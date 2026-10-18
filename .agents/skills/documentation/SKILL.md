@@ -60,7 +60,7 @@ Use:
 ./docs/
 ```
 
-for concepts spanning multiple files, modules, layers, routes, pages, or architectural boundaries.
+for concepts spanning multiple files, modules, layers, routes, or architectural boundaries.
 
 Examples include:
 
@@ -71,7 +71,6 @@ docs/
 ├── gates/
 ├── plans/
 ├── security/
-├── frontend/
 └── technical/
 ```
 
@@ -80,8 +79,6 @@ Appropriate topics include:
 - authentication strategy
 - authorization and RBAC
 - application architecture
-- UI theme/styling rules
-- component creation conventions
 - API conventions
 - security boundaries
 - engineering gates
@@ -318,7 +315,6 @@ Caveats are mandatory when meaningful.
 Pay particular attention to feature documentation covering:
 
 - routes
-- pages
 - authentication
 - authorization
 - middleware
@@ -369,7 +365,6 @@ Documentation may require review when implementation changes:
 - configuration
 - security assumptions
 - routes
-- pages
 - cross-layer behavior
 - architectural boundaries
 
@@ -414,14 +409,14 @@ Documentation checks should focus on **meaningful changes to understanding or us
 
 # Feature Documentation
 
-Features spanning routes, pages, modules, or layers deserve additional scrutiny.
+Features spanning routes, modules, or layers deserve additional scrutiny.
 
 A feature document should explain the flow rather than duplicate every participating file.
 
 Example:
 
 ```text
-Browser
+Request
    │
    ▼
 Route

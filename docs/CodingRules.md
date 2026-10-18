@@ -6,18 +6,15 @@ Within an application module, use `index.ts` for its public exports, `types.ts`
 for contracts and their runtime schemas, `helpers.ts` (or `helpers/`) for
 implementation, and optionally `constants.ts` (or `constants/`) for fixed values.
 Do not introduce operation-named source files such as `signJwt.ts` or a separate
-`schemas.ts`. Framework-required files such as `route.ts` and tooling/configuration
-entrypoints retain their required names. React page modules under
-`utils/frontend/pages/<page>/` use `index.tsx` for page assembly and `skeleton.tsx`
-for the application shell; this is an explicit page-layer exception to the
-implementation-free `index.ts` convention.
+`schemas.ts`. Framework-required files and tooling/configuration entrypoints
+retain their required names.
 
 Nested supporting capabilities belong under the owning module's `helpers/`.
 For example, JWT key configuration belongs in `utils/server/jwt/helpers/configuration/`,
 with `index.ts`, `helpers.ts`, and `types.ts` as needed, rather than a sibling
 `utils/server/jwt/configuration/` directory.
 
-Keep all tests under `src/tests/`, the test root of the Next.js project, mirroring
+Keep all tests under `src/tests/`, the test root of the project, mirroring
 the source paths below `src/`. For example,
 `src/utils/server/jwt/helpers/sign/helpers.ts` is tested by
 `src/tests/utils/server/jwt/helpers.test.ts`, which groups the public JWT operations.
@@ -27,18 +24,18 @@ directly under `src/tests/`. Do not colocate test files with application source.
 
 ## Naming and Spelling
 
-Use the full product name, "Shirley Pleasant," for all user-facing text,
-documentation, and UI labels.
+Use the full product name, "Agent Hosting Protocol," for all user-facing text
+and documentation.
 
 When a platform requires a compact, machine-safe identifier, use the product
-name in a compact form such as `ShirleyPleasant` for container names, network
-names, and generated identifiers. Do not concatenate the product name with a
-misspelling or a domain word such as `ShirleyPleasantpersistance`.
+name in a compact form such as `AgentHostingProtocol` for container names,
+network names, and generated identifiers. Do not concatenate the product name
+with a misspelling or a domain word such as `AgentHostingProtocolpersistance`.
 
 Use the correct English spelling `persistence` for the domain concept, and use
 `Persistence` only when a capitalized form is required by a class, folder, or
 identifier name. Prefer uppercase environment variables such as
-`SHIRLEY_PLEASANT_ADMIN_USER` and `SHIRLEY_PLEASANT_ADMIN_PASS`.
+`AGENT_HOSTING_PROTOCOL_ADMIN_USER` and `AGENT_HOSTING_PROTOCOL_ADMIN_PASS`.
 
 Organize code by **capability/domain**, not by framework artifact type.
 
@@ -137,7 +134,7 @@ Rules:
 Example:
 
 ```ts
-interface ShirleyJwtPayload extends JWTPayload {
+interface AgentHostingProtocolJwtPayload extends JWTPayload {
   userId: string;
 }
 ```
@@ -165,7 +162,7 @@ Rules:
 - One clear responsibility per helper.
 - Avoid generic `utils.ts`.
 - If a helper gains domain significance, give it a proper module/service instead.
-- Route handlers and components should consume helpers rather than accumulating reusable logic inline.
+- Route handlers and callers should consume helpers rather than accumulating reusable logic inline.
 
 ---
 
@@ -211,49 +208,9 @@ over:
 createDiscussion(request);
 ```
 
-Framework objects such as `NextRequest`, `Response`, React state, or database-specific objects should stay near their system boundary.
+Framework-specific objects such as HTTP request/response wrappers or database-specific objects should stay near their system boundary.
 
 ---
-
-## Frontend UI Ownership
-
-Use these boundaries for UI work:
-
-| Location                                      | Ownership                                                                                                                                        |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `src/components/ui/<primitive>/`              | Page-agnostic React primitives: contracts, visual variants, reusable interaction state, and theme behavior.                                      |
-| `src/components/compositions/<capability>/`   | Substantial display-only presentation assemblies, CVA bases, topology, typography, icons and accessibility.                                      |
-| `src/utils/frontend/components/<capability>/` | Application defaults, data adapters, validation, queries, transformations and application state/callbacks.                                       |
-| `src/utils/frontend/pages/<page>/`            | React page assembly in `index.tsx` and its structural application shell in `skeleton.tsx`.                                                       |
-| `src/utils/frontend/utils/hooks/`             | Hook and provider support, including the query provider. Other frontend support/configuration belongs under `utils/frontend/utils/` when needed. |
-| `src/app/`                                    | Next.js mounting, routing, metadata, and document/CSS boundaries.                                                                                |
-
-Each shadcn primitive has its own folder with an `index.ts` public boundary and
-`helpers.tsx` implementation. Preserve upstream exports and client directives
-when organizing generated components; do not leave a second flat implementation.
-Keep the established `@shadcn/*` alias.
-
-Primitives must not import application/frontend modules or contain page targets,
-brand defaults, or application data. Application components select primitive
-variants and prepare defaults rather than duplicating theme or interaction rules.
-Generic interaction state stays with its primitive; application-specific state
-stays with its application owner. For example, gallery section composition and
-its filter/favorite selections live in `utils/frontend/components/gallery/`;
-card tone variants, toggles, and dialog behavior remain shared primitives. There
-is no shared gallery/page primitive. Do not move state into Next routes.
-
-Neither primitives nor reusable `utils/frontend` modules import `next/*`.
-Use React/native navigation contracts for reusable UI; any future framework
-navigation integration belongs at the Next boundary. Pages assemble sections
-through their public APIs. `skeleton.tsx` means the structural page shell here,
-not an invented loading design or Next's `loading.tsx` lifecycle.
-
-Styled public roots/parts own CVA bases. Named child props preserve caller-last
-Tailwind merging, callback styles, refs and cancellation. Globals own theme tokens
-and document rules only; component CSS Modules use `@layer components`. Use the
-required [frontend integration gate](../.agents/skills/frontend-integration-gate/SKILL.md).
-
-See [Frontend UI Architecture](frontend/ui-architecture.md) for the current map.
 
 ## Dependencies
 
@@ -263,11 +220,10 @@ Library/framework details should remain behind owned interfaces where portabilit
 
 Application and domain logic should not unnecessarily depend on:
 
-- Next.js request objects
+- Framework request objects
 - JOSE internals
 - ORM-specific entities
 - HTTP response types
-- UI framework objects
 
 ---
 
@@ -290,7 +246,6 @@ Create a new abstraction when it establishes a meaningful boundary, contract, po
 
 Do not bury reusable or authoritative behavior inside:
 
-- React components
 - route handlers
 - middleware
 - controllers

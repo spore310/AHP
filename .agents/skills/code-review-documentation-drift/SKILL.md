@@ -21,7 +21,7 @@ Activate when the user explicitly requests any code review, including:
 - architecture;
 - maintainability;
 - performance;
-- API, contract, feature, route, or page review; and
+- API, contract, feature, or route review; and
 - general code review.
 
 Do not activate merely because files changed, tests ran, a build completed, or a commit was created.
@@ -52,9 +52,9 @@ Use Git only as historical evidence. Do not treat history as the current behavio
 
 ## Scope Resolution
 
-Documentation inspection inherits the review scope. It may follow behavior across directly participating layers when the reviewed unit is a feature, route, or page, but it must not expand into a repository-wide audit.
+Documentation inspection inherits the review scope. It may follow behavior across directly participating layers when the reviewed unit is a feature or route, but it must not expand into a repository-wide audit.
 
-Start from source files, modules, features, routes, pages, public contracts, or explicit paths named by the user. Include directly coupled files needed to understand the reviewed behavior. Exclude unrelated modules even when their documentation is visibly stale.
+Start from source files, modules, features, routes, public contracts, or explicit paths named by the user. Include directly coupled files needed to understand the reviewed behavior. Exclude unrelated modules even when their documentation is visibly stale.
 
 When scope is ambiguous, use the narrowest boundary that fully represents the requested review and state that boundary in the review.
 
@@ -64,7 +64,7 @@ For every scoped source file or participating feature, inspect documentation in 
 
 1. **Colocated module documentation.** Walk upward to the nearest meaningful module or feature-module `README.md`. Stop after a clear module boundary; do not continue into unrelated parents.
 2. **Explicit references.** Follow documentation links from the relevant module README when they describe the reviewed behavior.
-3. **Cross-cutting documentation.** Include documents under `docs/` only when the review task and implementation evidence show that they describe the reviewed feature, contract, security boundary, route/page flow, or behavior.
+3. **Cross-cutting documentation.** Include documents under `docs/` only when the review task and implementation evidence show that they describe the reviewed feature, contract, security boundary, request flow, or behavior.
 4. **User-provided documentation.** Include every document explicitly supplied or referenced by the user.
 
 Do not inspect unrelated documentation merely because it is nearby or contains a similar word.
@@ -87,8 +87,7 @@ Compare documented and implemented:
 - return values and types;
 - public interfaces and exports;
 - schemas and DTOs;
-- request and response contracts; and
-- meaningful public component props.
+- request and response contracts.
 
 ### Errors and Caveats
 
@@ -113,12 +112,12 @@ Pay special attention to authentication, authorization, RBAC, claims, token vali
 
 A material security or production mismatch remains a review finding even when documentation prompts are suppressed.
 
-### Routes, Pages, and Features
+### Routes and Features
 
 For feature-level documentation, compare the complete relevant flow rather than isolated files:
 
 ```text
-Page -> Component -> Route/API -> Validation -> Authentication -> Application Logic -> Persistence
+Request -> Route/API -> Validation -> Authentication -> Application Logic -> Persistence
 ```
 
 Include only layers participating in the reviewed behavior.

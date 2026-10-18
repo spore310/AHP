@@ -5,14 +5,13 @@ Use the smallest relevant instruction set.
 | Source                                                    | Responsibility                                                     |
 | --------------------------------------------------------- | ------------------------------------------------------------------ |
 | `.agents/AGENTS.md`                                       | Repository-wide invariants, architecture, validation, commits      |
-| `docs/product-direction.md`                               | Accepted resource-first MVP direction and pending product design   |
+| `docs/product-direction.md`                               | Accepted product direction and pending product design              |
 | `docs/CodingRules.md`                                     | TypeScript/module/file-organization conventions                    |
 | `.agents/skills/code-review-documentation-drift/SKILL.md` | Required instruction-driven procedure for explicit code reviews    |
 | `.agents/skills/documentation/SKILL.md`                   | Documentation creation and updates                                 |
 | `.agents/memory/documentation-review.md`                  | Tracked project setting for the documentation-update prompt        |
 | `docs/gates/`                                             | Gate descriptions and dated validation evidence                    |
 | `docs/plans/`                                             | Plans; honor the status and scope declared by each document        |
-| `src/AGENTS.md`                                           | Generated Next.js-specific guidance; read but do not manually edit |
 
 Read relevant documentation before changing an affected capability.
 
@@ -29,7 +28,6 @@ Established:
 - Zod 4.6.5
 
 The manifest and lockfile are authoritative for exact dependency versions.
-shadcn/ui, CVA, Lucide, Base UI and Embla are installed frontend dependencies.
 
 Pin newly added or deliberately updated dependency versions. Do not silently upgrade major versions.
 
@@ -140,7 +138,31 @@ feature/
 
 `index.ts` defines the intended public surface.
 
+Detailed rules belong to [the documentation skill](skills/documentation/SKILL.md).
+
 Do not duplicate them here.
+
+---
+
+# Code Review Documentation Drift
+
+This repository has no executable agent lifecycle callback registry. Instead,
+the root instructions require every explicit production, security, quality,
+architecture, maintainability, performance, API, feature, contract, or general
+code review to use the
+[documentation-drift review skill](skills/code-review-documentation-drift/SKILL.md).
+
+Documentation inspection inherits the review scope.
+
+Never perform a repository-wide documentation crawl unless explicitly requested.
+
+Prompt suppression is controlled by the tracked
+[project setting](memory/documentation-review.md). Session suppression remains
+only in the active conversation.
+
+Suppression never hides material security, production, or factual-drift findings.
+
+---
 
 # Decision Status
 
@@ -176,7 +198,7 @@ Prefer extending established patterns over creating competing ones.
 Use:
 
 ```text
-feat|fix|chore|scaffold|note|cdci(ShirleyTemple): title
+feat|fix|chore|scaffold|note|cdci(AHP): title
 
 description
 ```
@@ -193,7 +215,7 @@ Commits must:
 
 # Guiding Principle
 
-Build the smallest system capable of proving Agent Hosting Protocool.
+Build the smallest system capable of proving Agent Hosting Protocol.
 
 Control where dependencies enter the application.
 
