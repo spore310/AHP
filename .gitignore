@@ -21,3 +21,10 @@ coverage/
 # Editor and OS files
 .DS_Store
 Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+
+# Tool caches
+.eslintcache

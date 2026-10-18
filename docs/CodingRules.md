@@ -266,7 +266,7 @@ Prefer:
 - least-invasive changes
 - DRY without becoming magical
 - clear module boundaries
-- configured aliases such as `@/*`, `@utils/*`, and `@jwt/*`, declared in `tsconfig.json`
+- configured aliases such as `@/*`, `@utils/*`, `@jwt/*`, and `@jwt`, declared in `tsconfig.json`
 
 Use those aliases for cross-folder imports when relative paths would require
 climbing through parent directories. Short same-folder imports such as

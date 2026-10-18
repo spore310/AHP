@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 export const APP_NAME = "Agent Hosting Protocol";
 
 export const main = (): void => {
@@ -5,4 +7,8 @@ export const main = (): void => {
   console.log(APP_NAME);
 };
 
-main();
+// Run only when executed as the process entrypoint, so importing this module
+// from tests or tools has no side effects.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main();
+}

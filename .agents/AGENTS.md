@@ -5,13 +5,13 @@ Use the smallest relevant instruction set.
 | Source                                                    | Responsibility                                                     |
 | --------------------------------------------------------- | ------------------------------------------------------------------ |
 | `.agents/AGENTS.md`                                       | Repository-wide invariants, architecture, validation, commits      |
-| `docs/product-direction.md`                               | Accepted product direction and pending product design              |
+| `docs/product-direction.md` (not yet created)                               | Accepted product direction and pending product design              |
 | `docs/CodingRules.md`                                     | TypeScript/module/file-organization conventions                    |
 | `.agents/skills/code-review-documentation-drift/SKILL.md` | Required instruction-driven procedure for explicit code reviews    |
 | `.agents/skills/documentation/SKILL.md`                   | Documentation creation and updates                                 |
 | `.agents/memory/documentation-review.md`                  | Tracked project setting for the documentation-update prompt        |
-| `docs/gates/`                                             | Gate descriptions and dated validation evidence                    |
-| `docs/plans/`                                             | Plans; honor the status and scope declared by each document        |
+| `docs/gates/` (not yet created)                                             | Gate descriptions and dated validation evidence                    |
+| `docs/plans/` (not yet created)                                             | Plans; honor the status and scope declared by each document        |
 
 Read relevant documentation before changing an affected capability.
 
@@ -30,6 +30,7 @@ Established:
 - vite-node 6.0.0
 - JOSE 6.2.12
 - Zod 4.6.5
+- @microsoft/agent-host-protocol 1.0.0
 
 The manifest and lockfile are authoritative for exact dependency versions.
 
@@ -208,7 +209,7 @@ Prefer extending established patterns over creating competing ones.
 Use:
 
 ```text
-feat|fix|chore|scaffold|note|cdci(AHP): title
+feat|fix|chore|scaffold|note|cdci: title
 
 description
 ```
@@ -220,8 +221,14 @@ Commits must:
 - avoid unrelated changes
 - accurately describe staged changes
 - include useful descriptions when appropriate
+- inspect staged changes before committing.
 
-## Inspect staged changes before committing.
+---
+
+# Validation
+
+Run `pnpm validate` before considering a change complete. It runs lint,
+typecheck, tests, and the production build, in that order.
 
 # Guiding Principle
 

@@ -3,11 +3,20 @@ import stylistic from "@stylistic/eslint-plugin";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
+const tsFiles = ["**/*.ts", "**/*.mts", "**/*.cts"];
+
+const nodeLanguageOptions = {
+  ecmaVersion: "latest",
+  sourceType: "module",
+  globals: {
+    ...globals.node,
+  },
+};
+
 export default tseslint.config(
   { ignores: ["dist/**", "coverage/**", "node_modules/**"] },
   js.configs.recommended,
-  ...tseslint.configs.strict,
-  stylistic.configs["disable-legacy"],
+  ...tseslint.configs.strictTypeChecked.map((config) => ({ ...config, files: tsFiles })),
   stylistic.configs.customize({
     arrowParens: true,
     braceStyle: "1tbs",
@@ -16,11 +25,18 @@ export default tseslint.config(
     semi: true,
   }),
   {
+    languageOptions: nodeLanguageOptions,
+    rules: {
+      eqeqeq: ["error", "always"],
+    },
+  },
+  {
+    files: tsFiles,
     languageOptions: {
-      ecmaVersion: "latest",
-      sourceType: "module",
-      globals: {
-        ...globals.node,
+      ...nodeLanguageOptions,
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
       },
     },
   },

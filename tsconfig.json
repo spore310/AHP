@@ -22,6 +22,6 @@
       "@jwt": ["./src/utils/server/jwt/index.ts"]
     }
   },
-  "include": ["src", "vite.config.ts"],
+  "include": ["**/*.ts", "**/*.mts", "**/*.cts"],
   "exclude": ["node_modules", "dist"]
 }
