@@ -1,7 +1,13 @@
+import { request as httpRequest } from "node:http";
+import { connect as netConnect } from "node:net";
+import { AhpErrorCodes, JsonRpcErrorCodes } from "@microsoft/agent-host-protocol";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import { RpcError } from "@/jsonrpc";
+import { createSessionsFactory, SESSION_URI_PREFIX } from "@/sessions";
+import { mockProvider } from "@/sessions/mock";
 import {
   createWebSocketServer,
   type JsonRpcHandlers,
@@ -64,6 +70,51 @@ const request = async (socket: WebSocket, payload: unknown): Promise<unknown> =>
   return received;
 };
 
+/** Sends a raw upgrade request with an arbitrary request target over TCP. */
+const rawUpgrade = (port: number, target: string): Promise<void> =>
+  new Promise((resolve) => {
+    const socket = netConnect(port, "127.0.0.1");
+    const timer = setTimeout(() => {
+      socket.destroy();
+    }, 500);
+    const finish = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    socket.on("error", finish);
+    socket.on("close", finish);
+    socket.on("connect", () => {
+      const lines = [
+        `GET ${target} HTTP/1.1`,
+        "Host: 127.0.0.1",
+        "Connection: Upgrade",
+        "Upgrade: websocket",
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+        "Sec-WebSocket-Version: 13",
+      ];
+      socket.write(`${lines.join("\r\n")}\r\n\r\n`);
+    });
+  });
+
+/** Reads the HTTP status for an ordinary request. */
+const httpStatus = (port: number, path: string): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const outgoing = httpRequest(
+      { host: "127.0.0.1", port, path, method: "GET" },
+      (response) => {
+        response.resume();
+        resolve(response.statusCode ?? 0);
+      },
+    );
+    outgoing.on("error", reject);
+    outgoing.end();
+  });
+
+/** An error carrying a `code` that is not the owned RPC error type. */
+class FakeError extends Error {
+  readonly code = AhpErrorCodes.ProviderNotFound;
+}
+
 afterEach(async () => {
   for (const socket of sockets.splice(0)) {
     socket.terminate();
@@ -119,17 +170,32 @@ describe("WebSocket JSON-RPC handling", () => {
     });
   });
 
-  it("rejects a non-conforming message while preserving its id", async () => {
+  it("rejects a wrongly typed known member while preserving its id", async () => {
     const { url } = await startServer({});
     const socket = await connect(url);
 
-    const response = await request(socket, { jsonrpc: "2.0", id: 7, method: "m", extra: true });
+    const response = await request(socket, { jsonrpc: "2.0", id: 7, method: "m", params: 5 });
 
     expect(response).toEqual({
       jsonrpc: "2.0",
       id: 7,
       error: { code: -32600, message: "Invalid Request" },
     });
+  });
+
+  it("dispatches a request carrying an unknown additive member", async () => {
+    const { url } = await startServer({ echo: (params) => params });
+    const socket = await connect(url);
+
+    const response = await request(socket, {
+      jsonrpc: "2.0",
+      id: 9,
+      method: "echo",
+      params: { a: 1 },
+      trace: "abc",
+    });
+
+    expect(response).toEqual({ jsonrpc: "2.0", id: 9, result: { a: 1 } });
   });
 
   it("does not reply to notifications", async () => {
@@ -212,6 +278,19 @@ describe("WebSocket JSON-RPC handling", () => {
     await expect(connect(`ws://127.0.0.1:${String(address.port)}/`)).rejects.toThrow();
   });
 
+  it("survives a malformed upgrade target and still serves clients", async () => {
+    const { url, server } = await startServer({ ping: () => "pong" });
+    const address = new URL(url);
+
+    await rawUpgrade(Number(address.port), "//[");
+
+    const socket = await connect(url);
+    const response = await request(socket, { jsonrpc: "2.0", id: 1, method: "ping" });
+    expect(response).toEqual({ jsonrpc: "2.0", id: 1, result: "pong" });
+
+    await server.stop();
+  });
+
   it("closes clients when stopped", async () => {
     const { url, server } = await startServer({});
     const socket = await connect(url);
@@ -223,5 +302,177 @@ describe("WebSocket JSON-RPC handling", () => {
     });
     await server.stop();
     await closed;
+  });
+});
+
+describe("WebSocket method dispatch", () => {
+  it("answers MethodNotFound for inherited property names", async () => {
+    const { url } = await startServer({});
+    const socket = await connect(url);
+
+    for (const method of ["toString", "constructor", "__proto__", "hasOwnProperty", "valueOf"]) {
+      const response = await request(socket, { jsonrpc: "2.0", id: method, method });
+      expect(response).toEqual({
+        jsonrpc: "2.0",
+        id: method,
+        error: { code: -32601, message: `Method not found: ${method}` },
+      });
+    }
+  });
+
+  it("dispatches an own method whose name matches a prototype member", async () => {
+    const { url } = await startServer({ toString: () => "own" });
+    const socket = await connect(url);
+
+    const response = await request(socket, { jsonrpc: "2.0", id: 1, method: "toString" });
+
+    expect(response).toEqual({ jsonrpc: "2.0", id: 1, result: "own" });
+  });
+});
+
+describe("WebSocket error mapping", () => {
+  it("preserves an owned RPC error's code, message, and data", async () => {
+    const { url } = await startServer({
+      fail: () => {
+        throw new RpcError(AhpErrorCodes.UnsupportedProtocolVersion, "Unsupported", {
+          supportedVersions: ["1.0.0"],
+        });
+      },
+    });
+    const socket = await connect(url);
+
+    const response = await request(socket, { jsonrpc: "2.0", id: 1, method: "fail" });
+
+    expect(response).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      error: {
+        code: AhpErrorCodes.UnsupportedProtocolVersion,
+        message: "Unsupported",
+        data: { supportedVersions: ["1.0.0"] },
+      },
+    });
+  });
+
+  it("does not trust a thrown error that merely carries a code", async () => {
+    const { url } = await startServer({
+      fake: () => {
+        throw new FakeError("spoofed");
+      },
+    });
+    const socket = await connect(url);
+
+    const response = await request(socket, { jsonrpc: "2.0", id: 2, method: "fake" });
+
+    expect(response).toEqual({
+      jsonrpc: "2.0",
+      id: 2,
+      error: { code: -32603, message: "Internal error" },
+    });
+  });
+
+  it("maps session failures to their protocol codes through the boundary", async () => {
+    const factory = createSessionsFactory({ providers: [mockProvider] });
+    const { url } = await startServer({
+      createSession: (params) => factory.createSession(params),
+    });
+    const socket = await connect(url);
+
+    const unknownProvider = await request(socket, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "createSession",
+      params: { channel: `${SESSION_URI_PREFIX}unknown`, provider: "missing" },
+    });
+    expect(unknownProvider).toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      error: { code: AhpErrorCodes.ProviderNotFound },
+    });
+
+    const created = await request(socket, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "createSession",
+      params: { channel: `${SESSION_URI_PREFIX}dup` },
+    });
+    expect(created).toEqual({ jsonrpc: "2.0", id: 2, result: null });
+
+    const duplicate = await request(socket, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "createSession",
+      params: { channel: `${SESSION_URI_PREFIX}dup` },
+    });
+    expect(duplicate).toMatchObject({
+      jsonrpc: "2.0",
+      id: 3,
+      error: { code: AhpErrorCodes.SessionAlreadyExists },
+    });
+
+    const invalid = await request(socket, {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "createSession",
+      params: { channel: "not-a-session-uri" },
+    });
+    expect(invalid).toMatchObject({
+      jsonrpc: "2.0",
+      id: 4,
+      error: { code: JsonRpcErrorCodes.InvalidParams },
+    });
+  });
+});
+
+describe("WebSocket shutdown", () => {
+  it("shares one shutdown promise across concurrent and repeated stops", async () => {
+    const { server } = await startServer({});
+
+    const first = server.stop();
+    const second = server.stop();
+    expect(second).toBe(first);
+    await first;
+    expect(server.stop()).toBe(first);
+  });
+
+  it("answers ordinary HTTP requests instead of stalling them", async () => {
+    const { url } = await startServer({});
+    const status = await httpStatus(Number(new URL(url).port), "/");
+    expect(status).toBe(426);
+  });
+
+  it("rejects upgrades once stopping", async () => {
+    const { url, server } = await startServer({});
+    const stop = server.stop();
+    await expect(connect(url)).rejects.toThrow();
+    await stop;
+  });
+
+  it("bounds shutdown when an open request would otherwise stall it", async () => {
+    const server = createWebSocketServer({
+      host: "127.0.0.1",
+      port: 0,
+      handlers: {},
+      shutdownTimeoutMs: 100,
+    });
+    const address = await server.start();
+    servers.push(server);
+
+    // An incomplete request keeps a connection active; the deadline must still
+    // let shutdown finish.
+    const socket = netConnect(address.port, "127.0.0.1");
+    await new Promise<void>((resolve) => {
+      socket.once("connect", () => {
+        resolve();
+      });
+    });
+    socket.write("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n");
+
+    const startedAt = Date.now();
+    await server.stop();
+    const elapsed = Date.now() - startedAt;
+    socket.destroy();
+
+    expect(elapsed).toBeLessThan(2000);
   });
 });

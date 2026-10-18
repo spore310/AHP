@@ -3,11 +3,13 @@ import { ZodError } from "zod";
 import type WebSocket from "ws";
 
 import {
+  isRpcError,
   JSONRPC_INTERNAL_ERROR,
   JSONRPC_INVALID_PARAMS,
   JSONRPC_INVALID_REQUEST,
   JSONRPC_METHOD_NOT_FOUND,
   JSONRPC_PARSE_ERROR,
+  JSONRPC_PUBLIC_ERROR_CODES,
   JSONRPC_VERSION,
   jsonRpcMessageSchema,
   type JsonRpcErrorResponse,
@@ -21,6 +23,7 @@ import {
 
 import { WEBSOCKET_CLOSE_UNSUPPORTED_DATA } from "../constants";
 import type {
+  JsonRpcHandler,
   JsonRpcHandlers,
   WebSocketConnectionContext,
 } from "../types";
@@ -35,11 +38,26 @@ const errorResponse = (
   id: JsonRpcResponseId,
   code: number,
   message: string,
+  data?: unknown,
 ): JsonRpcErrorResponse => ({
   jsonrpc: JSONRPC_VERSION,
   id,
-  error: { code, message },
+  error: data === undefined ? { code, message } : { code, message, data },
 });
+
+// Only own, callable handler properties are dispatchable. A plain object also
+// exposes inherited members (`toString`, `constructor`, ...), which must not be
+// reachable as methods.
+const lookupHandler = (
+  handlers: JsonRpcHandlers,
+  method: string,
+): JsonRpcHandler | undefined => {
+  if (!Object.hasOwn(handlers, method)) {
+    return undefined;
+  }
+  const handler = handlers[method];
+  return typeof handler === "function" ? handler : undefined;
+};
 
 const frameToText = (data: WebSocket.RawData): string => {
   if (Array.isArray(data)) {
@@ -75,8 +93,8 @@ const handleRequest = async (
   context: WebSocketConnectionContext,
   handlers: JsonRpcHandlers,
 ): Promise<void> => {
-  const handler = handlers[request.method];
-  if (!handler) {
+  const handler = lookupHandler(handlers, request.method);
+  if (handler === undefined) {
     context.send(errorResponse(request.id, JSONRPC_METHOD_NOT_FOUND, `Method not found: ${request.method}`));
     return;
   }
@@ -85,10 +103,15 @@ const handleRequest = async (
     const result = await handler(request.params, context);
     context.send(resultResponse(request.id, result));
   } catch (cause) {
-    // Handler validation failures are the caller's fault; anything else is
-    // reported generically so internal details do not leak to the client.
+    // Handler validation failures are the caller's fault; an owned RPC error
+    // preserves its allowlisted code and message. Anything else is reported
+    // generically so internal details do not leak to the client.
     if (cause instanceof ZodError) {
       context.send(errorResponse(request.id, JSONRPC_INVALID_PARAMS, "Invalid params"));
+      return;
+    }
+    if (isRpcError(cause) && JSONRPC_PUBLIC_ERROR_CODES.has(cause.code)) {
+      context.send(errorResponse(request.id, cause.code, cause.message, cause.data));
       return;
     }
     context.send(errorResponse(request.id, JSONRPC_INTERNAL_ERROR, "Internal error"));
@@ -100,8 +123,8 @@ const handleNotification = async (
   context: WebSocketConnectionContext,
   handlers: JsonRpcHandlers,
 ): Promise<void> => {
-  const handler = handlers[notification.method];
-  if (!handler) {
+  const handler = lookupHandler(handlers, notification.method);
+  if (handler === undefined) {
     return;
   }
   try {

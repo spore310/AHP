@@ -37,12 +37,28 @@ export interface WebSocketServerOptions {
   readonly path?: string;
   /** JSON-RPC methods to dispatch. Unknown methods answer `MethodNotFound`. */
   readonly handlers?: JsonRpcHandlers;
+  /**
+   * Upper bound on graceful shutdown before remaining clients and connections
+   * are force-closed. Defaults to `WEBSOCKET_SHUTDOWN_TIMEOUT_MS`.
+   */
+  readonly shutdownTimeoutMs?: number;
 }
 
 /** Handle returned by {@link createWebSocketServer}. */
 export interface WebSocketServerHandle {
-  /** Begin listening and resolve with the bound address. */
+  /**
+   * Begin listening and resolve with the bound address. Repeated calls while
+   * listening resolve with the same address; calls after {@link stop} reject,
+   * because a stopped server is terminal.
+   */
   start(): Promise<AddressInfo>;
-  /** Stop listening and close every client, resolving once fully shut down. */
+  /**
+   * Stop accepting new upgrades, close every client, and release HTTP
+   * resources. Concurrent and repeated calls share one completion, so no caller
+   * observes shutdown as finished before cleanup finishes; if a client or an
+   * open HTTP request outlasts the configured deadline, remaining resources are
+   * force-closed and the promise still resolves. Rejects only if a forced close
+   * throws.
+   */
   stop(): Promise<void>;
 }

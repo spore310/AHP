@@ -109,10 +109,18 @@ describe("JSON-RPC strict parsing", () => {
     ).toBe(true);
   });
 
-  it("rejects unknown members", () => {
-    expect(
-      jsonRpcRequestSchema.safeParse({ jsonrpc: "2.0", method: "m", id: 1, extra: true }).success,
-    ).toBe(false);
+  it("tolerates an unknown additive member and discards it", () => {
+    const parsed = jsonRpcRequestSchema.safeParse({
+      jsonrpc: "2.0",
+      method: "m",
+      id: 1,
+      extra: true,
+    });
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) {
+      throw new Error("expected the request to parse");
+    }
+    expect(Object.hasOwn(parsed.data, "extra")).toBe(false);
   });
 
   it("rejects params: null", () => {
@@ -128,5 +136,50 @@ describe("JSON-RPC strict parsing", () => {
   it("accepts responses through the message union", () => {
     expect(jsonRpcMessageSchema.safeParse(ahpResultResponse).success).toBe(true);
     expect(jsonRpcMessageSchema.safeParse(ahpErrorResponse).success).toBe(true);
+  });
+});
+
+describe("JSON-RPC message classification", () => {
+  it("keeps a request a request when an additive member is present", () => {
+    const parsed = jsonRpcMessageSchema.safeParse({
+      jsonrpc: "2.0",
+      id: 7,
+      method: "m",
+      extension: { trace: "abc" },
+    });
+    if (!parsed.success) {
+      throw new Error("expected the request to parse");
+    }
+    expect("method" in parsed.data).toBe(true);
+    expect("id" in parsed.data).toBe(true);
+  });
+
+  it("rejects a wrongly typed known member", () => {
+    expect(
+      jsonRpcMessageSchema.safeParse({ jsonrpc: "2.0", id: 1, method: "m", params: 5 }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a response carrying both result and error", () => {
+    expect(
+      jsonRpcMessageSchema.safeParse({
+        jsonrpc: "2.0",
+        id: 1,
+        result: 1,
+        error: { code: -32603, message: "Internal error" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a message mixing request and response members", () => {
+    expect(
+      jsonRpcMessageSchema.safeParse({ jsonrpc: "2.0", id: 1, method: "m", result: 1 }).success,
+    ).toBe(false);
+  });
+
+  it("rejects an unknown protocol version", () => {
+    expect(
+      jsonRpcMessageSchema.safeParse({ jsonrpc: "1.0", id: 1, method: "m" }).success,
+    ).toBe(false);
   });
 });
