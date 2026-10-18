@@ -11,6 +11,7 @@ import type {
 import { z } from "zod";
 
 import { SESSION_URI_PREFIX } from "./constants";
+import type { SessionApplicationBinding, SessionApplicationOptions } from "./helpers/application";
 import type { ActionSequence } from "./helpers/sequence";
 
 /**
@@ -125,6 +126,8 @@ export interface SessionRecord {
   serverSeq: number;
   /** Backend handle once the provider has started; absent while `creating`. */
   backend?: SessionBackend;
+  /** Exact session-type binding for a typed host. Absent for untyped sessions. */
+  application?: SessionApplicationBinding;
 }
 
 /**
@@ -168,6 +171,7 @@ export interface SessionsDependencies {
   readonly providers: ReadonlyMap<string, SessionProvider>;
   readonly defaultProviderId: string;
   readonly sessions: SessionRegistry;
+  readonly application?: SessionApplicationOptions;
   readonly now: () => Date;
   /** Host-owned allocator for the connection-wide action sequence. */
   readonly nextServerSeq: () => number;
@@ -221,6 +225,11 @@ export interface SessionsFactoryOptions {
    * dropping diagnostics; the composition root can route them to its logger.
    */
   readonly onDiagnostic?: (diagnostic: SessionsDiagnostic) => void;
+  /**
+   * When present, session creation requires an exact session type. Untyped hosts
+   * omit this and reject a session-type selector instead of ignoring it.
+   */
+  readonly application?: SessionApplicationOptions;
 }
 
 /** Transport-agnostic session factory: the host's only way to create sessions. */

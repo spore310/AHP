@@ -11,6 +11,18 @@ export {
 } from "./helpers/errors";
 export { createSessionConfig } from "./helpers/configuration";
 export { createSessionsFactory } from "./helpers/factory";
+export { createApplicationSession } from "./helpers/application/host";
+export { defineApplicationSession } from "./helpers/application/define";
+export { createSessionTypeToolMap, visibleTools } from "./helpers/application";
+export { ClientAccessRole, ToolAccessLevel } from "./helpers/application";
+export { createSessionTypeCatalogue, SessionTypeError } from "./helpers/sessionTypes";
+export type {
+  ApplicationSessionType,
+  ResolvedSessionType,
+  SessionTypeCatalogue,
+  SessionTypeDefinition,
+  SessionTypeRef,
+} from "./helpers/sessionTypes";
 export { createActionSequence, createSequenceAllocator } from "./helpers/sequence";
 export type { ActionSequence } from "./helpers/sequence";
 

@@ -1,4 +1,5 @@
 import { AhpErrorCodes, JsonRpcErrorCodes, type ActionEnvelope } from "@microsoft/agent-host-protocol";
+import { parseUnknownJson } from "@jsonrpc";
 
 import { ACTION_TYPE_ROOT_ACTIVE_SESSIONS_CHANGED, ROOT_CHANNEL_URI } from "@sessions/constants";
 import { executeCreateSession } from "@sessions/createSession";
@@ -56,6 +57,7 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
     providers,
     defaultProviderId,
     sessions,
+    application: options.application,
     now,
     nextServerSeq,
     emitCatalogueNotification: (notification: CatalogueNotification): void => {
@@ -314,7 +316,7 @@ function readListOffset(params: unknown, length: number): number {
   }
   let decoded: unknown;
   try {
-    decoded = JSON.parse(Buffer.from(params.cursor, "base64url").toString("utf8"));
+    decoded = parseUnknownJson(Buffer.from(params.cursor, "base64url").toString("utf8"));
   } catch {
     throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid listSessions cursor");
   }

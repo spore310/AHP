@@ -34,6 +34,15 @@ client-connection adapter; see
 | `helpers/actions/types.ts` | Runtime schemas for client session actions and `clientSeq`. |
 | `helpers/actions/helpers.ts` | Validation and the baseline support policy for client session actions. |
 | `helpers/actions/index.ts` | Re-exports action validation. |
+| `helpers/sessionTypes/types.ts` | Session-type definitions and resolution errors. |
+| `helpers/sessionTypes/helpers.ts` | `createSessionTypeCatalogue`: exact type and tool resolution. |
+| `helpers/sessionTypes/index.ts` | Re-exports the session-type catalogue. |
+| `helpers/application/constants.ts` | Tool access levels and server-derived client roles. |
+| `helpers/application/types.ts` | Typed-host options, the header tool map, and the live session-type binding. |
+| `helpers/application/define.ts` | `defineApplicationSession`: domain registration, header enum, and tool grants. |
+| `helpers/application/helpers.ts` | `prepareSessionCreation`: selector extraction without mutating caller config. |
+| `helpers/application/host.ts` | `createApplicationSession`: factory createSession with a header-enum type string. |
+| `helpers/application/index.ts` | Re-exports typed session preparation. |
 | `helpers/state/helpers.ts` | Initial state, `applySessionAction` (reducer + envelope), and `buildSessionSnapshot`. |
 | `helpers/state/index.ts` | Re-exports the state helpers. |
 | `helpers/summary/helpers.ts` | `buildSessionSummary` and catalogue field diffs. |
@@ -65,7 +74,44 @@ client-connection adapter; see
 - `dispose(): Promise<void>`
 
 Options: `providers` (required), `defaultProviderId`, `now`, `sequence`,
-`nextServerSeq` (legacy adapter), `registryFactory`, `onDiagnostic`.
+`nextServerSeq` (legacy adapter), `registryFactory`, `onDiagnostic`, and
+optional `application` for a typed host.
+
+Typed session surface:
+
+- `defineApplicationSession({ id, key, version, providerId, configSchema, config, tools })`
+  returns `{ header, registration, grants }`. It does not create a session or a
+  JSON-RPC frame. `header` is `key`. `enabledForCreation` defaults to true.
+- `createSessionTypeToolMap({ [header]: grants })` builds the server map from
+  that header to its authorized tools.
+- `createSessionTypeCatalogue({ tools, types })` resolves exact tool revisions.
+  A missing contract fails construction.
+- `createApplicationSession(factory, { channel, type, config })` calls
+  `factory.createSession` with `config["x-ahp-session-type"]` set to the
+  header string. Other `config` keys are application config, not provider config.
+- `visibleTools(grants, role)` returns standard tools for `anonymous` and adds
+  admin tools only for the server role `admin`.
+
+#### Arguments
+
+| Argument | Type | Purpose | Example |
+| --- | --- | --- | --- |
+| `type` | `string` | Server-authored session-type header. Must be a registered key. | `"code.review"` |
+| `tools` | `AuthorizedToolGrant[]` | Tools that header may expose, each `standard` or `admin`. | `{ ref: { key: "workspace.read-file", version: 1 }, access: "standard" }` |
+| `role` | `"anonymous" \| "admin"` | Server-derived. Never taken from the client payload. | `"anonymous"` |
+
+#### Returns
+
+`defineApplicationSession` returns the header and the registration to pass into
+the catalogue. `createApplicationSession` returns `Promise<void>`. The created
+session snapshot carries `_meta["x-ahp-application"]` with the type identity
+and only the tools visible for the server role.
+
+#### Caveats
+
+A client cannot submit an object selector or choose the role. An unknown header
+creates no session. Hiding an admin tool does not execute or authorize the
+tool. Authentication is not implemented.
 
 Errors: `SessionsError`, `SessionsDisposingError`, `SessionConfigError`,
 `SessionStartError`. Sequence: `createActionSequence`, `createSequenceAllocator`.
@@ -179,6 +225,7 @@ than publishing a stale `session/ready`.
   a reducer application or accepted envelope. MCP, working-directory, and
   mutable-config behavior are not implemented here. Disconnect does not yet
   auto-remove an active client.
+- **`x-ahp-session-type` is a server-authored header enum.** The legal values are the registered session-type keys. A client cannot send an object selector. The key selects the authorized tool map. Admin grants are omitted from the snapshot metadata unless the server role is `admin`. The wire path does not accept a role from the client.
 - **`disposeSession` removes one session.** It emits `root/sessionRemoved`,
   drops that session from the catalogue, and releases its backend. It does not
   close the caller's socket. `listSessions` returns non-disposed summaries,
@@ -214,6 +261,11 @@ than publishing a stale `session/ready`.
 | [`src/tests/sessions/dispatch.test.ts`](../tests/sessions/dispatch.test.ts) | Missing-target errors, malformed title/read/archive payloads, `clientSeq` non-coercion, unsupported actions, sequence cursor, and summary/count projections. |
 | [`src/tests/sessions/compliance.test.ts`](../tests/sessions/compliance.test.ts) | Protocol-literal mirrors against the package runtime enums, catalogue/state conformance through the protocol reducer, and the single gap-free action sequence. |
 | [`src/tests/sessions/createSession.test.ts`](../tests/sessions/createSession.test.ts) | See [`createSession/README.md`](createSession/README.md). |
+| [`src/tests/sessions/sessionTypes.test.ts`](../tests/sessions/sessionTypes.test.ts) | Exact type resolution, disabled-type lookup, and missing tool rejection. |
+| [`src/tests/sessions/typedCreation.test.ts`](../tests/sessions/typedCreation.test.ts) | String header binding and untyped-host rejection. |
+| [`src/tests/sessions/toolAccess.test.ts`](../tests/sessions/toolAccess.test.ts) | Anonymous clients do not see admin tools. |
+| [`src/tests/sessions/applicationHost.test.ts`](../tests/sessions/applicationHost.test.ts) | `createApplicationSession` stamps the header and rejects an unknown type. |
+| [`src/tests/websocket/sessionTypeCapacity.test.ts`](../tests/websocket/sessionTypeCapacity.test.ts) | Wire threshold: accepted header, hidden admin tool, rejected object and unmapped headers. |
 
 ## Related Documentation
 

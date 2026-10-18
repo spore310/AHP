@@ -8,6 +8,7 @@ import {
   ROOT_CHANNEL_URI,
   SESSION_START_FAILURE_INFO,
 } from "@sessions/constants";
+import { prepareSessionCreation } from "@sessions/helpers/application";
 import {
   SessionConfigError,
   SessionStartError,
@@ -40,7 +41,11 @@ export async function executeCreateSession(
   }
 
   const params = parsed.data;
-  const provider = resolveProvider(dependencies, params.provider);
+  const prepared = prepareSessionCreation(dependencies.application, params.provider, params.config);
+  const provider = resolveProvider(
+    dependencies,
+    prepared.providerId.length === 0 ? params.provider : prepared.providerId,
+  );
 
   if (dependencies.sessions.has(params.channel)) {
     throw new SessionsError(
@@ -51,7 +56,7 @@ export async function executeCreateSession(
 
   // Parsing runs before registration so invalid configuration creates no record
   // and never reaches the provider.
-  const config = parseSessionConfig(provider, params.config);
+  const config = parseSessionConfig(provider, prepared.providerConfig);
 
   // No agent advertises multiple working directories yet, so the host keeps only
   // the first directory, per the `createSession` contract.
@@ -62,12 +67,27 @@ export async function executeCreateSession(
     provider,
     createdAt,
     modifiedAt: createdAt,
-    state: createInitialSessionState({
-      providerId: provider.providerId,
-      title: DEFAULT_SESSION_TITLE,
-      workingDirectories,
-    }),
+    state: {
+      ...createInitialSessionState({
+        providerId: provider.providerId,
+        title: DEFAULT_SESSION_TITLE,
+        workingDirectories,
+      }),
+      ...(prepared.binding === undefined
+        ? {}
+        : {
+            _meta: {
+              "x-ahp-application": {
+                typeId: prepared.binding.typeId,
+                key: prepared.binding.key,
+                version: prepared.binding.version,
+                tools: prepared.visibleTools ?? [],
+              },
+            },
+          }),
+    },
     serverSeq: 0,
+    ...(prepared.binding === undefined ? {} : { application: prepared.binding }),
   };
 
   dependencies.sessions.add(record);
