@@ -25,6 +25,10 @@ Established:
 - pnpm 10.34.6
 - Node.js 24.x
 - ESLint 10.11.0
+- Vite 8.3.4
+- Vitest 5.0.5
+- vite-node 6.0.0
+- JOSE 6.2.12
 - Zod 4.6.5
 
 The manifest and lockfile are authoritative for exact dependency versions.
@@ -36,6 +40,15 @@ Pin newly added or deliberately updated dependency versions. Do not silently upg
 # Architecture
 
 ## Modular Monolith
+
+Agent Hosting Protocol begins as a capability-oriented modular monolith.
+
+Module boundaries may evolve.
+
+Do not introduce microservices, brokers, distributed transactions, Kubernetes,
+service meshes, or additional backend deployments without demonstrated need.
+
+Logical separation comes before physical distribution.
 
 ## Capability Ownership
 
@@ -57,7 +70,6 @@ Never trust client-supplied:
 - ownership
 - roles
 - permissions
-- moderation authority
 - other authoritative state
 
 ---
@@ -86,9 +98,7 @@ Avoid:
 - framework leakage
 - premature distributed architecture
 
-Security, privacy, accessibility, moderation, maintainability, and auditability are first-class concerns.
-
-Use native HTML semantics before ARIA where practical.
+Security, privacy, maintainability, and auditability are first-class concerns.
 
 Do not log credentials, tokens, secrets, or unnecessary sensitive user information.
 
@@ -184,7 +194,7 @@ Before a meaningful change determine:
 2. Which layer should contain it?
 3. Does an existing abstraction already solve it?
 4. Does it introduce unnecessary coupling?
-5. Does it affect security, auditability, accessibility, or data ownership?
+5. Does it affect security, auditability, or data ownership?
 6. Can framework-specific behavior remain at the system boundary?
 
 Inspect existing conventions before creating new ones.
