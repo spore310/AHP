@@ -64,8 +64,9 @@ frames.
 - `src/tests/` — all tests. Tests are never colocated with source and never
   live at a root `tests/` directory.
 - `@microsoft/agent-host-protocol` is pinned at `1.0.0`. The sessions
-  capability uses its types, literal mirrors, and error codes; its client
-  classes are not used by server code yet.
+  capability uses its types, literal mirrors, error codes, and runtime
+  reducer (`sessionReducer`); its client classes are not used by server code
+  yet.
 
 ## Server / client ownership
 

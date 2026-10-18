@@ -224,8 +224,8 @@ export interface SessionsFactory {
   /**
    * Disposes the factory: rejects new sessions while in flight, drops the
    * registry and all listeners, and releases every backend attached before
-   * disposal began. Concurrent and repeated calls share one completion, and
-   * the factory accepts sessions again once disposal settles.
+   * disposal began. Concurrent calls in flight share one completion; the
+   * factory accepts sessions again once disposal settles.
    *
    * A backend that is still starting when disposal begins is not awaited (a
    * non-cooperative provider cannot be cancelled). When it eventually
