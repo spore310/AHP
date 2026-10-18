@@ -2,7 +2,11 @@ import { AhpErrorCodes, JsonRpcErrorCodes } from "@microsoft/agent-host-protocol
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createSessionsFactory, SESSION_URI_PREFIX } from "@sessions";
+import {
+  createSessionsFactory,
+  SESSION_URI_PREFIX,
+  type SessionsFactory,
+} from "@sessions";
 import { mockProvider } from "@sessions/mock";
 import { createAHPConnectionModule, createWebSocketServer, type WebSocketServerHandle } from "@websocket";
 
@@ -524,5 +528,99 @@ describe("AHP connection lifetime", () => {
       && frame.params.channel === channel
     ));
     expect(sessionActions).toHaveLength(0);
+  });
+});
+
+describe("AHP snapshot reply barrier", () => {
+  it("delivers a post-snapshot action once after the subscribe reply", async () => {
+    const inner = createSessionsFactory({ providers: [mockProvider] });
+    const channel = `${SESSION_URI_PREFIX}t19-barrier`;
+    let injected = false;
+    const factory: SessionsFactory = {
+      createSession: (params) => inner.createSession(params),
+      getSessionSnapshot: (sessionUri) => {
+        const snapshot = inner.getSessionSnapshot(sessionUri);
+        if (!injected && sessionUri === channel && snapshot !== undefined) {
+          injected = true;
+          inner.dispatchAction({
+            channel,
+            clientSeq: 1,
+            action: { type: "session/titleChanged", title: "After snapshot" },
+            clientId: "t19",
+          });
+        }
+        return snapshot;
+      },
+      listSessionSnapshots: () => inner.listSessionSnapshots(),
+      getCurrentServerSeq: () => inner.getCurrentServerSeq(),
+      listAgents: () => inner.listAgents(),
+      dispatchAction: (params) => inner.dispatchAction(params),
+      onCatalogueNotification: (listener) => inner.onCatalogueNotification(listener),
+      onSessionEnvelope: (listener) => inner.onSessionEnvelope(listener),
+      dispose: () => inner.dispose(),
+    };
+    const binding = createAHPConnectionModule(factory);
+    const server = createWebSocketServer({
+      host: "127.0.0.1",
+      port: 0,
+      handlers: binding.handlers,
+      onConnection: (context) => {
+        binding.onConnection(context);
+      },
+      beforeDispatch: (dispatch) => {
+        binding.beforeDispatch(dispatch);
+      },
+    });
+    servers.push(server);
+    const address = await server.start();
+    const { socket, frames } = await connect(`ws://127.0.0.1:${String(address.port)}/`);
+    await initialize(socket, frames, "t19-client");
+    await factory.createSession({ channel });
+    await frames.waitFor(methodFrame("root/sessionAdded"));
+
+    send(socket, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "subscribe",
+      params: { channel },
+    });
+    const reply = await frames.waitFor(responseWithId(2));
+    expect(reply).toMatchObject({
+      id: 2,
+      result: {
+        snapshot: {
+          resource: channel,
+          state: { title: "New Session" },
+        },
+      },
+    });
+    expect(injected).toBe(true);
+
+    const titleChanged = (frame: unknown): boolean => (
+      methodFrame("action")(frame)
+      && typeof frame === "object"
+      && frame !== null
+      && "params" in frame
+      && typeof frame.params === "object"
+      && frame.params !== null
+      && "channel" in frame.params
+      && frame.params.channel === channel
+      && "action" in frame.params
+      && typeof frame.params.action === "object"
+      && frame.params.action !== null
+      && "type" in frame.params.action
+      && frame.params.action.type === "session/titleChanged"
+      && "title" in frame.params.action
+      && frame.params.action.title === "After snapshot"
+    );
+    await frames.waitFor(titleChanged);
+
+    const replyIndex = frames.frames.findIndex(responseWithId(2));
+    const actionFrames = frames.frames.filter(titleChanged);
+    const actionIndex = frames.frames.findIndex(titleChanged);
+    expect(replyIndex).toBeGreaterThanOrEqual(0);
+    expect(actionIndex).toBeGreaterThan(replyIndex);
+    expect(actionFrames).toHaveLength(1);
+    expect(JSON.stringify(reply)).not.toContain("After snapshot");
   });
 });

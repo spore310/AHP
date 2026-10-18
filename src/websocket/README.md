@@ -45,7 +45,9 @@ the binding does not import sockets into that module.
 - `createAHPConnectionModule(factory)` — wire-only handlers plus `onConnection`,
   `beforeDispatch`, and `dispose`. Cleanup is not an RPC method.
 - `createAHPServer({ host, port, path, sessions })` — composed host. `stop()`
-  releases transport, binding, and sessions. It is terminal.
+  releases transport, binding, and sessions. It is terminal, including after a
+  failed `start()`. `host.sessions.createSession` and
+  `host.sessions.dispatchAction` then reject; a second `start()` rejects.
 
 ## 5-Minute Usage
 
@@ -143,8 +145,8 @@ const server = createWebSocketServer({
 | Test | Pins |
 | ---- | ---- |
 | [`src/tests/websocket.test.ts`](../tests/websocket.test.ts) | Request/result and error mapping, parse and invalid-request handling, notification silence, binary-frame close, upgrade path/malformed-target rejection, own-property dispatch, lifecycle (stop-races-bind, terminal stop, shared bind, retry after failure, heartbeat cleanup), and bounded shutdown. |
-| [`src/tests/websocket/ahp.test.ts`](../tests/websocket/ahp.test.ts) | Connection lifetime, single publication, pre-initialize rejection, unsupported-version close, and failed-subscribe rollback. |
-| [`src/tests/websocket/composition.test.ts`](../tests/websocket/composition.test.ts) | Two composed hosts do not share sessions, and a stopped host does not restart. |
+| [`src/tests/websocket/ahp.test.ts`](../tests/websocket/ahp.test.ts) | Connection lifetime, single publication, pre-initialize rejection, unsupported-version close, failed-subscribe rollback, and post-snapshot action ordering. |
+| [`src/tests/websocket/composition.test.ts`](../tests/websocket/composition.test.ts) | Two composed hosts do not share sessions; stop and failed start are terminal for start and session mutations. |
 | [`src/tests/websocket/sdk.test.ts`](../tests/websocket/sdk.test.ts) | Installed SDK client initializes, observes catalogue fan-out, and receives one accepted rename. |
 
 ## Related Documentation

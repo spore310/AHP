@@ -7,6 +7,9 @@ import { createWebSocketServer } from "../server";
 import { createAHPBinding } from "../ahp";
 import type { AHPServerHandle, AHPServerOptions } from "./types";
 
+const HOST_STOPPED = "AHP host cannot be started after shutdown has begun.";
+const HOST_SESSIONS_STOPPED = "AHP host sessions cannot be used after shutdown has begun.";
+
 const collectFailure = (failures: unknown[], error: unknown): void => {
   failures.push(error);
 };
@@ -38,6 +41,32 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
   });
   let stopped = false;
 
+  const assertSessionsOpen = (): void => {
+    if (stopped) {
+      throw new Error(HOST_SESSIONS_STOPPED);
+    }
+  };
+
+  const hostedSessions: SessionsFactory = {
+    createSession: (params: unknown): Promise<void> => {
+      if (stopped) {
+        return Promise.reject(new Error(HOST_SESSIONS_STOPPED));
+      }
+      return sessions.createSession(params);
+    },
+    getSessionSnapshot: (sessionUri: string) => sessions.getSessionSnapshot(sessionUri),
+    listSessionSnapshots: () => sessions.listSessionSnapshots(),
+    getCurrentServerSeq: () => sessions.getCurrentServerSeq(),
+    listAgents: () => sessions.listAgents(),
+    dispatchAction: (params) => {
+      assertSessionsOpen();
+      return sessions.dispatchAction(params);
+    },
+    onCatalogueNotification: (listener) => sessions.onCatalogueNotification(listener),
+    onSessionEnvelope: (listener) => sessions.onSessionEnvelope(listener),
+    dispose: () => sessions.dispose(),
+  };
+
   const stop = async (): Promise<void> => {
     if (stopped) {
       await transport.stop();
@@ -66,10 +95,10 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
   };
 
   return {
-    sessions,
+    sessions: hostedSessions,
     start: async (): Promise<AddressInfo> => {
       if (stopped) {
-        throw new Error("AHP host cannot be started after shutdown has begun.");
+        throw new Error(HOST_STOPPED);
       }
       try {
         return await transport.start();
