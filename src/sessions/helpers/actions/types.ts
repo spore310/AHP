@@ -15,6 +15,10 @@ import {
   ACTION_TYPE_SESSION_WORKING_DIRECTORY_REMOVED,
   ACTION_TYPE_SESSION_WORKING_DIRECTORY_REPLACED,
   ACTION_TYPE_SESSION_WORKING_DIRECTORY_SET,
+  CUSTOMIZATION_ENABLEMENT_GLOBAL,
+  CUSTOMIZATION_ENABLEMENT_SESSION,
+  CUSTOMIZATION_ENABLEMENT_WORKSPACE,
+  CUSTOMIZATION_TYPE_PLUGIN,
 } from "@sessions/constants";
 
 /**
@@ -28,44 +32,40 @@ export const clientSeqSchema = z
     message: "clientSeq must be a non-negative safe integer",
   });
 
+const jsonSchemaPropertySchema = z.custom<object>(
+  (value): value is object => typeof value === "object" && value !== null && !Array.isArray(value),
+);
+
+const toolSchemaObject = z.object({
+  type: z.literal("object"),
+  properties: z.record(z.string(), jsonSchemaPropertySchema).optional(),
+  required: z.array(z.string()).optional(),
+});
+
 const toolDefinitionSchema = z.object({
   name: z.string().min(1),
   title: z.string().optional(),
   description: z.string().optional(),
-  inputSchema: z
-    .object({
-      type: z.literal("object"),
-      properties: z.record(z.string(), z.unknown()).optional(),
-      required: z.array(z.string()).optional(),
-    })
-    .optional(),
-  outputSchema: z
-    .object({
-      type: z.literal("object"),
-      properties: z.record(z.string(), z.unknown()).optional(),
-      required: z.array(z.string()).optional(),
-    })
-    .optional(),
-  annotations: z
-    .object({
-      title: z.string().optional(),
-      readOnlyHint: z.boolean().optional(),
-      destructiveHint: z.boolean().optional(),
-      idempotentHint: z.boolean().optional(),
-      openWorldHint: z.boolean().optional(),
-    })
-    .optional(),
+  inputSchema: toolSchemaObject.optional(),
+  outputSchema: toolSchemaObject.optional(),
+  annotations: z.object({
+    title: z.string().optional(),
+    readOnlyHint: z.boolean().optional(),
+    destructiveHint: z.boolean().optional(),
+    idempotentHint: z.boolean().optional(),
+    openWorldHint: z.boolean().optional(),
+  }).optional(),
   _meta: z.record(z.string(), z.unknown()).optional(),
 });
 
 const customizationEnablementSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("global"), enabled: z.boolean() }),
+  z.object({ kind: z.literal(CUSTOMIZATION_ENABLEMENT_GLOBAL), enabled: z.boolean() }),
   z.object({
-    kind: z.literal("workspace"),
+    kind: z.literal(CUSTOMIZATION_ENABLEMENT_WORKSPACE),
     uri: z.string().min(1),
     enabled: z.boolean(),
   }),
-  z.object({ kind: z.literal("session"), enabled: z.boolean() }),
+  z.object({ kind: z.literal(CUSTOMIZATION_ENABLEMENT_SESSION), enabled: z.boolean() }),
 ]);
 
 const sessionTitleChangedActionSchema = z.object({
@@ -83,18 +83,26 @@ const sessionIsArchivedChangedActionSchema = z.object({
   isArchived: z.boolean(),
 });
 
+const clientPluginCustomizationSchema = z.object({
+  type: z.literal(CUSTOMIZATION_TYPE_PLUGIN),
+  id: z.string().min(1),
+  uri: z.string().min(1),
+  name: z.string().min(1),
+  nonce: z.string().optional(),
+  version: z.string().optional(),
+  clientId: z.string().optional(),
+  enablement: z.array(customizationEnablementSchema).optional(),
+  childEnablement: z.record(z.string(), z.array(customizationEnablementSchema)).optional(),
+  _meta: z.record(z.string(), z.unknown()).optional(),
+});
+
 const sessionActiveClientSetActionSchema = z.object({
   type: z.literal(ACTION_TYPE_SESSION_ACTIVE_CLIENT_SET),
   activeClient: z.object({
     clientId: z.string().min(1),
     displayName: z.string().optional(),
     tools: z.array(toolDefinitionSchema),
-    customizations: z
-      .array(z.object({
-        id: z.string().min(1),
-        type: z.string().min(1),
-      }))
-      .optional(),
+    customizations: z.array(clientPluginCustomizationSchema).optional(),
   }),
 });
 

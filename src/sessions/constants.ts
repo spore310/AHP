@@ -1,4 +1,10 @@
-import type { ActionType, ErrorInfo, SessionState } from "@microsoft/agent-host-protocol";
+import type {
+  ActionType,
+  CustomizationEnablementKind,
+  CustomizationType,
+  ErrorInfo,
+  SessionState,
+} from "@microsoft/agent-host-protocol";
 
 /* eslint-disable @typescript-eslint/no-unsafe-enum-assignment --
  * The mirrored literals below must be asserted to the Microsoft enum types
@@ -80,6 +86,18 @@ export const ACTION_TYPE_SESSION_CONFIG_CHANGED = "session/configChanged" as Act
 /** `ActionType.RootActiveSessionsChanged` — the non-disposed session count changed. */
 export const ACTION_TYPE_ROOT_ACTIVE_SESSIONS_CHANGED
   = "root/activeSessionsChanged" as ActionType.RootActiveSessionsChanged;
+
+/** `CustomizationType.Plugin` — a client-published plugin customization. */
+export const CUSTOMIZATION_TYPE_PLUGIN = "plugin" as CustomizationType.Plugin;
+
+/** `CustomizationEnablementKind.Global`. */
+export const CUSTOMIZATION_ENABLEMENT_GLOBAL = "global" as CustomizationEnablementKind.Global;
+
+/** `CustomizationEnablementKind.Workspace`. */
+export const CUSTOMIZATION_ENABLEMENT_WORKSPACE = "workspace" as CustomizationEnablementKind.Workspace;
+
+/** `CustomizationEnablementKind.Session`. */
+export const CUSTOMIZATION_ENABLEMENT_SESSION = "session" as CustomizationEnablementKind.Session;
 
 /**
  * Stable public error for an unexpected backend startup failure.

@@ -173,10 +173,12 @@ than publishing a stale `session/ready`.
   checks the mirrors against the package's runtime enums. Never read a
   `const enum` member directly here.
 - **Baseline client actions.** This host applies `session/titleChanged`,
-  `session/isReadChanged`, and `session/isArchivedChanged`. The other pinned
-  client-dispatchable session actions are validated and rejected without a
-  reducer application or accepted envelope. MCP, tools, working-directory, and
-  mutable-config behavior are not implemented here.
+  `session/isReadChanged`, `session/isArchivedChanged`, `session/activeClientSet`,
+  and `session/activeClientRemoved` through the protocol reducer. The other
+  pinned client-dispatchable session actions are validated and rejected without
+  a reducer application or accepted envelope. MCP, working-directory, and
+  mutable-config behavior are not implemented here. Disconnect does not yet
+  auto-remove an active client.
 - **`applySessionAction` is the only mutation path.** State changes only through
   the protocol reducer; the sequence comes from the injected port, never from
   the record. `getCurrentServerSeq()` reads `sequence.current()` even after

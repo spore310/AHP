@@ -2,6 +2,8 @@ import type { ClientSessionAction, SessionAction } from "@microsoft/agent-host-p
 import { JsonRpcErrorCodes } from "@microsoft/agent-host-protocol";
 
 import {
+  ACTION_TYPE_SESSION_ACTIVE_CLIENT_REMOVED,
+  ACTION_TYPE_SESSION_ACTIVE_CLIENT_SET,
   ACTION_TYPE_SESSION_IS_ARCHIVED_CHANGED,
   ACTION_TYPE_SESSION_IS_READ_CHANGED,
   ACTION_TYPE_SESSION_TITLE_CHANGED,
@@ -18,10 +20,24 @@ import {
 export const BASELINE_UNSUPPORTED_ACTION_REASON
   = "Action is not supported by this host baseline.";
 
+type BaselineSupportedSessionAction = Extract<
+  ParsedClientSessionAction,
+  {
+    readonly type:
+      | typeof ACTION_TYPE_SESSION_TITLE_CHANGED
+      | typeof ACTION_TYPE_SESSION_IS_READ_CHANGED
+      | typeof ACTION_TYPE_SESSION_IS_ARCHIVED_CHANGED
+      | typeof ACTION_TYPE_SESSION_ACTIVE_CLIENT_SET
+      | typeof ACTION_TYPE_SESSION_ACTIVE_CLIENT_REMOVED;
+  }
+>;
+
 const BASELINE_SUPPORTED_ACTION_TYPES = new Set<ParsedClientSessionAction["type"]>([
   ACTION_TYPE_SESSION_TITLE_CHANGED,
   ACTION_TYPE_SESSION_IS_READ_CHANGED,
   ACTION_TYPE_SESSION_IS_ARCHIVED_CHANGED,
+  ACTION_TYPE_SESSION_ACTIVE_CLIENT_SET,
+  ACTION_TYPE_SESSION_ACTIVE_CLIENT_REMOVED,
 ]);
 
 /**
@@ -55,15 +71,7 @@ export function parseClientSessionAction(value: unknown): ParsedClientSessionAct
 /** Whether this baseline applies the action through the session reducer. */
 export function isBaselineSupportedSessionAction(
   action: ParsedClientSessionAction,
-): action is Extract<
-  ParsedClientSessionAction,
-  {
-    readonly type:
-      | typeof ACTION_TYPE_SESSION_TITLE_CHANGED
-      | typeof ACTION_TYPE_SESSION_IS_READ_CHANGED
-      | typeof ACTION_TYPE_SESSION_IS_ARCHIVED_CHANGED;
-  }
-> {
+): action is BaselineSupportedSessionAction {
   return BASELINE_SUPPORTED_ACTION_TYPES.has(action.type);
 }
 
@@ -73,26 +81,16 @@ export function isBaselineSupportedSessionAction(
  * Supported variants are a subset of the SDK union; this helper exists so the
  * reducer never receives an unvalidated value.
  */
-export function toSupportedSessionAction(
-  action: Extract<
-    ParsedClientSessionAction,
-    {
-      readonly type:
-        | typeof ACTION_TYPE_SESSION_TITLE_CHANGED
-        | typeof ACTION_TYPE_SESSION_IS_READ_CHANGED
-        | typeof ACTION_TYPE_SESSION_IS_ARCHIVED_CHANGED;
-    }
-  >,
-): SessionAction {
+export function toSupportedSessionAction(action: BaselineSupportedSessionAction): SessionAction {
   return action;
 }
 
 /**
  * Turns a schema-validated client action into the SDK union.
  *
- * Nested optional SDK fields are wider than the parser output; the value has
- * already passed the pinned payload schema.
+ * The parser output is checked against the pinned client-action union at compile
+ * time. Unsupported variants are not passed to the reducer.
  */
 export function toClientSessionAction(action: ParsedClientSessionAction): ClientSessionAction {
-  return action as ClientSessionAction;
+  return action;
 }

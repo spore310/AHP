@@ -37,6 +37,8 @@ export const BASELINE_SUPPORTED_ACTIONS: ReadonlySet<string> = new Set([
   "session/titleChanged",
   "session/isReadChanged",
   "session/isArchivedChanged",
+  "session/activeClientSet",
+  "session/activeClientRemoved",
 ]);
 
 /** Cap on events buffered while a snapshot reply is still unsettled. */

@@ -201,6 +201,116 @@ describe("dispatchAction: clientSeq non-coercion (T13)", () => {
   });
 });
 
+describe("dispatchAction: active clients", () => {
+  it("sets, updates by clientId, and removes without inventing a second reducer", async () => {
+    const { factory, uri, envelopes } = await readyFactory();
+    const envelopesBefore = envelopes.length;
+
+    const first = factory.dispatchAction({
+      channel: uri,
+      clientSeq: 1,
+      action: {
+        type: "session/activeClientSet",
+        activeClient: {
+          clientId: "client-a",
+          displayName: "Alpha",
+          tools: [{ name: "read_file" }],
+        },
+      },
+      clientId: CLIENT_ID,
+    });
+    expect(first.rejectionReason).toBeUndefined();
+    expect(factory.getSessionSnapshot(uri)?.state.activeClients).toEqual([
+      { clientId: "client-a", displayName: "Alpha", tools: [{ name: "read_file" }] },
+    ]);
+
+    factory.dispatchAction({
+      channel: uri,
+      clientSeq: 2,
+      action: {
+        type: "session/activeClientSet",
+        activeClient: {
+          clientId: "client-b",
+          displayName: "Beta",
+          tools: [],
+        },
+      },
+      clientId: CLIENT_ID,
+    });
+    factory.dispatchAction({
+      channel: uri,
+      clientSeq: 3,
+      action: {
+        type: "session/activeClientSet",
+        activeClient: {
+          clientId: "client-a",
+          displayName: "Alpha Prime",
+          tools: [{ name: "write_file" }],
+        },
+      },
+      clientId: CLIENT_ID,
+    });
+
+    expect(factory.getSessionSnapshot(uri)?.state.activeClients).toEqual([
+      { clientId: "client-a", displayName: "Alpha Prime", tools: [{ name: "write_file" }] },
+      { clientId: "client-b", displayName: "Beta", tools: [] },
+    ]);
+
+    factory.dispatchAction({
+      channel: uri,
+      clientSeq: 4,
+      action: { type: "session/activeClientRemoved", clientId: "client-b" },
+      clientId: CLIENT_ID,
+    });
+    expect(factory.getSessionSnapshot(uri)?.state.activeClients).toEqual([
+      { clientId: "client-a", displayName: "Alpha Prime", tools: [{ name: "write_file" }] },
+    ]);
+
+    expect(() => factory.dispatchAction({
+      channel: uri,
+      clientSeq: 5,
+      action: { type: "session/activeClientRemoved", clientId: "absent" },
+      clientId: CLIENT_ID,
+    })).not.toThrow();
+    expect(factory.getSessionSnapshot(uri)?.state.activeClients).toEqual([
+      { clientId: "client-a", displayName: "Alpha Prime", tools: [{ name: "write_file" }] },
+    ]);
+
+    expect(envelopes.slice(envelopesBefore)).toHaveLength(5);
+    expect(envelopes.slice(envelopesBefore).every((envelope) => envelope.rejectionReason === undefined)).toBe(true);
+  });
+
+  it("rejects a malformed tools payload without mutating", async () => {
+    const { factory, uri, envelopes } = await readyFactory();
+    const snapshotBefore = structuredClone(factory.getSessionSnapshot(uri));
+    const envelopesBefore = envelopes.length;
+
+    try {
+      factory.dispatchAction({
+        channel: uri,
+        clientSeq: 1,
+        action: {
+          type: "session/activeClientSet",
+          activeClient: {
+            clientId: "client-a",
+            tools: [{ name: 1 }],
+          },
+        },
+        clientId: CLIENT_ID,
+      });
+      throw new Error("expected InvalidParams");
+    } catch (error) {
+      expect(error).toMatchObject({
+        name: "SessionsError",
+        code: JsonRpcErrorCodes.InvalidParams,
+      });
+    }
+
+    expect(factory.getSessionSnapshot(uri)).toEqual(snapshotBefore);
+    expect(envelopes).toHaveLength(envelopesBefore);
+  });
+});
+
 describe("dispatchAction: valid-but-unsupported baseline actions", () => {
   it("validates the pinned payload, does not reduce, and does not emit an accepted envelope", async () => {
     const { factory, uri, catalogue, envelopes } = await readyFactory();

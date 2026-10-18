@@ -152,6 +152,82 @@ describe("AHP connection lifetime", () => {
     ))).toBe(false);
   });
 
+  it("applies session/activeClientSet on the wire with the connection origin", async () => {
+    const { url, factory } = await startHost();
+    const subscriber = await connect(url);
+    const outsider = await connect(url);
+    await initialize(subscriber.socket, subscriber.frames, "subscriber");
+    await initialize(outsider.socket, outsider.frames, "outsider");
+    const channel = `${SESSION_URI_PREFIX}active-client-peer`;
+    await factory.createSession({ channel });
+    await subscriber.frames.waitFor(methodFrame("root/sessionAdded"));
+    await outsider.frames.waitFor(methodFrame("root/sessionAdded"));
+
+    send(subscriber.socket, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "subscribe",
+      params: { channel },
+    });
+    await subscriber.frames.waitFor(responseWithId(2));
+
+    const beforeSubscriber = subscriber.frames.frames.length;
+    const beforeOutsider = outsider.frames.frames.length;
+    send(subscriber.socket, {
+      jsonrpc: "2.0",
+      method: "dispatchAction",
+      params: {
+        channel,
+        clientSeq: 1,
+        action: {
+          type: "session/activeClientSet",
+          activeClient: {
+            clientId: "subscriber",
+            displayName: "Subscriber",
+            tools: [{ name: "read_file" }],
+          },
+        },
+        origin: { clientId: "spoofed", clientSeq: 99 },
+      },
+    });
+    send(subscriber.socket, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "ping",
+      params: { channel: "ahp-root://" },
+    });
+    send(outsider.socket, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "ping",
+      params: { channel: "ahp-root://" },
+    });
+    await subscriber.frames.waitFor(responseWithId(3));
+    await outsider.frames.waitFor(responseWithId(3));
+
+    const delivered = subscriber.frames.frames.slice(beforeSubscriber).filter(methodFrame("action"));
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]).toMatchObject({
+      method: "action",
+      params: {
+        channel,
+        action: {
+          type: "session/activeClientSet",
+          activeClient: {
+            clientId: "subscriber",
+            displayName: "Subscriber",
+            tools: [{ name: "read_file" }],
+          },
+        },
+        origin: { clientId: "subscriber", clientSeq: 1 },
+      },
+    });
+    expect(factory.getSessionSnapshot(channel)?.state.activeClients).toEqual([
+      { clientId: "subscriber", displayName: "Subscriber", tools: [{ name: "read_file" }] },
+    ]);
+    expect(outsider.frames.frames.slice(beforeOutsider).filter(methodFrame("action"))).toEqual([]);
+  });
+
   it("rejects a request-shaped dispatch without mutating session state", async () => {
     const { url, factory } = await startHost();
     const origin = await connect(url);
