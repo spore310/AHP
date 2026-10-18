@@ -1,8 +1,8 @@
 import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 
-import { APP_NAME, installShutdownHandlers } from "@/index";
-import type { WebSocketServerHandle } from "@/websocket";
+import { APP_NAME, installShutdownHandlers } from "../index";
+import type { WebSocketServerHandle } from "@websocket";
 
 const fakeAddress: AddressInfo = { address: "127.0.0.1", family: "IPv4", port: 0 };
 

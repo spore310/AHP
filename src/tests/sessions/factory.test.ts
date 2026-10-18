@@ -9,8 +9,8 @@ import {
   type SessionBackend,
   type SessionProvider,
   type SessionsDiagnostic,
-} from "@/sessions";
-import { createMockProvider, mockProvider } from "@/sessions/mock";
+} from "@sessions";
+import { createMockProvider, mockProvider } from "@sessions/mock";
 
 const TEST_NOW = (): Date => new Date("2026-01-02T03:04:05.000Z");
 

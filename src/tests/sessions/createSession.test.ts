@@ -16,8 +16,8 @@ import {
   type SessionConfigContract,
   type SessionProvider,
   type SessionsFactory,
-} from "@/sessions";
-import { createMockProvider } from "@/sessions/mock";
+} from "@sessions";
+import { createMockProvider } from "@sessions/mock";
 
 const TEST_NOW = (): Date => new Date("2026-01-02T03:04:05.000Z");
 

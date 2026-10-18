@@ -12,7 +12,7 @@ import {
   jsonRpcNotificationSchema,
   jsonRpcRequestSchema,
   jsonRpcResultResponseSchema,
-} from "@/jsonrpc";
+} from "@jsonrpc";
 
 // Wire fixtures are typed with the Microsoft protocol package and validated
 // with our schemas. The fixture types and the schema types must stay linked

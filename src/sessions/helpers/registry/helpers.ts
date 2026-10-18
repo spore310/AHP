@@ -1,4 +1,4 @@
-import type { SessionRecord, SessionRegistry } from "@/sessions/types";
+import type { SessionRecord, SessionRegistry } from "@sessions/types";
 
 /**
  * Creates the in-memory {@link SessionRegistry}.

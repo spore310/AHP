@@ -1,7 +1,7 @@
 import type { CreateSessionParams as AhpCreateSessionParams } from "@microsoft/agent-host-protocol";
 import { z } from "zod";
 
-import { sessionUriSchema } from "@/sessions/types";
+import { sessionUriSchema } from "@sessions/types";
 
 /**
  * Parameters accepted by `createSession`.

@@ -16,12 +16,16 @@
     "incremental": true,
     "types": ["node"],
     "paths": {
-      "@/*": ["./src/*"],
-      "@utils/*": ["./src/utils/*"],
-      "@jwt/*": ["./src/utils/server/jwt/*"],
-      "@jwt": ["./src/utils/server/jwt/index.ts"],
       "@env/*": ["./env/*"],
-      "@env": ["./env/index.ts"]
+      "@env": ["./env/index.ts"],
+      "@jsonrpc": ["./src/jsonrpc/index.ts"],
+      "@jsonrpc/*": ["./src/jsonrpc/*"],
+      "@sessions": ["./src/sessions/index.ts"],
+      "@sessions/*": ["./src/sessions/*"],
+      "@websocket": ["./src/websocket/index.ts"],
+      "@websocket/*": ["./src/websocket/*"],
+      "@providers": ["./src/providers/index.ts"],
+      "@providers/*": ["./src/providers/*"]
     }
   },
   "include": ["**/*.ts", "**/*.mts", "**/*.cts"],

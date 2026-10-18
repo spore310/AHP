@@ -1,6 +1,6 @@
 import type { SessionSummary } from "@microsoft/agent-host-protocol";
 
-import type { SessionRecord } from "@/sessions/types";
+import type { SessionRecord } from "@sessions/types";
 
 /**
  * Projects session state into the catalog summary broadcast on the root channel.

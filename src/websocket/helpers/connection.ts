@@ -19,7 +19,7 @@ import {
   type JsonRpcRequestId,
   type JsonRpcResponseId,
   type JsonRpcResultResponse,
-} from "@/jsonrpc";
+} from "@jsonrpc";
 
 import { WEBSOCKET_CLOSE_UNSUPPORTED_DATA } from "../constants";
 import type {

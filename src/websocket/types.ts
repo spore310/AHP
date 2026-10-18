@@ -1,6 +1,6 @@
 import type { AddressInfo } from "node:net";
 
-import type { JsonRpcMessage, JsonRpcParams } from "@/jsonrpc";
+import type { JsonRpcMessage, JsonRpcParams } from "@jsonrpc";
 
 /** Per-connection surface handed to JSON-RPC method handlers. */
 export interface WebSocketConnectionContext {

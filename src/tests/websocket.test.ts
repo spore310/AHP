@@ -5,15 +5,15 @@ import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { RpcError } from "@/jsonrpc";
-import { createSessionsFactory, SESSION_URI_PREFIX } from "@/sessions";
-import { mockProvider } from "@/sessions/mock";
+import { RpcError } from "@jsonrpc";
+import { createSessionsFactory, SESSION_URI_PREFIX } from "@sessions";
+import { mockProvider } from "@sessions/mock";
 import {
   createWebSocketServer,
   WEBSOCKET_HEARTBEAT_INTERVAL_MS,
   type JsonRpcHandlers,
   type WebSocketServerHandle,
-} from "@/websocket";
+} from "@websocket";
 
 const servers: WebSocketServerHandle[] = [];
 const sockets: WebSocket[] = [];

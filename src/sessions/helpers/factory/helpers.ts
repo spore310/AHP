@@ -1,10 +1,10 @@
 import type { ActionEnvelope } from "@microsoft/agent-host-protocol";
 
-import { executeCreateSession } from "@/sessions/createSession";
-import { SessionsDisposingError } from "@/sessions/helpers/errors";
-import { createInMemorySessionRegistry } from "@/sessions/helpers/registry";
-import { createSequenceAllocator } from "@/sessions/helpers/sequence";
-import { buildSessionSnapshot } from "@/sessions/helpers/state";
+import { executeCreateSession } from "@sessions/createSession";
+import { SessionsDisposingError } from "@sessions/helpers/errors";
+import { createInMemorySessionRegistry } from "@sessions/helpers/registry";
+import { createSequenceAllocator } from "@sessions/helpers/sequence";
+import { buildSessionSnapshot } from "@sessions/helpers/state";
 import type {
   CatalogueNotification,
   SessionProvider,
@@ -13,7 +13,7 @@ import type {
   SessionsFactory,
   SessionsFactoryOptions,
   SessionSnapshot,
-} from "@/sessions/types";
+} from "@sessions/types";
 
 /**
  * Creates the host's session factory.

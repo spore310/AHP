@@ -1,7 +1,7 @@
 import type { ErrorInfo } from "@microsoft/agent-host-protocol";
 import { JsonRpcErrorCodes } from "@microsoft/agent-host-protocol";
 
-import { RpcError } from "@/jsonrpc";
+import { RpcError } from "@jsonrpc";
 
 /**
  * A session-capability failure carrying the JSON-RPC/AHP error code the

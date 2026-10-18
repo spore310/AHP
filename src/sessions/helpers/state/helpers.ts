@@ -5,8 +5,8 @@ import type {
 } from "@microsoft/agent-host-protocol";
 import { sessionReducer } from "@microsoft/agent-host-protocol";
 
-import { SESSION_LIFECYCLE_CREATING, SESSION_STATUS_IDLE } from "@/sessions/constants";
-import type { SessionRecord, SessionSnapshot } from "@/sessions/types";
+import { SESSION_LIFECYCLE_CREATING, SESSION_STATUS_IDLE } from "@sessions/constants";
+import type { SessionRecord, SessionSnapshot } from "@sessions/types";
 
 /** Inputs that shape the state a session holds before its backend settles. */
 export interface NewSessionStateInput {

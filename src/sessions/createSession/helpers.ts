@@ -7,15 +7,15 @@ import {
   DEFAULT_SESSION_TITLE,
   ROOT_CHANNEL_URI,
   SESSION_START_FAILURE_INFO,
-} from "@/sessions/constants";
+} from "@sessions/constants";
 import {
   SessionConfigError,
   SessionStartError,
   SessionsError,
-} from "@/sessions/helpers/errors";
-import { applySessionAction, createInitialSessionState } from "@/sessions/helpers/state";
-import { buildSessionSummary } from "@/sessions/helpers/summary";
-import type { SessionProvider, SessionRecord, SessionsDependencies } from "@/sessions/types";
+} from "@sessions/helpers/errors";
+import { applySessionAction, createInitialSessionState } from "@sessions/helpers/state";
+import { buildSessionSummary } from "@sessions/helpers/summary";
+import type { SessionProvider, SessionRecord, SessionsDependencies } from "@sessions/types";
 
 import { createSessionParamsSchema } from "./types";
 

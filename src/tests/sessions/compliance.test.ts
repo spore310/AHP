@@ -14,14 +14,14 @@ import {
   createSequenceAllocator,
   SESSION_URI_PREFIX,
   type CatalogueNotification,
-} from "@/sessions";
+} from "@sessions";
 import {
   ACTION_TYPE_SESSION_CREATION_FAILED,
   ACTION_TYPE_SESSION_READY,
   SESSION_LIFECYCLE_CREATING,
   SESSION_STATUS_IDLE,
-} from "@/sessions/constants";
-import { createMockProvider } from "@/sessions/mock";
+} from "@sessions/constants";
+import { createMockProvider } from "@sessions/mock";
 
 const TEST_NOW = (): Date => new Date("2026-01-02T03:04:05.000Z");
 
