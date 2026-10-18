@@ -172,4 +172,27 @@ describe("action sequence allocator", () => {
 
     expect(envelopes[0]?.serverSeq).toBe(100);
   });
+
+  it("keeps catalogue notifications outside the numbered action stream", async () => {
+    const factory = createSessionsFactory({ providers: [createMockProvider()], now: TEST_NOW });
+    const catalogue: CatalogueNotification[] = [];
+    const envelopes: ActionEnvelope[] = [];
+    factory.onCatalogueNotification((notification) => catalogue.push(notification));
+    factory.onSessionEnvelope((envelope) => envelopes.push(envelope));
+    const uri = sessionUri("catalogue-outside-stream");
+
+    await factory.createSession({ channel: uri, provider: "mock" });
+
+    expect(catalogue.map((notification) => notification.method)).toEqual([
+      "root/sessionAdded",
+      "root/sessionSummaryChanged",
+    ]);
+    // Catalogue events follow their own protocol shape: they carry no action
+    // envelope and never consume the connection-wide sequence.
+    for (const notification of catalogue) {
+      expect(notification).not.toHaveProperty("serverSeq");
+    }
+    expect(envelopes.map((envelope) => envelope.serverSeq)).toEqual([1]);
+    expect(factory.getSessionSnapshot(uri)?.fromSeq).toBe(1);
+  });
 });
