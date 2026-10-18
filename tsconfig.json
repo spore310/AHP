@@ -19,7 +19,9 @@
       "@/*": ["./src/*"],
       "@utils/*": ["./src/utils/*"],
       "@jwt/*": ["./src/utils/server/jwt/*"],
-      "@jwt": ["./src/utils/server/jwt/index.ts"]
+      "@jwt": ["./src/utils/server/jwt/index.ts"],
+      "@env/*": ["./env/*"],
+      "@env": ["./env/index.ts"]
     }
   },
   "include": ["**/*.ts", "**/*.mts", "**/*.cts"],
