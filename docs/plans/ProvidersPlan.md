@@ -1,8 +1,10 @@
 # Providers & Client Connection Plan
 
-Status: **Agreed direction. Milestones are proposed or agreed; none is
-complete. Milestone 1 has partial implementation, but its acceptance is not
-met.**
+Status: **Agreed direction. Milestone 1's scoped baseline is implemented:
+an SDK client can initialize, subscribe, create a session, and observe the
+same catalogue and accepted action as a second client. Later milestones are
+not started. This is not the full AHP specification, authentication, or
+reconnect/replay.**
 
 This is a target-state plan for connecting independent AHP clients (Pi and
 others) to this server. It describes intended behavior, not current behavior;
@@ -52,23 +54,26 @@ frames.
 
 - `src/jsonrpc/` — JSON-RPC message parsing and validation, plus the owned
   `RpcError`.
-- `src/websocket/` — WebSocket transport: upgrade-path check, HTTP 426 for
-  ordinary requests, frame-size limits, heartbeat, and race-safe start/stop
-  with a shared, bounded shutdown. `src/index.ts` wires
-  `createAHPHandlers` from `src/websocket/helpers/ahp.ts`, which handles
-  initialization/version negotiation, ping, subscriptions, session creation,
-  action dispatch, and notification fan-out. SDK smoke tests currently show
-  that Milestone 1 acceptance is not met: another subscribed client misses
-  catalogue notifications, the dispatching client receives duplicate action
-  envelopes, commands are accepted before `initialize`, and an unsupported
-  version does not close the connection.
+- `src/websocket/` — session-agnostic WebSocket transport: upgrade-path
+  check, HTTP 426 for ordinary requests, frame-size limits, heartbeat,
+  per-socket frame serialization, per-invocation reply settlement, and
+  race-safe start/stop with a shared, bounded shutdown. The AHP binding in
+  `src/websocket/helpers/ahp/` owns connection lifetime, initialization,
+  subscriptions, and fan-out. `createAHPServer` in
+  `src/websocket/helpers/host/` composes that binding with a session factory
+  and is what `src/index.ts` starts. Cleanup is not an RPC method. Baseline
+  wire tests cover lifetime fan-out, one publication route, pre-initialize
+  rejection, unsupported-version close, duplicate initialize, atomic initial
+  subscriptions, and origin-only rejection. This is not yet the full Milestone
+  1 acceptance matrix, and it is not an SDK `AhpClient` proof.
 - `src/sessions/` — the session factory: validated session creation,
-  in-memory registry, snapshots, catalogue notifications, per-listener
-  isolation, host-shared sequence injection, root/session snapshot reads,
-  reducer-applied client actions, and disposal that rejects creation while in
-  flight and reports sanitized late-cleanup diagnostics. `SessionBackend` is
-  only `{ dispose() }`; `src/sessions/mock/` is deterministic test scaffolding,
-  not an agent runtime.
+  in-memory registry with an optional `registryFactory`, snapshots, catalogue
+  notifications, per-listener isolation, an injectable `ActionSequence`,
+  root/session snapshot reads, a three-action baseline reducer profile,
+  rejection envelopes for valid-but-unsupported client actions, and disposal
+  that rejects creation while in flight and reports sanitized late-cleanup
+  diagnostics. `SessionBackend` is only `{ dispose() }`; `src/sessions/mock/`
+  is deterministic test scaffolding, not an agent runtime.
 - `src/tests/` — all tests. Tests are never colocated with source and never
   live at a root `tests/` directory.
 - `@microsoft/agent-host-protocol` is pinned at `1.0.0`. The sessions
