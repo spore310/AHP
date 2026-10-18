@@ -179,6 +179,10 @@ than publishing a stale `session/ready`.
   a reducer application or accepted envelope. MCP, working-directory, and
   mutable-config behavior are not implemented here. Disconnect does not yet
   auto-remove an active client.
+- **`disposeSession` removes one session.** It emits `root/sessionRemoved`,
+  drops that session from the catalogue, and releases its backend. It does not
+  close the caller's socket. `listSessions` returns non-disposed summaries,
+  most recently modified first.
 - **`applySessionAction` is the only mutation path.** State changes only through
   the protocol reducer; the sequence comes from the injected port, never from
   the record. `getCurrentServerSeq()` reads `sequence.current()` even after

@@ -3,7 +3,9 @@ import type {
   AgentInfo,
   SessionAddedParams,
   SessionConfigSchema,
+  SessionRemovedParams,
   SessionState,
+  SessionSummary,
   SessionSummaryChangedParams,
 } from "@microsoft/agent-host-protocol";
 import { z } from "zod";
@@ -96,8 +98,15 @@ export interface SessionSummaryChangedCatalogueNotification {
   readonly params: SessionSummaryChangedParams;
 }
 
+export interface SessionRemovedCatalogueNotification {
+  readonly method: "root/sessionRemoved";
+  readonly params: SessionRemovedParams;
+}
+
 export type CatalogueNotification
-  = SessionAddedCatalogueNotification | SessionSummaryChangedCatalogueNotification;
+  = SessionAddedCatalogueNotification
+    | SessionSummaryChangedCatalogueNotification
+    | SessionRemovedCatalogueNotification;
 
 /** One live session owned by the factory. */
 export interface SessionRecord {
@@ -230,6 +239,16 @@ export interface SessionsFactory {
   getSessionSnapshot(sessionUri: string): SessionSnapshot | undefined;
   /** Root-state snapshot of all sessions, or the current server-sequence cursor. */
   listSessionSnapshots(): SessionSnapshot[];
+  /**
+   * Lists non-disposed session summaries, most recently modified first.
+   * Omitting `limit` returns the whole catalogue. An unrecognized cursor rejects.
+   */
+  listSessions(params: unknown): { items: SessionSummary[]; nextCursor?: string };
+  /**
+   * Removes one live session, emits `root/sessionRemoved`, and releases its backend.
+   * A missing session rejects with `SessionNotFound` and emits nothing.
+   */
+  disposeSession(params: unknown): Promise<void>;
   /** Current host-owned action sequence value. */
   getCurrentServerSeq(): number;
   /** Agent descriptors for every registered provider, for the root channel catalogue. */

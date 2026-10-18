@@ -56,6 +56,16 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     },
     getSessionSnapshot: (sessionUri: string) => sessions.getSessionSnapshot(sessionUri),
     listSessionSnapshots: () => sessions.listSessionSnapshots(),
+    listSessions: (params) => {
+      assertSessionsOpen();
+      return sessions.listSessions(params);
+    },
+    disposeSession: (params) => {
+      if (stopped) {
+        return Promise.reject(new Error(HOST_SESSIONS_STOPPED));
+      }
+      return sessions.disposeSession(params);
+    },
     getCurrentServerSeq: () => sessions.getCurrentServerSeq(),
     listAgents: () => sessions.listAgents(),
     dispatchAction: (params) => {

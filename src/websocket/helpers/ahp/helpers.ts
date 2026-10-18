@@ -209,7 +209,20 @@ export const createAHPBinding = (
   };
 
   const unsubscribeCatalogue = factory.onCatalogueNotification((notification) => {
-    publish(ROOT_SCHEME, catalogueNotification(notification.method, notification.params));
+    const message = catalogueNotification(notification.method, notification.params);
+    publish(ROOT_SCHEME, message);
+    if (notification.method !== "root/sessionRemoved") {
+      return;
+    }
+    const session = notification.params.session;
+    for (const peer of peers.values()) {
+      const subscribedToSession = peer.subscriptions.has(session) || peer.pending.has(session);
+      if (subscribedToSession && !peer.subscriptions.has(ROOT_SCHEME)) {
+        sendToPeer(peer, message);
+      }
+      peer.subscriptions.delete(session);
+      peer.pending.delete(session);
+    }
   });
   const unsubscribeEnvelopes = factory.onSessionEnvelope((envelope: ActionEnvelope) => {
     if (envelope.rejectionReason !== undefined) {
@@ -331,6 +344,17 @@ export const createAHPBinding = (
       requirePeer(context);
       await factory.createSession(params);
       return null;
+    },
+
+    disposeSession: async (params: unknown, context: WebSocketConnectionContext): Promise<null> => {
+      requirePeer(context);
+      await factory.disposeSession(params);
+      return null;
+    },
+
+    listSessions: (params: unknown, context: WebSocketConnectionContext) => {
+      requirePeer(context);
+      return factory.listSessions(params);
     },
 
     dispatchAction: (params: unknown, context: WebSocketConnectionContext): null => {

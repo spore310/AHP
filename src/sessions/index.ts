@@ -28,5 +28,6 @@ export type {
   SessionsFactory,
   SessionsFactoryOptions,
   SessionSnapshot,
+  SessionRemovedCatalogueNotification,
   SessionSummaryChangedCatalogueNotification,
 } from "./types";

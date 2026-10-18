@@ -607,6 +607,87 @@ describe("AHP connection lifetime", () => {
   });
 });
 
+describe("session disposal and listing", () => {
+  it("removes a session from subscribers and lists the sessions that remain", async () => {
+    const { url, factory } = await startHost();
+    const owner = await connect(url);
+    const peer = await connect(url);
+    const rootOnly = await connect(url);
+    const sessionOnly = await connect(url);
+    await initialize(owner.socket, owner.frames, "owner");
+    await initialize(peer.socket, peer.frames, "peer", 1);
+    await initialize(rootOnly.socket, rootOnly.frames, "root-only", 1);
+    send(sessionOnly.socket, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        channel: "ahp-root://",
+        clientId: "session-only",
+        protocolVersions: ["1.0.0"],
+        initialSubscriptions: [],
+      },
+    });
+    await sessionOnly.frames.waitFor(responseWithId(1));
+    const channel = `${SESSION_URI_PREFIX}dispose-me`;
+    const kept = `${SESSION_URI_PREFIX}keep-me`;
+    await factory.createSession({ channel });
+    await factory.createSession({ channel: kept });
+
+    send(owner.socket, { jsonrpc: "2.0", id: 2, method: "subscribe", params: { channel } });
+    send(peer.socket, { jsonrpc: "2.0", id: 2, method: "subscribe", params: { channel } });
+    send(sessionOnly.socket, { jsonrpc: "2.0", id: 2, method: "subscribe", params: { channel } });
+    await owner.frames.waitFor(responseWithId(2));
+    await peer.frames.waitFor(responseWithId(2));
+    await sessionOnly.frames.waitFor(responseWithId(2));
+
+    send(owner.socket, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "disposeSession",
+      params: { channel },
+    });
+    await expect(owner.frames.waitFor(responseWithId(3))).resolves.toMatchObject({ id: 3, result: null });
+    await expect(owner.frames.waitFor(methodFrame("root/sessionRemoved"))).resolves.toMatchObject({
+      method: "root/sessionRemoved",
+      params: { channel: "ahp-root://", session: channel },
+    });
+    await expect(peer.frames.waitFor(methodFrame("root/sessionRemoved"))).resolves.toMatchObject({
+      method: "root/sessionRemoved",
+      params: { session: channel },
+    });
+    await expect(rootOnly.frames.waitFor(methodFrame("root/sessionRemoved"))).resolves.toMatchObject({
+      method: "root/sessionRemoved",
+      params: { session: channel },
+    });
+    await expect(sessionOnly.frames.waitFor(methodFrame("root/sessionRemoved"))).resolves.toMatchObject({
+      method: "root/sessionRemoved",
+      params: { session: channel },
+    });
+
+    send(owner.socket, {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "listSessions",
+      params: { channel: "ahp-root://" },
+    });
+    const listed = await owner.frames.waitFor(responseWithId(4));
+    expect(listed).toMatchObject({
+      id: 4,
+      result: { items: [{ resource: kept }] },
+    });
+
+    send(owner.socket, {
+      jsonrpc: "2.0",
+      id: 5,
+      method: "ping",
+      params: { channel: "ahp-root://" },
+    });
+    await expect(owner.frames.waitFor(responseWithId(5))).resolves.toMatchObject({ id: 5, result: null });
+    expect(factory.getSessionSnapshot(channel)).toBeUndefined();
+  });
+});
+
 describe("AHP snapshot reply barrier", () => {
   it("delivers a post-snapshot action once after the subscribe reply", async () => {
     const inner = createSessionsFactory({ providers: [mockProvider] });
@@ -628,6 +709,8 @@ describe("AHP snapshot reply barrier", () => {
         return snapshot;
       },
       listSessionSnapshots: () => inner.listSessionSnapshots(),
+      listSessions: (params) => inner.listSessions(params),
+      disposeSession: (params) => inner.disposeSession(params),
       getCurrentServerSeq: () => inner.getCurrentServerSeq(),
       listAgents: () => inner.listAgents(),
       dispatchAction: (params) => inner.dispatchAction(params),

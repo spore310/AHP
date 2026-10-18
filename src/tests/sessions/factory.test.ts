@@ -495,3 +495,34 @@ describe("sessions factory: disposal lifecycle", () => {
     expect(factory.getSessionSnapshot(uri)?.state.lifecycle).toBe("ready");
   });
 });
+
+describe("session catalogue", () => {
+  it("lists active sessions and removes one with a catalogue broadcast", async () => {
+    const factory = createSessionsFactory({ providers: [mockProvider], now: TEST_NOW });
+    const catalogue: string[] = [];
+    factory.onCatalogueNotification((notification) => {
+      catalogue.push(notification.method);
+    });
+    const older = sessionUri("older");
+    const newer = sessionUri("newer");
+    await factory.createSession({ channel: older });
+    await factory.createSession({ channel: newer });
+
+    const listed = factory.listSessions({ channel: "ahp-root://", limit: 1 });
+    expect(listed.items.map((item) => item.resource)).toEqual([newer]);
+    expect(typeof listed.nextCursor).toBe("string");
+
+    const next = factory.listSessions({ channel: "ahp-root://", limit: 1, cursor: listed.nextCursor });
+    expect(next.items.map((item) => item.resource)).toEqual([older]);
+    expect(next.nextCursor).toBeUndefined();
+
+    await factory.disposeSession({ channel: older });
+    expect(factory.getSessionSnapshot(older)).toBeUndefined();
+    expect(catalogue).toContain("root/sessionRemoved");
+    expect(factory.listSessions({ channel: "ahp-root://" }).items.map((item) => item.resource)).toEqual([newer]);
+    await expect(factory.disposeSession({ channel: older })).rejects.toMatchObject({
+      name: "SessionsError",
+      code: -32001,
+    });
+  });
+});

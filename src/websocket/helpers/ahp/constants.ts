@@ -4,6 +4,8 @@ export const AHP_REQUEST_METHODS: ReadonlySet<string> = new Set([
   "ping",
   "subscribe",
   "createSession",
+  "disposeSession",
+  "listSessions",
 ]);
 
 /** AHP methods that must arrive as JSON-RPC notifications. */

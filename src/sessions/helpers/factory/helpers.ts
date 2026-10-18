@@ -19,9 +19,8 @@ import {
 } from "@sessions/helpers/sequence";
 import { applySessionAction, buildSessionSnapshot } from "@sessions/helpers/state";
 import { buildSessionSummary, changedSessionSummaryFields } from "@sessions/helpers/summary";
+import { sessionUriSchema, type CatalogueNotification, type SessionProvider } from "@sessions/types";
 import type {
-  CatalogueNotification,
-  SessionProvider,
   SessionsDependencies,
   SessionsDiagnostic,
   SessionsFactory,
@@ -156,6 +155,36 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
     listSessionSnapshots: (): SessionSnapshot[] => {
       return sessions.records().map((record) => buildSessionSnapshot(record));
     },
+    listSessions: (params: unknown) => listSessions(sessions, params),
+    disposeSession: async (params: unknown): Promise<void> => {
+      if (shutdown !== null) {
+        throw new SessionsDisposingError();
+      }
+      const channel = readDisposeChannel(params);
+      const record = sessions.get(channel);
+      if (record === undefined) {
+        throw new SessionsError(AhpErrorCodes.SessionNotFound, `Session not found: ${channel}`);
+      }
+      sessions.delete(record.sessionUri);
+      dependencies.emitCatalogueNotification({
+        method: "root/sessionRemoved",
+        params: { channel: ROOT_CHANNEL_URI, session: record.sessionUri },
+      });
+      emitActiveSessionsChanged();
+      if (record.backend === undefined) {
+        return;
+      }
+      try {
+        await record.backend.dispose();
+      } catch (error) {
+        dependencies.reportDiagnostic({
+          event: "lateBackendDisposeFailed",
+          sessionUri: record.sessionUri,
+          errorType: error instanceof Error ? error.name : "unknown",
+        });
+        throw new SessionsError(JsonRpcErrorCodes.InternalError, "Session backend failed to dispose.");
+      }
+    },
     getCurrentServerSeq: (): number => sequence.current(),
     listAgents: () => [...providers.values()].map((provider) => structuredClone(provider.agentInfo)),
     onCatalogueNotification: (listener) => subscribe(catalogueListeners, listener),
@@ -228,6 +257,88 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
  * other observers or the operation that produced the event. Delivery failures
  * are dropped here; operational diagnostics belong to the composition root.
  */
+const LIST_SESSIONS_CURSOR_VERSION = 1;
+
+function readDisposeChannel(params: unknown): string {
+  if (typeof params !== "object" || params === null || !("channel" in params)) {
+    throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid disposeSession params");
+  }
+  const parsed = sessionUriSchema.safeParse(params.channel);
+  if (!parsed.success) {
+    throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid disposeSession params");
+  }
+  return parsed.data;
+}
+
+function listSessions(
+  sessions: SessionsDependencies["sessions"],
+  params: unknown,
+): { items: ReturnType<typeof buildSessionSummary>[]; nextCursor?: string } {
+  const limit = readListLimit(params);
+  const ordered = sessions.records().slice().sort((left, right) => {
+    if (left.modifiedAt === right.modifiedAt) {
+      return left.sessionUri < right.sessionUri ? -1 : 1;
+    }
+    return left.modifiedAt < right.modifiedAt ? 1 : -1;
+  });
+  const offset = readListOffset(params, ordered.length);
+  const page = limit === undefined ? ordered.slice(offset) : ordered.slice(offset, offset + limit);
+  const nextOffset = offset + page.length;
+  return {
+    items: page.map((record) => buildSessionSummary(record)),
+    ...(limit !== undefined && nextOffset < ordered.length
+      ? { nextCursor: encodeListCursor(nextOffset) }
+      : {}),
+  };
+}
+
+function readListLimit(params: unknown): number | undefined {
+  if (!isRecord(params) || params.channel !== ROOT_CHANNEL_URI) {
+    throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid listSessions params");
+  }
+  if (params.limit === undefined) {
+    return undefined;
+  }
+  if (typeof params.limit !== "number" || !Number.isInteger(params.limit) || params.limit < 1) {
+    throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid listSessions params");
+  }
+  return Math.min(params.limit, 100);
+}
+
+function readListOffset(params: unknown, length: number): number {
+  if (!isRecord(params) || params.cursor === undefined) {
+    return 0;
+  }
+  if (typeof params.cursor !== "string" || params.cursor.length === 0) {
+    throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid listSessions cursor");
+  }
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(Buffer.from(params.cursor, "base64url").toString("utf8"));
+  } catch {
+    throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid listSessions cursor");
+  }
+  if (
+    !isRecord(decoded)
+    || decoded.v !== LIST_SESSIONS_CURSOR_VERSION
+    || typeof decoded.o !== "number"
+    || !Number.isInteger(decoded.o)
+    || decoded.o < 0
+    || decoded.o > length
+  ) {
+    throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid listSessions cursor");
+  }
+  return decoded.o;
+}
+
+function encodeListCursor(offset: number): string {
+  return Buffer.from(JSON.stringify({ v: LIST_SESSIONS_CURSOR_VERSION, o: offset }), "utf8").toString("base64url");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function deliver<TValue>(
   listeners: ReadonlySet<(value: TValue) => void>,
   value: TValue,

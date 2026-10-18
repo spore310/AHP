@@ -1,10 +1,10 @@
 # Providers & Client Connection Plan
 
-Status: **Agreed direction. Milestone 1's scoped baseline is implemented:
-an SDK client can initialize, subscribe, create a session, and observe the
-same catalogue and accepted action as a second client. Later milestones are
-not started. This is not the full AHP specification, authentication, or
-reconnect/replay.**
+Status: **Agreed direction. Milestone 1 is implemented: an SDK client can
+initialize, subscribe, create a session, list sessions, dispose a session, and
+observe the same catalogue and accepted action as a second client. Milestones
+2–5 are not started. This is not authentication, a Pi extension, client-to-client
+conversation, or reconnect/replay.**
 
 This is a target-state plan for connecting independent AHP clients (Pi and
 others) to this server. It describes intended behavior, not current behavior;
@@ -64,16 +64,16 @@ frames.
   and is what `src/index.ts` starts. Cleanup is not an RPC method. Baseline
   wire tests cover lifetime fan-out, one publication route, pre-initialize
   rejection, unsupported-version close, duplicate initialize, atomic initial
-  subscriptions, and origin-only rejection. This is not yet the full Milestone
-  1 acceptance matrix, and it is not an SDK `AhpClient` proof.
-- `src/sessions/` — the session factory: validated session creation,
-  in-memory registry with an optional `registryFactory`, snapshots, catalogue
-  notifications, per-listener isolation, an injectable `ActionSequence`,
-  root/session snapshot reads, a three-action baseline reducer profile,
-  rejection envelopes for valid-but-unsupported client actions, and disposal
-  that rejects creation while in flight and reports sanitized late-cleanup
-  diagnostics. `SessionBackend` is only `{ dispose() }`; `src/sessions/mock/`
-  is deterministic test scaffolding, not an agent runtime.
+  subscriptions, origin-only rejection, session disposal, and `listSessions`.
+  `src/tests/websocket/sdk.test.ts` is the SDK acceptance path.
+- `src/sessions/` — the session factory: validated session creation and
+  disposal, in-memory registry with an optional `registryFactory`, snapshots,
+  catalogue notifications including `root/sessionRemoved`, per-listener
+  isolation, an injectable `ActionSequence`, root/session snapshot reads,
+  `listSessions`, a five-action baseline reducer profile, rejection envelopes
+  for the other client actions, and factory disposal that rejects creation
+  while in flight. `SessionBackend` is only `{ dispose() }`;
+  `src/sessions/mock/` is deterministic test scaffolding, not an agent runtime.
 - `src/tests/` — all tests. Tests are never colocated with source and never
   live at a root `tests/` directory.
 - `@microsoft/agent-host-protocol` is pinned at `1.0.0`. The sessions
@@ -136,7 +136,7 @@ at the boundary, be versioned, and never impersonate a standard AHP provider.
 A host-side Pi "agent" must never be advertised for a runtime that executes on
 the client.
 
-## Milestone 1 — Native AHP host connection (server-only) — Agreed / acceptance incomplete
+## Milestone 1 — Native AHP host connection (server-only) — Implemented
 
 1. **AHP method layer** in the websocket capability (new owner-aligned module,
    for example `src/websocket/ahp/`). It must not introduce a second connection
