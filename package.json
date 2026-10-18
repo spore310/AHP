@@ -24,6 +24,7 @@
     "validate": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build"
   },
   "dependencies": {
+    "@microsoft/agent-host-protocol": "1.0.0",
     "jose": "6.2.12",
     "zod": "4.6.5"
   },

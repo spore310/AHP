@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@microsoft/agent-host-protocol':
+        specifier: 1.0.0
+        version: 1.0.0
       jose:
         specifier: 6.2.12
         version: 6.2.12
@@ -131,6 +134,9 @@ packages:
 
   '@keyv/serialize@1.1.1':
     resolution: {integrity: sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA==}
+
+  '@microsoft/agent-host-protocol@1.0.0':
+    resolution: {integrity: sha512-swjikGoqZ/bv3Mn4vkkLzwpmS/j9tV7Aas7ruD2a/R3KVsUlokwCJNSET57mdsmZLMnrawDaCr/ctufbpjE4iA==}
 
   '@oxc-project/types@0.154.0':
     resolution: {integrity: sha512-KYOUGQFlLWR+s4QMV2Q9ko38TZm7EdO87Qm7rvZLqk/webse/cDjtyxKhg/47l0byCbs/k46LT8qc4PKjAikzA==}
@@ -953,6 +959,8 @@ snapshots:
       keyv: 5.6.0
 
   '@keyv/serialize@1.1.1': {}
+
+  '@microsoft/agent-host-protocol@1.0.0': {}
 
   '@oxc-project/types@0.154.0': {}
 
