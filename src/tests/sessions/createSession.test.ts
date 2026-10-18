@@ -131,6 +131,12 @@ describe("createSession: lifecycle", () => {
 
     expect(envelopes).toEqual([
       { channel: uri, action: { type: "session/ready" }, serverSeq: 1, origin: undefined },
+      {
+        channel: "ahp-root://",
+        action: { type: "root/activeSessionsChanged", activeSessions: 1 },
+        serverSeq: 2,
+        origin: undefined,
+      },
     ]);
 
     const timestamp = TEST_NOW().toISOString();
@@ -177,6 +183,12 @@ describe("createSession: lifecycle", () => {
         serverSeq: 1,
         origin: undefined,
       },
+      {
+        channel: "ahp-root://",
+        action: { type: "root/activeSessionsChanged", activeSessions: 1 },
+        serverSeq: 2,
+        origin: undefined,
+      },
     ]);
     expect(catalogue.map((notification) => notification.method)).toEqual([
       "root/sessionAdded",
@@ -199,6 +211,10 @@ describe("createSession: lifecycle", () => {
     expect(envelopes[0]?.action).toEqual({
       type: "session/creationFailed",
       error: { errorType: "sessionStartFailed", message: "Session backend failed to start." },
+    });
+    expect(envelopes[1]?.action).toEqual({
+      type: "root/activeSessionsChanged",
+      activeSessions: 1,
     });
     expect(JSON.stringify(envelopes)).not.toContain("kaboom");
     expect(factory.getSessionSnapshot(uri)?.state.creationError).toEqual({

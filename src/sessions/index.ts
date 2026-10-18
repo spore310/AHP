@@ -9,8 +9,10 @@ export {
   SessionsDisposingError,
   SessionsError,
 } from "./helpers/errors";
+export { createSessionConfig } from "./helpers/configuration";
 export { createSessionsFactory } from "./helpers/factory";
-export { createSequenceAllocator } from "./helpers/sequence";
+export { createActionSequence, createSequenceAllocator } from "./helpers/sequence";
+export type { ActionSequence } from "./helpers/sequence";
 
 export { sessionUriSchema } from "./types";
 export type {

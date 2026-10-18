@@ -25,3 +25,49 @@ export function buildSessionSummary(record: SessionRecord): SessionSummary {
       : { workingDirectories: state.workingDirectories }),
   };
 }
+
+/**
+ * Mutable catalogue fields that changed between two summaries.
+ *
+ * Identity fields (`resource`, `provider`, `createdAt`) are never included.
+ */
+export function changedSessionSummaryFields(
+  before: SessionSummary,
+  after: SessionSummary,
+): Partial<SessionSummary> {
+  const changes: Partial<SessionSummary> = {};
+
+  if (before.title !== after.title) {
+    changes.title = after.title;
+  }
+  if (before.status !== after.status) {
+    changes.status = after.status;
+  }
+  if (before.modifiedAt !== after.modifiedAt) {
+    changes.modifiedAt = after.modifiedAt;
+  }
+  if (before.activity !== after.activity) {
+    changes.activity = after.activity;
+  }
+  if (!sameWorkingDirectories(before.workingDirectories, after.workingDirectories)) {
+    changes.workingDirectories = after.workingDirectories;
+  }
+
+  return changes;
+}
+
+function sameWorkingDirectories(
+  before: SessionSummary["workingDirectories"],
+  after: SessionSummary["workingDirectories"],
+): boolean {
+  if (before === after) {
+    return true;
+  }
+  if (before === undefined || after === undefined) {
+    return false;
+  }
+  if (before.length !== after.length) {
+    return false;
+  }
+  return before.every((directory, index) => directory === after[index]);
+}

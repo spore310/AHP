@@ -1,7 +1,6 @@
 import type {
   ActionEnvelope,
   AgentInfo,
-  SessionAction,
   SessionAddedParams,
   SessionConfigSchema,
   SessionState,
@@ -10,6 +9,7 @@ import type {
 import { z } from "zod";
 
 import { SESSION_URI_PREFIX } from "./constants";
+import type { ActionSequence } from "./helpers/sequence";
 
 /**
  * Schema for a session channel URI (`ahp-session:/<id>`). The identifier is
@@ -189,11 +189,23 @@ export interface SessionsFactoryOptions {
   /** Clock used for session timestamps. Defaults to the system clock. */
   readonly now?: () => Date;
   /**
-   * Host-owned allocator for the one connection-wide action sequence. Inject a
-   * shared allocator when the host publishes other channels' actions onto the
-   * same stream. Defaults to a fresh monotonic allocator for this factory.
+   * Shared action-sequence port. The same instance may be injected into other
+   * producers so envelopes stay on one cursor. When omitted, the factory creates
+   * its own. `getCurrentServerSeq()` reads `current()` and never allocates.
+   */
+  readonly sequence?: ActionSequence;
+  /**
+   * Legacy allocator adapter. Used only when {@link sequence} is omitted. The
+   * adapter's `current()` tracks calls this factory makes, not other producers
+   * that invoke the same function directly. Prefer {@link sequence}.
    */
   readonly nextServerSeq?: () => number;
+  /**
+   * Creates the live-session registry for this factory. Invoked once at
+   * construction. Defaults to the in-memory registry. This is a synchronous
+   * live-state port, not a database.
+   */
+  readonly registryFactory?: () => SessionRegistry;
   /**
    * Receives sanitized lifecycle diagnostics, such as a detached late backend
    * cleanup failure. Never receives exception text or stacks. Defaults to
@@ -222,11 +234,18 @@ export interface SessionsFactory {
   getCurrentServerSeq(): number;
   /** Agent descriptors for every registered provider, for the root channel catalogue. */
   listAgents(): AgentInfo[];
-  /** Dispatch an action envelope on the host-owned stream. */
+  /**
+   * Dispatch a client action against a live session.
+   *
+   * Validates `clientSeq` and the action payload before looking up the target.
+   * Supported baseline actions are reduced once and emitted as an accepted
+   * envelope. Valid-but-unsupported pinned actions are not reduced and do not
+   * emit an accepted envelope.
+   */
   dispatchAction(params: {
     readonly channel: string;
-    readonly clientSeq: number;
-    readonly action: SessionAction;
+    readonly clientSeq: unknown;
+    readonly action: unknown;
     readonly clientId: string;
   }): ActionEnvelope;
   /** Subscribes to root catalogue events. Returns an unsubscribe function. */

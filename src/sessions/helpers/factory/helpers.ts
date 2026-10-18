@@ -1,10 +1,24 @@
-import type { ActionEnvelope } from "@microsoft/agent-host-protocol";
+import { AhpErrorCodes, JsonRpcErrorCodes, type ActionEnvelope } from "@microsoft/agent-host-protocol";
 
+import { ACTION_TYPE_ROOT_ACTIVE_SESSIONS_CHANGED, ROOT_CHANNEL_URI } from "@sessions/constants";
 import { executeCreateSession } from "@sessions/createSession";
-import { SessionsDisposingError } from "@sessions/helpers/errors";
+import {
+  BASELINE_UNSUPPORTED_ACTION_REASON,
+  isBaselineSupportedSessionAction,
+  parseClientSeq,
+  parseClientSessionAction,
+  toClientSessionAction,
+  toSupportedSessionAction,
+} from "@sessions/helpers/actions";
+import { SessionsDisposingError, SessionsError } from "@sessions/helpers/errors";
 import { createInMemorySessionRegistry } from "@sessions/helpers/registry";
-import { createSequenceAllocator } from "@sessions/helpers/sequence";
+import {
+  adaptSequenceAllocator,
+  createActionSequence,
+  type ActionSequence,
+} from "@sessions/helpers/sequence";
 import { applySessionAction, buildSessionSnapshot } from "@sessions/helpers/state";
+import { buildSessionSummary, changedSessionSummaryFields } from "@sessions/helpers/summary";
 import type {
   CatalogueNotification,
   SessionProvider,
@@ -27,9 +41,12 @@ import type {
 export function createSessionsFactory(options: SessionsFactoryOptions): SessionsFactory {
   const providers = buildProviderMap(options.providers);
   const defaultProviderId = resolveDefaultProviderId(options, providers);
-  const sessions = createInMemorySessionRegistry();
+  const sessions = options.registryFactory === undefined
+    ? createInMemorySessionRegistry()
+    : options.registryFactory();
   const now = options.now ?? ((): Date => new Date());
-  const nextServerSeq = options.nextServerSeq ?? createSequenceAllocator();
+  const sequence = resolveActionSequence(options);
+  const nextServerSeq = (): number => sequence.next();
 
   const catalogueListeners = new Set<(notification: CatalogueNotification) => void>();
   const envelopeListeners = new Set<(envelope: ActionEnvelope) => void>();
@@ -73,9 +90,25 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
    * attached backend, collecting failures. Backends still starting are skipped:
    * their completion detects the cleared registry and disposes itself detached.
    */
+  const emitActiveSessionsChanged = (): void => {
+    const envelope: ActionEnvelope = {
+      channel: ROOT_CHANNEL_URI,
+      action: {
+        type: ACTION_TYPE_ROOT_ACTIVE_SESSIONS_CHANGED,
+        activeSessions: sessions.size,
+      },
+      serverSeq: sequence.next(),
+      origin: undefined,
+    };
+    deliver(envelopeListeners, envelope);
+  };
+
   async function performDispose(): Promise<void> {
     const records = sessions.records();
     sessions.clear();
+    if (records.length > 0) {
+      emitActiveSessionsChanged();
+    }
     catalogueListeners.clear();
     envelopeListeners.clear();
 
@@ -109,7 +142,12 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
       if (shutdown !== null) {
         return Promise.reject(new SessionsDisposingError());
       }
-      return executeCreateSession(dependencies, params);
+      const previousCount = sessions.size;
+      return executeCreateSession(dependencies, params).then(() => {
+        if (sessions.size !== previousCount) {
+          emitActiveSessionsChanged();
+        }
+      });
     },
     getSessionSnapshot: (sessionUri: string): SessionSnapshot | undefined => {
       const record = sessions.get(sessionUri);
@@ -118,33 +156,64 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
     listSessionSnapshots: (): SessionSnapshot[] => {
       return sessions.records().map((record) => buildSessionSnapshot(record));
     },
-    getCurrentServerSeq: (): number => {
-      const records = sessions.records();
-      if (records.length === 0) {
-        return 0;
-      }
-      return records.reduce((max, record) => Math.max(max, record.serverSeq), 0);
-    },
+    getCurrentServerSeq: (): number => sequence.current(),
     listAgents: () => [...providers.values()].map((provider) => structuredClone(provider.agentInfo)),
     onCatalogueNotification: (listener) => subscribe(catalogueListeners, listener),
     onSessionEnvelope: (listener) => subscribe(envelopeListeners, listener),
     dispatchAction: ({ channel, clientSeq, action, clientId }) => {
-      const record = sessions.get(channel);
-      if (record === undefined) {
-        throw new Error(`Session not found: ${channel}`);
+      if (typeof channel !== "string" || channel.length === 0) {
+        throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid dispatchAction channel");
+      }
+      if (typeof clientId !== "string" || clientId.length === 0) {
+        throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid dispatchAction clientId");
       }
 
+      const parsedClientSeq = parseClientSeq(clientSeq);
+      const parsedAction = parseClientSessionAction(action);
+
+      const record = sessions.get(channel);
+      if (record === undefined) {
+        throw new SessionsError(
+          AhpErrorCodes.SessionNotFound,
+          `Session not found: ${channel}`,
+        );
+      }
+
+      if (!isBaselineSupportedSessionAction(parsedAction)) {
+        return {
+          channel,
+          action: toClientSessionAction(parsedAction),
+          serverSeq: sequence.next(),
+          origin: { clientId, clientSeq: parsedClientSeq },
+          rejectionReason: BASELINE_UNSUPPORTED_ACTION_REASON,
+        } satisfies ActionEnvelope;
+      }
+
+      const before = buildSessionSummary(record);
       const envelope = applySessionAction(
         record,
-        action,
+        toSupportedSessionAction(parsedAction),
         now().toISOString(),
         nextServerSeq,
       );
       const stamped = {
         ...envelope,
-        origin: { clientId, clientSeq },
+        origin: { clientId, clientSeq: parsedClientSeq },
       } satisfies ActionEnvelope;
       deliver(envelopeListeners, stamped);
+
+      const changes = changedSessionSummaryFields(before, buildSessionSummary(record));
+      if (Object.keys(changes).length > 0) {
+        deliver(catalogueListeners, {
+          method: "root/sessionSummaryChanged",
+          params: {
+            channel: ROOT_CHANNEL_URI,
+            session: record.sessionUri,
+            changes,
+          },
+        });
+      }
+
       return stamped;
     },
     dispose,
@@ -203,6 +272,16 @@ function resolveDefaultProviderId(
   }
 
   return defaultProviderId;
+}
+
+function resolveActionSequence(options: SessionsFactoryOptions): ActionSequence {
+  if (options.sequence !== undefined) {
+    return options.sequence;
+  }
+  if (options.nextServerSeq !== undefined) {
+    return adaptSequenceAllocator(options.nextServerSeq);
+  }
+  return createActionSequence();
 }
 
 function firstProviderId(providers: ReadonlyMap<string, SessionProvider>): string {

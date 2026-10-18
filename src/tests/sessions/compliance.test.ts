@@ -125,12 +125,13 @@ describe("session state replay conformance", () => {
     }
     expect(finalSnapshot.fromSeq).toBe(1);
     expect(finalSnapshot.state.lifecycle).toBe("ready");
-    expect(envelopes).toHaveLength(1);
+    const sessionEnvelopes = envelopes.filter((envelope) => envelope.channel === uri);
+    expect(sessionEnvelopes).toHaveLength(1);
 
     // A client that starts from the creating snapshot and applies every emitted
-    // action must land exactly on the server's authoritative state.
+    // session action must land exactly on the server's authoritative state.
     let mirrored = creatingSnapshot.state;
-    for (const envelope of envelopes) {
+    for (const envelope of sessionEnvelopes) {
       mirrored = sessionReducer(mirrored, envelope.action as SessionAction);
     }
 
@@ -149,14 +150,19 @@ describe("action sequence allocator", () => {
     await factory.createSession({ channel: firstUri, provider: "mock" });
     await factory.createSession({ channel: secondUri, provider: "mock" });
 
-    expect(envelopes.map((envelope) => envelope.serverSeq)).toEqual([1, 2]);
-    expect(envelopes.map((envelope) => envelope.channel)).toEqual([firstUri, secondUri]);
+    expect(envelopes.map((envelope) => envelope.serverSeq)).toEqual([1, 2, 3, 4]);
+    expect(envelopes.map((envelope) => envelope.channel)).toEqual([
+      firstUri,
+      "ahp-root://",
+      secondUri,
+      "ahp-root://",
+    ]);
 
     // A single connection-wide cursor selects actions after seq 1 regardless of
     // which session produced them.
     const afterFirst = envelopes.filter((envelope) => envelope.serverSeq > 1);
-    expect(afterFirst).toHaveLength(1);
-    expect(afterFirst[0]?.channel).toBe(secondUri);
+    expect(afterFirst.map((envelope) => envelope.serverSeq)).toEqual([2, 3, 4]);
+    expect(afterFirst[2]?.channel).toBe("ahp-root://");
   });
 
   it("uses an injected allocator instead of a per-factory one", async () => {
@@ -171,6 +177,7 @@ describe("action sequence allocator", () => {
     await factory.createSession({ channel: sessionUri("injected-seq") });
 
     expect(envelopes[0]?.serverSeq).toBe(100);
+    expect(envelopes[1]?.serverSeq).toBe(101);
   });
 
   it("keeps catalogue notifications outside the numbered action stream", async () => {
@@ -192,7 +199,7 @@ describe("action sequence allocator", () => {
     for (const notification of catalogue) {
       expect(notification).not.toHaveProperty("serverSeq");
     }
-    expect(envelopes.map((envelope) => envelope.serverSeq)).toEqual([1]);
+    expect(envelopes.map((envelope) => envelope.serverSeq)).toEqual([1, 2]);
     expect(factory.getSessionSnapshot(uri)?.fromSeq).toBe(1);
   });
 });

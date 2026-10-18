@@ -77,6 +77,10 @@ export const ACTION_TYPE_SESSION_IS_ARCHIVED_CHANGED = "session/isArchivedChange
 /** `ActionType.SessionConfigChanged` — session configuration changed. */
 export const ACTION_TYPE_SESSION_CONFIG_CHANGED = "session/configChanged" as ActionType.SessionConfigChanged;
 
+/** `ActionType.RootActiveSessionsChanged` — the non-disposed session count changed. */
+export const ACTION_TYPE_ROOT_ACTIVE_SESSIONS_CHANGED
+  = "root/activeSessionsChanged" as ActionType.RootActiveSessionsChanged;
+
 /**
  * Stable public error for an unexpected backend startup failure.
  *

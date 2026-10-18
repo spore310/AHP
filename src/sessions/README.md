@@ -21,16 +21,23 @@ client-connection adapter; see
 | `createSession/types.ts` | See [`createSession/README.md`](createSession/README.md). |
 | `createSession/helpers.ts` | See [`createSession/README.md`](createSession/README.md). |
 | `createSession/index.ts` | See [`createSession/README.md`](createSession/README.md). |
+| `helpers/configuration/types.ts` | `CreateSessionConfigInput` for `createSessionConfig`. |
+| `helpers/configuration/helpers.ts` | `createSessionConfig`: clone a descriptor and bind a runtime parser. |
+| `helpers/configuration/index.ts` | Re-exports `createSessionConfig`. |
 | `helpers/factory/helpers.ts` | `createSessionsFactory`: wiring, event delivery, and disposal. |
 | `helpers/factory/index.ts` | Re-exports `createSessionsFactory`. |
 | `helpers/registry/helpers.ts` | `createInMemorySessionRegistry`: the live-session store. |
 | `helpers/registry/index.ts` | Re-exports the registry factory. |
-| `helpers/sequence/helpers.ts` | `createSequenceAllocator`: monotonic sequence minting. |
-| `helpers/sequence/index.ts` | Re-exports the allocator. |
+| `helpers/sequence/types.ts` | `ActionSequence`: `next()` / non-allocating `current()`. |
+| `helpers/sequence/helpers.ts` | `createActionSequence`, `createSequenceAllocator`, and the legacy allocator adapter. |
+| `helpers/sequence/index.ts` | Re-exports the sequence port. |
+| `helpers/actions/types.ts` | Runtime schemas for client session actions and `clientSeq`. |
+| `helpers/actions/helpers.ts` | Validation and the baseline support policy for client session actions. |
+| `helpers/actions/index.ts` | Re-exports action validation. |
 | `helpers/state/helpers.ts` | Initial state, `applySessionAction` (reducer + envelope), and `buildSessionSnapshot`. |
 | `helpers/state/index.ts` | Re-exports the state helpers. |
-| `helpers/summary/helpers.ts` | `buildSessionSummary`: catalogue projection. |
-| `helpers/summary/index.ts` | Re-exports the summary builder. |
+| `helpers/summary/helpers.ts` | `buildSessionSummary` and catalogue field diffs. |
+| `helpers/summary/index.ts` | Re-exports the summary helpers. |
 | `helpers/errors/helpers.ts` | The error taxonomy: `SessionsError`, `SessionsDisposingError`, `SessionConfigError`, `SessionStartError`. |
 | `helpers/errors/index.ts` | Re-exports the error classes. |
 | `mock/helpers.ts` | `createMockProvider` / `mockProvider`: deterministic in-process provider. |
@@ -49,18 +56,20 @@ client-connection adapter; see
 - `getCurrentServerSeq(): number`
 - `listAgents(): AgentInfo[]`
 - `dispatchAction({ channel, clientSeq, action, clientId }): ActionEnvelope` —
-  apply a client-dispatched action through the protocol reducer and return its
-  host-sequenced envelope.
+  validate the client action, then apply a supported baseline mutation through
+  the protocol reducer. Missing targets throw `SessionsError` with
+  `SessionNotFound`. Valid-but-unsupported pinned actions are not reduced and
+  do not emit an accepted envelope.
 - `onCatalogueNotification(listener): () => void`
 - `onSessionEnvelope(listener): () => void`
 - `dispose(): Promise<void>`
 
-Options: `providers` (required), `defaultProviderId`, `now`, `nextServerSeq`,
-`onDiagnostic`.
+Options: `providers` (required), `defaultProviderId`, `now`, `sequence`,
+`nextServerSeq` (legacy adapter), `registryFactory`, `onDiagnostic`.
 
 Errors: `SessionsError`, `SessionsDisposingError`, `SessionConfigError`,
-`SessionStartError`. Sequence: `createSequenceAllocator`. Schema:
-`sessionUriSchema`, `createSessionParamsSchema`.
+`SessionStartError`. Sequence: `createActionSequence`, `createSequenceAllocator`.
+Schema: `sessionUriSchema`, `createSessionParamsSchema`.
 
 ## 5-Minute Usage
 
@@ -89,7 +98,7 @@ Implement a provider. A provider owns the agent backend, advertises an
 `agentInfo`, and may expose a configuration contract. It never touches the wire:
 
 ```ts
-import { SessionConfigError, type SessionProvider } from "@sessions";
+import { createActionSequence, SessionConfigError, type SessionProvider } from "@sessions";
 
 const provider: SessionProvider = {
   providerId: "local",
@@ -114,7 +123,7 @@ const factory = createSessionsFactory({
   providers: [provider],
   defaultProviderId: "local",
   now: () => new Date("2026-01-01T00:00:00.000Z"),
-  nextServerSeq: createSequenceAllocator(100),
+  sequence: createActionSequence(100),
   onDiagnostic: (diagnostic) => logger.warn(diagnostic),
 });
 ```
@@ -127,14 +136,14 @@ action stream so sequence numbers stay monotonic and gap-free:
 
 ```ts
 import {
-  createSequenceAllocator,
+  createActionSequence,
   createSessionsFactory,
   mockProvider,
   ROOT_CHANNEL_URI,
 } from "@sessions";
 
-const nextServerSeq = createSequenceAllocator();
-const factory = createSessionsFactory({ providers: [mockProvider], nextServerSeq });
+const sequence = createActionSequence();
+const factory = createSessionsFactory({ providers: [mockProvider], sequence });
 
 factory.onSessionEnvelope((envelope) => {
   // envelope: { channel, action, serverSeq, origin }
@@ -163,9 +172,15 @@ than publishing a stale `session/ready`.
   [`src/tests/sessions/compliance.test.ts`](../tests/sessions/compliance.test.ts)
   checks the mirrors against the package's runtime enums. Never read a
   `const enum` member directly here.
+- **Baseline client actions.** This host applies `session/titleChanged`,
+  `session/isReadChanged`, and `session/isArchivedChanged`. The other pinned
+  client-dispatchable session actions are validated and rejected without a
+  reducer application or accepted envelope. MCP, tools, working-directory, and
+  mutable-config behavior are not implemented here.
 - **`applySessionAction` is the only mutation path.** State changes only through
-  the protocol reducer; the sequence comes from the injected allocator, never
-  from the record.
+  the protocol reducer; the sequence comes from the injected port, never from
+  the record. `getCurrentServerSeq()` reads `sequence.current()` even after
+  disposal or an empty registry.
 - **Snapshots and delivered events are `structuredClone`d** per consumer, so an
   in-process caller cannot mutate authoritative state or affect another
   observer.
@@ -188,7 +203,9 @@ than publishing a stale `session/ready`.
 
 | Test | Pins |
 | ---- | ---- |
+| [`src/tests/sessions/configuration.test.ts`](../tests/sessions/configuration.test.ts) | `createSessionConfig` descriptor protection, parser defaults, required/type/enum/unknown-key rejection, and sanitized unexpected parser failures. |
 | [`src/tests/sessions/factory.test.ts`](../tests/sessions/factory.test.ts) | Construction guards, queries, listener unsubscribe, snapshot/observer isolation, and the full disposal lifecycle including late backends and reused URIs. |
+| [`src/tests/sessions/dispatch.test.ts`](../tests/sessions/dispatch.test.ts) | Missing-target errors, malformed title/read/archive payloads, `clientSeq` non-coercion, unsupported actions, sequence cursor, and summary/count projections. |
 | [`src/tests/sessions/compliance.test.ts`](../tests/sessions/compliance.test.ts) | Protocol-literal mirrors against the package runtime enums, catalogue/state conformance through the protocol reducer, and the single gap-free action sequence. |
 | [`src/tests/sessions/createSession.test.ts`](../tests/sessions/createSession.test.ts) | See [`createSession/README.md`](createSession/README.md). |
 

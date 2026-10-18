@@ -338,7 +338,7 @@ describe("sessions factory: observer isolation", () => {
 
     expect(starts).toEqual([uri]);
     expect(factory.getSessionSnapshot(uri)?.state.lifecycle).toBe("ready");
-    expect(envelopes).toHaveLength(1);
+    expect(envelopes.filter((envelope) => envelope.channel === uri)).toHaveLength(1);
     expect(envelopes[0]?.action).toEqual({ type: "session/ready" });
   });
 
@@ -375,7 +375,7 @@ describe("sessions factory: disposal lifecycle", () => {
 
     expect(disposed).toEqual([uri]);
     expect(factory.getSessionSnapshot(uri)).toBeUndefined();
-    expect(envelopes).toEqual([]);
+    expect(envelopes.filter((envelope) => envelope.channel === uri)).toEqual([]);
   });
 
   it("continues cleanup when one disposer rejects and reports the failure", async () => {
@@ -467,7 +467,7 @@ describe("sessions factory: disposal lifecycle", () => {
     ]);
     // The sink receives stable identifiers only, never exception detail.
     expect(JSON.stringify(diagnostics)).not.toContain("sensitive");
-    expect(envelopes).toEqual([]);
+    expect(envelopes.filter((envelope) => envelope.channel === failingUri || envelope.channel === okUri)).toEqual([]);
   });
 
   it("keeps a late backend from an older record away from a reused URI", async () => {
@@ -489,9 +489,9 @@ describe("sessions factory: disposal lifecycle", () => {
     await Promise.all([staleCreation, reusedCreation]);
 
     expect(disposeAttempts).toEqual([uri]);
-    expect(envelopes).toHaveLength(1);
-    expect(envelopes[0]?.channel).toBe(uri);
-    expect(envelopes[0]?.action).toEqual({ type: "session/ready" });
+    const sessionEnvelopes = envelopes.filter((envelope) => envelope.channel === uri);
+    expect(sessionEnvelopes).toHaveLength(1);
+    expect(sessionEnvelopes[0]?.action).toEqual({ type: "session/ready" });
     expect(factory.getSessionSnapshot(uri)?.state.lifecycle).toBe("ready");
   });
 });
