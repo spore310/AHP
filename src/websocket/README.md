@@ -12,8 +12,9 @@ handlers are injected.
 | `types.ts` | `WebSocketServerOptions`, `WebSocketServerHandle`, `JsonRpcHandler(s)`, and `WebSocketConnectionContext`. |
 | `helpers/server.ts` | `createWebSocketServer`: HTTP/WebSocket lifecycle, upgrade checks, heartbeat, and shutdown. |
 | `helpers/connection.ts` | `attachConnection`: per-socket framing, JSON-RPC dispatch, and error mapping. |
+| `helpers/ahp.ts` | Native AHP method layer: initialize, negotiate protocol version, subscription fan-out, session creation, dispatch action, and root/session notification broadcasts. |
 | `constants.ts` | Default path, heartbeat interval, payload limit, close codes, shutdown deadline, and the `426` status. |
-| `index.ts` | Public surface: `createWebSocketServer`, the option/handle types, and constants. |
+| `index.ts` | Public surface: `createAHPHandlers`, `createWebSocketServer`, the option/handle types, and constants. |
 
 ## API
 

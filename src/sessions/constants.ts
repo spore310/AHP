@@ -38,6 +38,45 @@ export const ACTION_TYPE_SESSION_READY = "session/ready" as ActionType.SessionRe
 /** `ActionType.SessionCreationFailed` — backend failed to initialise. */
 export const ACTION_TYPE_SESSION_CREATION_FAILED = "session/creationFailed" as ActionType.SessionCreationFailed;
 
+/** `ActionType.SessionTitleChanged` — a user-facing session title was changed. */
+export const ACTION_TYPE_SESSION_TITLE_CHANGED = "session/titleChanged" as ActionType.SessionTitleChanged;
+
+/** `ActionType.SessionActiveClientSet` — a client became the active actor for a session. */
+export const ACTION_TYPE_SESSION_ACTIVE_CLIENT_SET = "session/activeClientSet" as ActionType.SessionActiveClientSet;
+
+/** `ActionType.SessionActiveClientRemoved` — a client was removed from the active set. */
+export const ACTION_TYPE_SESSION_ACTIVE_CLIENT_REMOVED = "session/activeClientRemoved" as ActionType.SessionActiveClientRemoved;
+
+/** `ActionType.SessionWorkingDirectorySet` — a session working directory was set. */
+export const ACTION_TYPE_SESSION_WORKING_DIRECTORY_SET = "session/workingDirectorySet" as ActionType.SessionWorkingDirectorySet;
+
+/** `ActionType.SessionWorkingDirectoryRemoved` — a session working directory entry was removed. */
+export const ACTION_TYPE_SESSION_WORKING_DIRECTORY_REMOVED = "session/workingDirectoryRemoved" as ActionType.SessionWorkingDirectoryRemoved;
+
+/** `ActionType.SessionWorkingDirectoryReplaced` — a session working directory set replaced an existing one. */
+export const ACTION_TYPE_SESSION_WORKING_DIRECTORY_REPLACED = "session/workingDirectoryReplaced" as ActionType.SessionWorkingDirectoryReplaced;
+
+/** `ActionType.SessionCustomizationToggled` — a customization toggle changed. */
+export const ACTION_TYPE_SESSION_CUSTOMIZATION_TOGGLED = "session/customizationToggled" as ActionType.SessionCustomizationToggled;
+
+/** `ActionType.SessionMcpServerStartRequested` — a server start was requested. */
+export const ACTION_TYPE_SESSION_MCP_SERVER_START_REQUESTED = "session/mcpServerStartRequested" as ActionType.SessionMcpServerStartRequested;
+
+/** `ActionType.SessionMcpServerStopRequested` — a server stop was requested. */
+export const ACTION_TYPE_SESSION_MCP_SERVER_STOP_REQUESTED = "session/mcpServerStopRequested" as ActionType.SessionMcpServerStopRequested;
+
+/** `ActionType.SessionMcpServerBackgroundRequested` — a background MCP server request was issued. */
+export const ACTION_TYPE_SESSION_MCP_SERVER_BACKGROUND_REQUESTED = "session/mcpServerBackgroundRequested" as ActionType.SessionMcpServerBackgroundRequested;
+
+/** `ActionType.SessionIsReadChanged` — the read/unread session flag changed. */
+export const ACTION_TYPE_SESSION_IS_READ_CHANGED = "session/isReadChanged" as ActionType.SessionIsReadChanged;
+
+/** `ActionType.SessionIsArchivedChanged` — the archived flag changed. */
+export const ACTION_TYPE_SESSION_IS_ARCHIVED_CHANGED = "session/isArchivedChanged" as ActionType.SessionIsArchivedChanged;
+
+/** `ActionType.SessionConfigChanged` — session configuration changed. */
+export const ACTION_TYPE_SESSION_CONFIG_CHANGED = "session/configChanged" as ActionType.SessionConfigChanged;
+
 /**
  * Stable public error for an unexpected backend startup failure.
  *

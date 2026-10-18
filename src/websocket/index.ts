@@ -16,4 +16,5 @@ export type {
   WebSocketServerOptions,
 } from "./types";
 
+export { createAHPHandlers } from "./helpers/ahp";
 export { createWebSocketServer } from "./helpers/server";

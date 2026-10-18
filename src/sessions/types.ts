@@ -1,6 +1,7 @@
 import type {
   ActionEnvelope,
   AgentInfo,
+  SessionAction,
   SessionAddedParams,
   SessionConfigSchema,
   SessionState,
@@ -215,8 +216,19 @@ export interface SessionsFactory {
   createSession(params: unknown): Promise<void>;
   /** Current snapshot for a session, or `undefined` when no such session exists. */
   getSessionSnapshot(sessionUri: string): SessionSnapshot | undefined;
+  /** Root-state snapshot of all sessions, or the current server-sequence cursor. */
+  listSessionSnapshots(): SessionSnapshot[];
+  /** Current host-owned action sequence value. */
+  getCurrentServerSeq(): number;
   /** Agent descriptors for every registered provider, for the root channel catalogue. */
   listAgents(): AgentInfo[];
+  /** Dispatch an action envelope on the host-owned stream. */
+  dispatchAction(params: {
+    readonly channel: string;
+    readonly clientSeq: number;
+    readonly action: SessionAction;
+    readonly clientId: string;
+  }): ActionEnvelope;
   /** Subscribes to root catalogue events. Returns an unsubscribe function. */
   onCatalogueNotification(listener: (notification: CatalogueNotification) => void): () => void;
   /** Subscribes to session action envelopes. Returns an unsubscribe function. */

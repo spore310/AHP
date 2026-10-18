@@ -45,7 +45,12 @@ client-connection adapter; see
   `root/sessionAdded`, then settle with `session/ready` or
   `session/creationFailed`.
 - `getSessionSnapshot(sessionUri): SessionSnapshot | undefined`
+- `listSessionSnapshots(): SessionSnapshot[]`
+- `getCurrentServerSeq(): number`
 - `listAgents(): AgentInfo[]`
+- `dispatchAction({ channel, clientSeq, action, clientId }): ActionEnvelope` —
+  apply a client-dispatched action through the protocol reducer and return its
+  host-sequenced envelope.
 - `onCatalogueNotification(listener): () => void`
 - `onSessionEnvelope(listener): () => void`
 - `dispose(): Promise<void>`

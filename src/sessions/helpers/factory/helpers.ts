@@ -4,7 +4,7 @@ import { executeCreateSession } from "@sessions/createSession";
 import { SessionsDisposingError } from "@sessions/helpers/errors";
 import { createInMemorySessionRegistry } from "@sessions/helpers/registry";
 import { createSequenceAllocator } from "@sessions/helpers/sequence";
-import { buildSessionSnapshot } from "@sessions/helpers/state";
+import { applySessionAction, buildSessionSnapshot } from "@sessions/helpers/state";
 import type {
   CatalogueNotification,
   SessionProvider,
@@ -115,9 +115,38 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
       const record = sessions.get(sessionUri);
       return record === undefined ? undefined : buildSessionSnapshot(record);
     },
+    listSessionSnapshots: (): SessionSnapshot[] => {
+      return sessions.records().map((record) => buildSessionSnapshot(record));
+    },
+    getCurrentServerSeq: (): number => {
+      const records = sessions.records();
+      if (records.length === 0) {
+        return 0;
+      }
+      return records.reduce((max, record) => Math.max(max, record.serverSeq), 0);
+    },
     listAgents: () => [...providers.values()].map((provider) => structuredClone(provider.agentInfo)),
     onCatalogueNotification: (listener) => subscribe(catalogueListeners, listener),
     onSessionEnvelope: (listener) => subscribe(envelopeListeners, listener),
+    dispatchAction: ({ channel, clientSeq, action, clientId }) => {
+      const record = sessions.get(channel);
+      if (record === undefined) {
+        throw new Error(`Session not found: ${channel}`);
+      }
+
+      const envelope = applySessionAction(
+        record,
+        action,
+        now().toISOString(),
+        nextServerSeq,
+      );
+      const stamped = {
+        ...envelope,
+        origin: { clientId, clientSeq },
+      } satisfies ActionEnvelope;
+      deliver(envelopeListeners, stamped);
+      return stamped;
+    },
     dispose,
   };
 }

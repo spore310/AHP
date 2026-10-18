@@ -3,7 +3,9 @@ import { fileURLToPath } from "node:url";
 
 import { loadEnv } from "@env";
 
-import { createWebSocketServer, type WebSocketServerHandle } from "./websocket";
+import { createAHPHandlers, createWebSocketServer, type WebSocketServerHandle } from "./websocket";
+import { createSessionsFactory } from "@sessions";
+import { mockProvider } from "@sessions/mock";
 
 export const APP_NAME = "Agent Hosting Protocol";
 
@@ -32,13 +34,12 @@ export const installShutdownHandlers = (server: WebSocketServerHandle): (() => v
 
 export const main = async (): Promise<void> => {
   const config = loadEnv();
+  const factory = createSessionsFactory({ providers: [mockProvider] });
 
   const server = createWebSocketServer({
     host: config.AGENT_HOSTING_PROTOCOL_WEBSOCKET_HOST,
     port: config.AGENT_HOSTING_PROTOCOL_WEBSOCKET_PORT,
-    handlers: {
-      ping: () => null,
-    },
+    handlers: createAHPHandlers(factory),
   });
 
   const address = await server.start();
