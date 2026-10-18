@@ -221,7 +221,6 @@ Library/framework details should remain behind owned interfaces where portabilit
 Application and domain logic should not unnecessarily depend on:
 
 - Framework request objects
-- JOSE internals
 - ORM-specific entities
 - HTTP response types
 

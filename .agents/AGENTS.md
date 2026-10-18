@@ -28,7 +28,6 @@ Established:
 - Vite 8.3.4
 - Vitest 5.0.5
 - vite-node 6.0.0
-- JOSE 6.2.12
 - Zod 4.6.5
 - @microsoft/agent-host-protocol 1.0.0
 
