@@ -39,7 +39,8 @@ export interface WebSocketServerOptions {
   readonly handlers?: JsonRpcHandlers;
   /**
    * Upper bound on graceful shutdown before remaining clients and connections
-   * are force-closed. Defaults to `WEBSOCKET_SHUTDOWN_TIMEOUT_MS`.
+   * are force-closed. Shutdown still waits for local release after a forced
+   * close. Defaults to `WEBSOCKET_SHUTDOWN_TIMEOUT_MS`.
    */
   readonly shutdownTimeoutMs?: number;
 }
@@ -47,18 +48,21 @@ export interface WebSocketServerOptions {
 /** Handle returned by {@link createWebSocketServer}. */
 export interface WebSocketServerHandle {
   /**
-   * Begin listening and resolve with the bound address. Repeated calls while
-   * listening resolve with the same address; calls after {@link stop} reject,
-   * because a stopped server is terminal.
+   * Begin listening and resolve with the bound address. Concurrent calls share
+   * a single bind. A start still in flight when {@link stop} runs rejects, and
+   * a stopped server is terminal, so later calls reject.
    */
   start(): Promise<AddressInfo>;
   /**
    * Stop accepting new upgrades, close every client, and release HTTP
-   * resources. Concurrent and repeated calls share one completion, so no caller
-   * observes shutdown as finished before cleanup finishes; if a client or an
-   * open HTTP request outlasts the configured deadline, remaining resources are
-   * force-closed and the promise still resolves. Rejects only if a forced close
-   * throws.
+   * resources. Concurrent and repeated calls share one completion.
+   *
+   * The promise resolves only after local resources are released: no listener,
+   * client, or heartbeat remains afterwards. Clients and open HTTP requests get
+   * up to the configured deadline to close; once it elapses, remaining
+   * resources are force-closed and shutdown still awaits local release. A slow
+   * remote peer is not guaranteed to observe the close handshake. Rejects only
+   * if a forced close throws.
    */
   stop(): Promise<void>;
 }

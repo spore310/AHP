@@ -1,8 +1,8 @@
 import { request as httpRequest } from "node:http";
-import { connect as netConnect } from "node:net";
+import { connect as netConnect, createServer as netCreateServer } from "node:net";
 import { AhpErrorCodes, JsonRpcErrorCodes } from "@microsoft/agent-host-protocol";
 import WebSocket from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { RpcError } from "@/jsonrpc";
@@ -10,6 +10,7 @@ import { createSessionsFactory, SESSION_URI_PREFIX } from "@/sessions";
 import { mockProvider } from "@/sessions/mock";
 import {
   createWebSocketServer,
+  WEBSOCKET_HEARTBEAT_INTERVAL_MS,
   type JsonRpcHandlers,
   type WebSocketServerHandle,
 } from "@/websocket";
@@ -108,6 +109,47 @@ const httpStatus = (port: number, path: string): Promise<number> =>
     );
     outgoing.on("error", reject);
     outgoing.end();
+  });
+
+/** Binds a throwaway TCP listener so a test can target a known-occupied port. */
+const occupiedPort = async (): Promise<{ port: number; release: () => Promise<void> }> => {
+  const probe = netCreateServer();
+  await new Promise<void>((resolve) => {
+    probe.listen(0, "127.0.0.1", resolve);
+  });
+  const address = probe.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("probe server did not bind to a TCP address");
+  }
+  return {
+    port: address.port,
+    release: () =>
+      new Promise<void>((resolve) => {
+        probe.close(() => {
+          resolve();
+        });
+      }),
+  };
+};
+
+/** Reserves an ephemeral port and releases it for the server under test. */
+const reservePort = async (): Promise<number> => {
+  const { port, release } = await occupiedPort();
+  await release();
+  return port;
+};
+
+/** Resolves `true` when nothing accepts TCP connections on the port. */
+const isPortClosed = (port: number): Promise<boolean> =>
+  new Promise((resolve) => {
+    const socket = netConnect(port, "127.0.0.1");
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.once("error", () => {
+      resolve(true);
+    });
   });
 
 /** An error carrying a `code` that is not the owned RPC error type. */
@@ -424,6 +466,93 @@ describe("WebSocket error mapping", () => {
   });
 });
 
+describe("WebSocket lifecycle", () => {
+  it("leaves no listener behind when stop() races the initial bind", async () => {
+    const intervalSpy = vi.spyOn(globalThis, "setInterval");
+    try {
+      const port = await reservePort();
+      const server = createWebSocketServer({ host: "127.0.0.1", port, handlers: {} });
+      servers.push(server);
+
+      const [startResult, stopResult] = await Promise.allSettled([
+        server.start(),
+        server.stop(),
+      ]);
+
+      expect(startResult.status).toBe("rejected");
+      expect(stopResult.status).toBe("fulfilled");
+      expect(await isPortClosed(port)).toBe(true);
+      // The bind never reached `listening`, so no heartbeat was ever scheduled.
+      const heartbeatIntervals = intervalSpy.mock.calls.filter(
+        (call) => call[1] === WEBSOCKET_HEARTBEAT_INTERVAL_MS,
+      );
+      expect(heartbeatIntervals).toHaveLength(0);
+    } finally {
+      intervalSpy.mockRestore();
+    }
+  });
+
+  it("is terminal when stop() precedes start()", async () => {
+    const server = createWebSocketServer({ host: "127.0.0.1", port: 0, handlers: {} });
+    servers.push(server);
+
+    await server.stop();
+
+    await expect(server.start()).rejects.toThrow(/shutdown has begun/);
+  });
+
+  it("shares one bind across concurrent start() calls", async () => {
+    const server = createWebSocketServer({ host: "127.0.0.1", port: 0, handlers: {} });
+    servers.push(server);
+
+    const first = server.start();
+    const second = server.start();
+    expect(second).toBe(first);
+
+    const [firstAddress, secondAddress] = await Promise.all([first, second]);
+    expect(firstAddress.port).toBe(secondAddress.port);
+    expect((await server.start()).port).toBe(firstAddress.port);
+  });
+
+  it("retries a bind after the first attempt fails", async () => {
+    const { port, release } = await occupiedPort();
+    const server = createWebSocketServer({ host: "127.0.0.1", port, handlers: {} });
+    servers.push(server);
+
+    await expect(server.start()).rejects.toThrow();
+
+    await release();
+
+    const address = await server.start();
+    expect(address.port).toBe(port);
+  });
+
+  it("clears the heartbeat timer when a listening server stops", async () => {
+    const intervalSpy = vi.spyOn(globalThis, "setInterval");
+    const clearSpy = vi.spyOn(globalThis, "clearInterval");
+    try {
+      const server = createWebSocketServer({ host: "127.0.0.1", port: 0, handlers: {} });
+      servers.push(server);
+      await server.start();
+
+      const heartbeatTimers = intervalSpy.mock.calls
+        .map((call, index) => ({ delay: call[1], result: intervalSpy.mock.results[index] }))
+        .filter((entry) => entry.delay === WEBSOCKET_HEARTBEAT_INTERVAL_MS)
+        .map((entry) => entry.result?.value as NodeJS.Timeout | undefined);
+      expect(heartbeatTimers).toHaveLength(1);
+
+      await server.stop();
+
+      for (const timer of heartbeatTimers) {
+        expect(clearSpy.mock.calls.some(([cleared]) => cleared === timer)).toBe(true);
+      }
+    } finally {
+      intervalSpy.mockRestore();
+      clearSpy.mockRestore();
+    }
+  });
+});
+
 describe("WebSocket shutdown", () => {
   it("shares one shutdown promise across concurrent and repeated stops", async () => {
     const { server } = await startServer({});
@@ -474,5 +603,7 @@ describe("WebSocket shutdown", () => {
     socket.destroy();
 
     expect(elapsed).toBeLessThan(2000);
+    // Forced closure still awaits local release before stop() resolves.
+    expect(await isPortClosed(address.port)).toBe(true);
   });
 });

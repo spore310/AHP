@@ -18,17 +18,31 @@ import type {
 } from "../types";
 import { attachConnection } from "./connection";
 
-/** Lifecycle of a server: bound lazily and stopped terminally. */
-type WebSocketLifecycle = "idle" | "listening" | "stopping" | "stopped";
+/**
+ * Lifecycle of a server: bound lazily, single-flight while starting, and
+ * terminal once stopped.
+ *
+ * Legal transitions:
+ *
+ *     idle -> starting -> listening -> stopping -> stopped
+ *                \------------------> stopping -> stopped
+ *     idle -------------------------> stopped
+ *
+ * `stop()` enters `stopping` synchronously, before any in-flight bind settles,
+ * so a late `listening` callback can never restore `listening` after shutdown
+ * has begun.
+ */
+type WebSocketLifecycle = "idle" | "starting" | "listening" | "stopping" | "stopped";
 
 /**
  * Create a WebSocket server that speaks JSON-RPC over text frames.
  *
  * Binds lazily: nothing listens until {@link WebSocketServerHandle.start}.
  * Upgrades are accepted only on the configured path, oversized frames are
- * rejected, and idle connections are dropped by a heartbeat ping. Shutdown is
- * shared and bounded: concurrent stops await the same cleanup, and a slow
- * client or open HTTP request cannot stall it past the configured deadline.
+ * rejected, and idle connections are dropped by a heartbeat ping. Startup and
+ * shutdown are single-flight: concurrent starts share one bind, concurrent
+ * stops share one cleanup, and a stop that races a start leaves no listener
+ * behind.
  */
 export const createWebSocketServer = (
   options: WebSocketServerOptions,
@@ -47,6 +61,11 @@ export const createWebSocketServer = (
     response.writeHead(WEBSOCKET_HTTP_UPGRADE_REQUIRED, { Connection: "close" });
     response.end();
   });
+  // Hold a permanent error listener so a late server-level error (after the
+  // one-shot listen handlers are removed) cannot crash the process. Socket
+  // errors are handled per connection, and startup failures by the pending
+  // bind.
+  httpServer.on("error", () => undefined);
   const wsServer = new WebSocketServer({
     noServer: true,
     maxPayload: WEBSOCKET_MAX_PAYLOAD_BYTES,
@@ -116,55 +135,182 @@ export const createWebSocketServer = (
     attachConnection(socket, handlers);
   });
 
+  const startHeartbeat = (): void => {
+    heartbeatTimer = setInterval(() => {
+      for (const socket of wsServer.clients) {
+        if (!alive.has(socket)) {
+          socket.terminate();
+          continue;
+        }
+        alive.delete(socket);
+        socket.ping();
+      }
+    }, WEBSOCKET_HEARTBEAT_INTERVAL_MS);
+  };
+
+  const stopHeartbeat = (): void => {
+    if (heartbeatTimer !== null) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  };
+
   const beginListening = (): Promise<AddressInfo> =>
     new Promise((resolve, reject) => {
       const onError = (error: Error): void => {
         httpServer.off("listening", onListening);
-        lifecycle = "idle";
-        startPromise = null;
+        if (lifecycle === "starting") {
+          lifecycle = "idle";
+        }
         reject(error);
       };
       const onListening = (): void => {
         httpServer.off("error", onError);
         const address = httpServer.address();
         if (address === null || typeof address === "string") {
+          if (lifecycle === "starting") {
+            lifecycle = "idle";
+          }
           reject(new Error("WebSocket server did not bind to a TCP address"));
           return;
         }
 
         boundAddress = address;
-        lifecycle = "listening";
-        heartbeatTimer = setInterval(() => {
-          for (const socket of wsServer.clients) {
-            if (!alive.has(socket)) {
-              socket.terminate();
-              continue;
-            }
-            alive.delete(socket);
-            socket.ping();
-          }
-        }, WEBSOCKET_HEARTBEAT_INTERVAL_MS);
+        if (lifecycle !== "starting") {
+          // stop() began while the bind was completing. The listener must not
+          // become usable, and shutdown closes it once this promise settles.
+          reject(new Error("WebSocket server began stopping before it finished starting."));
+          return;
+        }
 
+        lifecycle = "listening";
+        startHeartbeat();
         resolve(address);
       };
 
       httpServer.once("error", onError);
       httpServer.once("listening", onListening);
-      httpServer.listen(port, host);
+      try {
+        httpServer.listen(port, host);
+      } catch (error) {
+        httpServer.off("error", onError);
+        httpServer.off("listening", onListening);
+        if (lifecycle === "starting") {
+          lifecycle = "idle";
+        }
+        reject(error instanceof Error ? error : new Error("WebSocket server failed to listen."));
+      }
     });
 
   const start = (): Promise<AddressInfo> => {
     if (lifecycle === "stopping" || lifecycle === "stopped") {
       return Promise.reject(
-        new Error("WebSocket server cannot be restarted after it has stopped."),
+        new Error("WebSocket server cannot be started after shutdown has begun."),
       );
     }
     if (lifecycle === "listening" && boundAddress !== null) {
       return Promise.resolve(boundAddress);
     }
+    if (lifecycle === "starting" && startPromise !== null) {
+      return startPromise;
+    }
 
-    startPromise ??= beginListening();
-    return startPromise;
+    lifecycle = "starting";
+    const attempt = beginListening();
+    startPromise = attempt;
+    void attempt.then(undefined, () => {
+      // A bind failure returns to `idle` so a later start can retry; shutdown
+      // keeps the settled attempt for its own bookkeeping.
+      if (lifecycle === "idle") {
+        startPromise = null;
+      }
+    });
+    return attempt;
+  };
+
+  const forceClose = (): void => {
+    for (const socket of wsServer.clients) {
+      socket.terminate();
+    }
+    wsServer.close();
+    httpServer.closeAllConnections();
+    httpServer.close();
+  };
+
+  const closeResources = async (): Promise<void> => {
+    const closed = new Promise<void>((resolve) => {
+      wsServer.close(() => {
+        httpServer.close(() => {
+          resolve();
+        });
+      });
+    });
+
+    interface DeadlineOutcome {
+      readonly timedOut: true;
+      readonly error?: Error;
+    }
+
+    let timer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<DeadlineOutcome>((resolve) => {
+      timer = setTimeout(() => {
+        try {
+          forceClose();
+          resolve({ timedOut: true });
+        } catch (error) {
+          resolve({
+            timedOut: true,
+            error: error instanceof Error ? error : new Error("Forced close failed."),
+          });
+        }
+      }, shutdownTimeoutMs);
+    });
+
+    let outcome: DeadlineOutcome | { readonly timedOut: false };
+    try {
+      outcome = await Promise.race([
+        closed.then((): { readonly timedOut: false } => ({ timedOut: false })),
+        deadline,
+      ]);
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+    }
+
+    if (outcome.timedOut) {
+      if (outcome.error !== undefined) {
+        throw outcome.error;
+      }
+      // Forced closure was initiated for clients or requests that outlasted
+      // the deadline. Await local release confirmation so a resolved stop()
+      // means the listener and its connections are actually gone; a remote
+      // peer observing the close handshake is not guaranteed.
+      await closed;
+    }
+  };
+
+  const performShutdown = async (): Promise<void> => {
+    const wasStarting = lifecycle === "starting";
+    lifecycle = "stopping";
+    stopHeartbeat();
+
+    // A bind still in flight must settle before shutdown can close it, so a
+    // listener cannot appear after stop() reports completion. beginListening
+    // rejects its promise when it observes `stopping`.
+    if (wasStarting && startPromise !== null) {
+      await startPromise.catch(() => undefined);
+    }
+
+    for (const socket of wsServer.clients) {
+      socket.close(WEBSOCKET_CLOSE_GOING_AWAY, "Server shutting down");
+    }
+
+    if (boundAddress !== null) {
+      await closeResources();
+    }
+
+    lifecycle = "stopped";
   };
 
   const stop = (): Promise<void> => {
@@ -172,69 +318,5 @@ export const createWebSocketServer = (
     return shutdownPromise;
   };
 
-  const performShutdown = async (): Promise<void> => {
-    if (lifecycle === "stopped") {
-      return;
-    }
-    const wasListening = lifecycle === "listening";
-    lifecycle = "stopping";
-
-    if (heartbeatTimer !== null) {
-      clearInterval(heartbeatTimer);
-      heartbeatTimer = null;
-    }
-
-    for (const socket of wsServer.clients) {
-      socket.close(WEBSOCKET_CLOSE_GOING_AWAY, "Server shutting down");
-    }
-
-    if (wasListening) {
-      const closed = new Promise<void>((resolve) => {
-        wsServer.close(() => {
-          httpServer.close(() => {
-            resolve();
-          });
-        });
-      });
-
-      await withDeadline(closed, shutdownTimeoutMs, () => {
-        for (const socket of wsServer.clients) {
-          socket.terminate();
-        }
-        wsServer.close();
-        httpServer.closeAllConnections();
-        httpServer.close();
-      });
-    }
-
-    lifecycle = "stopped";
-  };
-
   return { start, stop };
 };
-
-/**
- * Awaits a shutdown promise, invoking {@link onTimeout} and resolving once the
- * deadline elapses so forced cleanup can complete.
- */
-async function withDeadline(
-  promise: Promise<void>,
-  timeoutMs: number,
-  onTimeout: () => void,
-): Promise<void> {
-  let timer: NodeJS.Timeout | undefined;
-  const deadline = new Promise<void>((resolve) => {
-    timer = setTimeout(() => {
-      onTimeout();
-      resolve();
-    }, timeoutMs);
-  });
-
-  try {
-    await Promise.race([promise, deadline]);
-  } finally {
-    if (timer !== undefined) {
-      clearTimeout(timer);
-    }
-  }
-}
