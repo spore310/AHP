@@ -1,3 +1,4 @@
+import { parseUnknownJson } from "@jsonrpc";
 import WebSocket from "ws";
 
 const frameToText = (data: WebSocket.RawData): string => {
@@ -17,7 +18,7 @@ export class FrameLog {
 
   constructor(socket: WebSocket) {
     socket.on("message", (data) => {
-      this.frames.push(JSON.parse(frameToText(data)) as unknown);
+      this.frames.push(parseUnknownJson(frameToText(data)));
       const pending = this.waiters;
       this.waiters = [];
       for (const wake of pending) {

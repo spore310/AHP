@@ -16,7 +16,7 @@ silently accepting a different wire shape. See
 | File | Responsibility |
 | ---- | -------------- |
 | `types.ts` | Zod schemas and inferred types for requests, notifications, and responses, plus compile-time conformance with the protocol package. |
-| `helpers.ts` | `RpcError`, the `isRpcError` narrowing, and `JSONRPC_PUBLIC_ERROR_CODES`. |
+| `helpers.ts` | `RpcError`, the `isRpcError` narrowing, `parseUnknownJson`, and `JSONRPC_PUBLIC_ERROR_CODES`. |
 | `constants.ts` | Standard JSON-RPC 2.0 error codes and the `"2.0"` version literal. |
 | `index.ts` | Public surface: schemas, types, the error type, and the code allowlist. |
 

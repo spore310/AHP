@@ -5,7 +5,7 @@ import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { RpcError } from "@jsonrpc";
+import { parseUnknownJson, RpcError } from "@jsonrpc";
 import { createSessionsFactory, SESSION_URI_PREFIX } from "@sessions";
 import { mockProvider } from "@sessions/mock";
 import {
@@ -51,7 +51,7 @@ const readJson = (socket: WebSocket): Promise<unknown> =>
   new Promise((resolve, reject) => {
     const onMessage = (data: WebSocket.RawData): void => {
       cleanup();
-      resolve(JSON.parse(frameToText(data)));
+      resolve(parseUnknownJson(frameToText(data)));
     };
     const onClose = (): void => {
       cleanup();

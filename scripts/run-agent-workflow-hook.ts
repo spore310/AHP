@@ -1,3 +1,5 @@
+import { parseUnknownJson } from "@jsonrpc";
+
 import { handleHookEvent } from "./agent-workflow-hook";
 
 async function main(): Promise<void> {
@@ -9,7 +11,7 @@ async function main(): Promise<void> {
 
   let input: unknown;
   try {
-    input = JSON.parse(rawInput);
+    input = parseUnknownJson(rawInput);
   } catch {
     process.stderr.write("The native workflow hook received invalid JSON.\n");
     process.stdout.write(

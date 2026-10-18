@@ -12,6 +12,7 @@ import {
   JSONRPC_PUBLIC_ERROR_CODES,
   JSONRPC_VERSION,
   jsonRpcMessageSchema,
+  parseUnknownJson,
   type JsonRpcErrorResponse,
   type JsonRpcMessage,
   type JsonRpcNotification,
@@ -219,7 +220,7 @@ const handleFrame = async (
 ): Promise<void> => {
   let decoded: unknown;
   try {
-    decoded = JSON.parse(text);
+    decoded = parseUnknownJson(text);
   } catch {
     context.send(errorResponse(null, JSONRPC_PARSE_ERROR, "Parse error"));
     return;

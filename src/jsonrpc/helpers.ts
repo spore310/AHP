@@ -28,6 +28,17 @@ export class RpcError extends Error {
 export const isRpcError = (value: unknown): value is RpcError => value instanceof RpcError;
 
 /**
+ * Parses JSON text into `unknown`.
+ *
+ * `JSON.parse` is typed as `any`. This is the only place that absorbs that
+ * result; callers validate the value before use.
+ */
+export function parseUnknownJson(text: string): unknown {
+  // eslint-disable-next-line no-restricted-syntax -- the any boundary lives here so lint can reject every other JSON.parse assignment
+  return JSON.parse(text) as unknown;
+}
+
+/**
  * Error codes the transport is willing to surface to clients.
  *
  * Codes come only from the protocol's own code sets, so a capability cannot

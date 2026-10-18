@@ -12,6 +12,7 @@ import {
 import {
   JSONRPC_VERSION,
   jsonRpcParamsSchema,
+  parseUnknownJson,
   RpcError,
   type JsonRpcMessage,
   type JsonRpcParams,
@@ -42,7 +43,7 @@ import {
 } from "./types";
 
 const toParams = (value: unknown): JsonRpcParams => (
-  jsonRpcParamsSchema.parse(JSON.parse(JSON.stringify(value)))
+  jsonRpcParamsSchema.parse(parseUnknownJson(JSON.stringify(value)))
 );
 
 const actionNotification = (envelope: ActionEnvelope): JsonRpcMessage => ({

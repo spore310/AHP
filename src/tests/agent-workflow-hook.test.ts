@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
+import { parseUnknownJson } from "@jsonrpc";
 import { handleHookEvent } from "../../scripts/agent-workflow-hook";
 
 const cleanRepository = vi.fn(() => ({ root: "C:\\repo", dirty: false }));
@@ -127,7 +128,8 @@ describe("agent workflow native hook", () => {
       process.cwd(),
       ".github/hooks/ahp-agent-workflow.json",
     );
-    const config = JSON.parse(readFileSync(configPath, "utf8")) as {
+    const parsedConfig = parseUnknownJson(readFileSync(configPath, "utf8"));
+    const config = parsedConfig as {
       version: number;
       hooks: Record<
         string,
@@ -179,7 +181,7 @@ describe("agent workflow native hook", () => {
 
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(0);
-    const output = JSON.parse(result.stdout) as { additionalContext: string };
+    const output = parseUnknownJson(result.stdout) as { additionalContext: string };
     expect(output.additionalContext).toContain("architecture-aware-delivery");
   });
 });
