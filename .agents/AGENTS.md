@@ -10,8 +10,9 @@ Use the smallest relevant instruction set.
 | `.agents/skills/code-review-documentation-drift/SKILL.md` | Required instruction-driven procedure for explicit code reviews    |
 | `.agents/skills/documentation/SKILL.md`                   | Documentation creation and updates                                 |
 | `.agents/memory/documentation-review.md`                  | Tracked project setting for the documentation-update prompt        |
-| `docs/gates/` (not yet created)                                             | Gate descriptions and dated validation evidence                    |
-| `docs/plans/` (not yet created)                                             | Plans; honor the status and scope declared by each document        |
+| `docs/gates/`                                             | Gate descriptions and dated validation evidence                    |
+| `docs/plans/`                                             | Plans; honor the status and scope declared by each document        |
+| `docs/architecture/`, `docs/technical/`                   | Cross-cutting architecture and verified technical behavior         |
 
 Read relevant documentation before changing an affected capability.
 
@@ -152,6 +153,10 @@ Detailed rules belong to [the documentation skill](skills/documentation/SKILL.md
 
 Do not duplicate them here.
 
+Every source file under `src/` and `env/` must be mapped by its module
+`README.md`; the documentation gate enforces this. See
+[`../docs/gates/documentation.md`](../docs/gates/documentation.md).
+
 ---
 
 # Code Review Documentation Drift
@@ -227,7 +232,16 @@ Commits must:
 # Validation
 
 Run `pnpm validate` before considering a change complete. It runs lint,
-typecheck, tests, and the production build, in that order.
+typecheck, tests, the documentation gate, and the production build, in that
+order:
+
+```text
+pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run docs:check && pnpm run build
+```
+
+The documentation gate (`pnpm docs:check`) fails when a `src/` or `env/` source
+file is not mapped by its module `README.md`. See
+[`docs/gates/documentation.md`](gates/documentation.md).
 
 # Guiding Principle
 

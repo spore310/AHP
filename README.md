@@ -14,16 +14,21 @@ Early scaffold. The host is **not** yet a complete AHP endpoint.
 
 Implemented today:
 
-- `src/jsonrpc/` — JSON-RPC 2.0 message schemas, the owned `RpcError`, and the
-  allowlisted error codes the transport may surface.
-- `src/sessions/` — the session engine: a `SessionsFactory` that owns a
-  provider registry, an in-memory session store, a shared action-sequence
-  allocator, and a `SessionProvider` contract for agent backends. It is
-  AHP-aware but transport-agnostic.
-- `src/websocket/` — a JSON-RPC-over-WebSocket server. It dispatches a handler
-  map, contains malformed upgrades, and shuts down idempotently within a
-  deadline.
-- `env/` — environment validation.
+- [`src/jsonrpc/`](src/jsonrpc/README.md) — JSON-RPC 2.0 message schemas, the
+  owned `RpcError`, and the allowlisted error codes the transport may surface.
+- [`src/sessions/`](src/sessions/README.md) — the session engine: a
+  `SessionsFactory` that owns a provider registry, an in-memory session store, a
+  shared action-sequence allocator, and a `SessionProvider` contract for agent
+  backends. It is AHP-aware but transport-agnostic.
+- [`src/websocket/`](src/websocket/README.md) — a JSON-RPC-over-WebSocket server.
+  It dispatches a handler map, contains malformed upgrades, and shuts down
+  idempotently within a deadline.
+- [`env/`](env/README.md) — environment validation, required before startup.
+
+Each capability has a colocated `README.md`. See [`src/README.md`](src/README.md)
+for the capability map and
+[`docs/architecture/capabilities.md`](docs/architecture/capabilities.md) for how
+they compose.
 
 Currently **only the `ping` method is wired** into the running server. Session
 creation, subscription, and chat are not exposed on the wire yet.
@@ -39,8 +44,8 @@ Planned milestones, in order:
 5. Reconnect and replay.
 
 Chat channels and turn execution remain later server capabilities and are not
-yet specified. See [`docs/ProvidersPlan.md`](docs/ProvidersPlan.md) for the
-client-connection milestones.
+yet specified. See [`docs/plans/ProvidersPlan.md`](docs/plans/ProvidersPlan.md)
+for the client-connection milestones.
 
 ## Requirements
 
@@ -58,6 +63,9 @@ pnpm start
 `pnpm start` runs the built entrypoint at `dist/index.js`.
 
 ## Environment variables
+
+Configuration is validated before the server starts; see
+[`env/README.md`](env/README.md).
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -86,5 +94,10 @@ Example exchange:
 pnpm lint         # ESLint
 pnpm typecheck    # tsc --noEmit
 pnpm test         # Vitest
-pnpm validate     # lint, typecheck, test, build — run before completing a change
+pnpm docs:check   # documentation coverage gate
+pnpm validate     # lint, typecheck, test, docs:check, build — run before completing a change
 ```
+
+Module documentation is required: every `src/` and `env/` source file must be
+mapped by its module `README.md`. See
+[`docs/gates/documentation.md`](docs/gates/documentation.md).

@@ -20,7 +20,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "validate": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build"
+    "docs:check": "vite-node scripts/check-docs.ts",
+    "validate": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run docs:check && pnpm run build"
   },
   "dependencies": {
     "@microsoft/agent-host-protocol": "1.0.0",
