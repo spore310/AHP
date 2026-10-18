@@ -40,9 +40,11 @@ export interface ProviderSessionInput {
  * A provider's session configuration contract: the descriptor clients see and
  * the single runtime parser the factory invokes.
  *
- * The provider owns both halves so the advertised schema and the accepted
- * values cannot drift, and so unknown-key/required/default policy is decided by
- * the session type rather than assumed from an empty JSON Schema.
+ * The provider owns both halves and is responsible for keeping them in step:
+ * the advertised schema must describe what `parse` accepts. Co-locating them
+ * (or deriving one from the other) makes that easier; per-provider conformance
+ * tests are the enforcement point. Unknown-key, required, and default policy is
+ * decided by the session type rather than assumed from an empty JSON Schema.
  */
 export interface SessionConfigContract {
   /** Descriptor advertised to clients for this session type's configuration. */
@@ -133,6 +135,22 @@ export interface SessionRegistry {
 }
 
 /**
+ * Sanitized lifecycle diagnostic for a failure no caller can observe.
+ *
+ * Late backend cleanup happens detached from any request, so failures are
+ * reported to the host's diagnostic sink instead of being published or thrown.
+ * The payload carries stable identifiers only: never exception text or stacks.
+ */
+export interface SessionsDiagnostic {
+  /** Stable machine-readable event name. */
+  readonly event: "lateBackendDisposeFailed";
+  /** Session whose detached backend could not be released. */
+  readonly sessionUri: string;
+  /** Error constructor name, or `"unknown"` for non-`Error` throwables. */
+  readonly errorType: string;
+}
+
+/**
  * Internal wiring shared by the session methods. Not part of the public surface
  * exported from `@/sessions`.
  */
@@ -145,6 +163,8 @@ export interface SessionsDependencies {
   readonly nextServerSeq: () => number;
   emitCatalogueNotification(notification: CatalogueNotification): void;
   emitSessionEnvelope(envelope: ActionEnvelope): void;
+  /** Reports a sanitized lifecycle diagnostic to the host-owned sink. */
+  reportDiagnostic(diagnostic: SessionsDiagnostic): void;
 }
 
 /**
@@ -173,6 +193,12 @@ export interface SessionsFactoryOptions {
    * same stream. Defaults to a fresh monotonic allocator for this factory.
    */
   readonly nextServerSeq?: () => number;
+  /**
+   * Receives sanitized lifecycle diagnostics, such as a detached late backend
+   * cleanup failure. Never receives exception text or stacks. Defaults to
+   * dropping diagnostics; the composition root can route them to its logger.
+   */
+  readonly onDiagnostic?: (diagnostic: SessionsDiagnostic) => void;
 }
 
 /** Transport-agnostic session factory: the host's only way to create sessions. */
@@ -183,6 +209,8 @@ export interface SessionsFactory {
    * then settles its lifecycle with `session/ready` or `session/creationFailed`.
    *
    * Rejects with a {@link SessionsError} carrying the AHP/JSON-RPC error code.
+   * While {@link dispose} is in flight, creation is rejected with
+   * `SessionsDisposingError` rather than registered after the disposal boundary.
    */
   createSession(params: unknown): Promise<void>;
   /** Current snapshot for a session, or `undefined` when no such session exists. */
@@ -193,6 +221,18 @@ export interface SessionsFactory {
   onCatalogueNotification(listener: (notification: CatalogueNotification) => void): () => void;
   /** Subscribes to session action envelopes. Returns an unsubscribe function. */
   onSessionEnvelope(listener: (envelope: ActionEnvelope) => void): () => void;
-  /** Disposes every live backend and drops all sessions and listeners. */
+  /**
+   * Disposes the factory: rejects new sessions while in flight, drops the
+   * registry and all listeners, and releases every backend attached before
+   * disposal began. Concurrent and repeated calls share one completion, and
+   * the factory accepts sessions again once disposal settles.
+   *
+   * A backend that is still starting when disposal begins is not awaited (a
+   * non-cooperative provider cannot be cancelled). When it eventually
+   * resolves, it is released detached, its disposal failure is reported
+   * through {@link SessionsFactoryOptions.onDiagnostic}, and nothing is
+   * published. Rejects with an `AggregateError` when one or more attached
+   * backends fail to release; every backend is still attempted.
+   */
   dispose(): Promise<void>;
 }

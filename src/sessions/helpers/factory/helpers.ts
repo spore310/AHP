@@ -1,6 +1,7 @@
 import type { ActionEnvelope } from "@microsoft/agent-host-protocol";
 
 import { executeCreateSession } from "@/sessions/createSession";
+import { SessionsDisposingError } from "@/sessions/helpers/errors";
 import { createInMemorySessionRegistry } from "@/sessions/helpers/registry";
 import { createSequenceAllocator } from "@/sessions/helpers/sequence";
 import { buildSessionSnapshot } from "@/sessions/helpers/state";
@@ -8,6 +9,7 @@ import type {
   CatalogueNotification,
   SessionProvider,
   SessionsDependencies,
+  SessionsDiagnostic,
   SessionsFactory,
   SessionsFactoryOptions,
   SessionSnapshot,
@@ -46,6 +48,15 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
     emitSessionEnvelope: (envelope: ActionEnvelope): void => {
       deliver(envelopeListeners, envelope);
     },
+    reportDiagnostic: (diagnostic: SessionsDiagnostic): void => {
+      // A broken sink must not break lifecycle cleanup, and detached callbacks
+      // have no caller to observe a throw.
+      try {
+        options.onDiagnostic?.(diagnostic);
+      } catch {
+        // Isolated intentionally.
+      }
+    },
   };
 
   const dispose = (): Promise<void> => {
@@ -57,6 +68,11 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
     return shutdown;
   };
 
+  /**
+   * Clears the registry and listeners synchronously, then releases every
+   * attached backend, collecting failures. Backends still starting are skipped:
+   * their completion detects the cleared registry and disposes itself detached.
+   */
   async function performDispose(): Promise<void> {
     const records = sessions.records();
     sessions.clear();
@@ -86,7 +102,15 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
   }
 
   return {
-    createSession: (params: unknown): Promise<void> => executeCreateSession(dependencies, params),
+    createSession: (params: unknown): Promise<void> => {
+      // Disposal clears the registry and listeners and releases attached
+      // backends; accepting a session now would register it after that
+      // boundary. Reuse is allowed again once disposal settles.
+      if (shutdown !== null) {
+        return Promise.reject(new SessionsDisposingError());
+      }
+      return executeCreateSession(dependencies, params);
+    },
     getSessionSnapshot: (sessionUri: string): SessionSnapshot | undefined => {
       const record = sessions.get(sessionUri);
       return record === undefined ? undefined : buildSessionSnapshot(record);

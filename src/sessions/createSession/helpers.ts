@@ -150,8 +150,14 @@ async function startBackend(
     if (dependencies.sessions.get(record.sessionUri) !== record) {
       try {
         await backend.dispose();
-      } catch {
-        // Best-effort cleanup: the session is already gone.
+      } catch (error) {
+        // Detached cleanup has no caller to observe it, so report a sanitized
+        // lifecycle diagnostic instead of publishing anything.
+        dependencies.reportDiagnostic({
+          event: "lateBackendDisposeFailed",
+          sessionUri: record.sessionUri,
+          errorType: error instanceof Error ? error.name : "unknown",
+        });
       }
       return;
     }

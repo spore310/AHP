@@ -1,4 +1,5 @@
 import type { ErrorInfo } from "@microsoft/agent-host-protocol";
+import { JsonRpcErrorCodes } from "@microsoft/agent-host-protocol";
 
 import { RpcError } from "@/jsonrpc";
 
@@ -15,6 +16,23 @@ export class SessionsError extends RpcError {
   constructor(code: number, message: string) {
     super(code, message);
     this.name = "SessionsError";
+  }
+}
+
+/**
+ * Raised when a session is requested while the factory is disposing.
+ *
+ * Disposal rejects new sessions instead of racing cleanup; once disposal
+ * settles, the factory accepts sessions again. The carried code is a public
+ * JSON-RPC code, so the transport surfaces it unchanged.
+ */
+export class SessionsDisposingError extends SessionsError {
+  constructor() {
+    super(
+      JsonRpcErrorCodes.InternalError,
+      "The sessions factory is shutting down and cannot accept new sessions.",
+    );
+    this.name = "SessionsDisposingError";
   }
 }
 
