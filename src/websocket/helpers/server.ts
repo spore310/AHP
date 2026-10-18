@@ -52,6 +52,8 @@ export const createWebSocketServer = (
     port,
     path = WEBSOCKET_DEFAULT_PATH,
     handlers = {},
+    onConnection,
+    beforeDispatch,
     shutdownTimeoutMs = WEBSOCKET_SHUTDOWN_TIMEOUT_MS,
   } = options;
 
@@ -132,7 +134,8 @@ export const createWebSocketServer = (
     socket.on("pong", () => {
       alive.add(socket);
     });
-    attachConnection(socket, handlers);
+    const context = attachConnection(socket, handlers, beforeDispatch);
+    onConnection?.(context);
   });
 
   const startHeartbeat = (): void => {

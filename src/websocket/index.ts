@@ -11,10 +11,16 @@ export {
 export type {
   JsonRpcHandler,
   JsonRpcHandlers,
+  JsonRpcInvocation,
+  ReplySettlement,
   WebSocketConnectionContext,
+  WebSocketDispatchContext,
   WebSocketServerHandle,
   WebSocketServerOptions,
 } from "./types";
 
-export { createAHPHandlers } from "./helpers/ahp";
+export { createAHPBinding, createAHPBinding as createAHPConnectionModule } from "./helpers/ahp";
+export type { AHPBinding, AHPConnectionModuleOptions, AHPDiagnostic } from "./helpers/ahp";
+export { createAHPServer } from "./helpers/host";
+export type { AHPServerHandle, AHPServerOptions } from "./helpers/host";
 export { createWebSocketServer } from "./helpers/server";

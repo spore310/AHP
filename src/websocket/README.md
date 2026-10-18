@@ -1,9 +1,13 @@
 # WebSocket Transport
 
-A JSON-RPC 2.0 server over WebSocket text frames. It owns the network boundary:
-upgrade handling, per-socket framing and dispatch, heartbeat, and race-safe
-start/stop with a bounded shutdown. It knows nothing about sessions; method
-handlers are injected.
+A JSON-RPC 2.0 server over WebSocket text frames. The raw transport owns the
+network boundary: upgrade handling, per-socket framing and dispatch, heartbeat,
+and race-safe start/stop with a bounded shutdown. It is session-agnostic;
+method handlers are injected.
+
+The contained AHP binding is AHP-aware. It owns connection lifetime,
+initialization, subscriptions, and fan-out. Session policy stays in `@sessions`;
+the binding does not import sockets into that module.
 
 ## Files
 
@@ -11,10 +15,16 @@ handlers are injected.
 | ---- | -------------- |
 | `types.ts` | `WebSocketServerOptions`, `WebSocketServerHandle`, `JsonRpcHandler(s)`, and `WebSocketConnectionContext`. |
 | `helpers/server.ts` | `createWebSocketServer`: HTTP/WebSocket lifecycle, upgrade checks, heartbeat, and shutdown. |
-| `helpers/connection.ts` | `attachConnection`: per-socket framing, JSON-RPC dispatch, and error mapping. |
-| `helpers/ahp.ts` | Native AHP method layer: initialize, negotiate protocol version, subscription fan-out, session creation, dispatch action, and root/session notification broadcasts. |
+| `helpers/connection.ts` | `attachConnection`: per-socket framing, serialized dispatch, reply settlement, and error mapping. |
+| `helpers/ahp/index.ts` | Public AHP binding exports. |
+| `helpers/ahp/helpers.ts` | `createAHPBinding`: initialize, subscriptions, publication, and connection lifetime. |
+| `helpers/ahp/types.ts` | AHP peer, adapter, and parameter schemas. |
+| `helpers/ahp/constants.ts` | Method kinds, baseline action inventory, and pending-delivery limit. |
+| `helpers/host/index.ts` | Public composed-host exports. |
+| `helpers/host/helpers.ts` | `createAHPServer`: owns sequence injection, sessions, binding, transport, and shutdown. |
+| `helpers/host/types.ts` | `AHPServerOptions` and `AHPServerHandle`. |
 | `constants.ts` | Default path, heartbeat interval, payload limit, close codes, shutdown deadline, and the `426` status. |
-| `index.ts` | Public surface: `createAHPHandlers`, `createWebSocketServer`, the option/handle types, and constants. |
+| `index.ts` | Public surface: `createAHPConnectionModule`, `createAHPServer`, `createWebSocketServer`, option/handle types, and constants. |
 
 ## API
 
@@ -27,10 +37,15 @@ handlers are injected.
   - `options.shutdownTimeoutMs` — graceful-shutdown deadline (default `5000`).
 - `handle.start(): Promise<AddressInfo>` — resolves with the bound address.
 - `handle.stop(): Promise<void>` — resolves once local resources are released.
-- `JsonRpcHandler = (params: JsonRpcParams, context: WebSocketConnectionContext) => unknown`
+- `JsonRpcHandler = (params, context, invocation) => unknown`
   - return value → the request's `result`; a thrown value → an error response.
-- `WebSocketConnectionContext.send(message)` — send a JSON-RPC message to this
-  connection.
+  - `invocation.onReplySettled` runs after that invocation's response is enqueued.
+- `WebSocketConnectionContext.send(message)` — enqueue a JSON-RPC message.
+  Returns whether the open socket accepted the frame.
+- `createAHPConnectionModule(factory)` — wire-only handlers plus `onConnection`,
+  `beforeDispatch`, and `dispose`. Cleanup is not an RPC method.
+- `createAHPServer({ host, port, path, sessions })` — composed host. `stop()`
+  releases transport, binding, and sessions. It is terminal.
 
 ## 5-Minute Usage
 
@@ -115,9 +130,9 @@ const server = createWebSocketServer({
   parsed.
 - **`send` is best-effort.** It is a no-op once the socket is no longer open; it
   does not queue messages for a closing connection.
-- **Broadcast is not built here.** A handler sees only its own connection
-  context. Fan-out to many connections requires a registry layered on top; see
-  [`docs/plans/ProvidersPlan.md`](../../docs/plans/ProvidersPlan.md).
+- **The raw transport does not broadcast.** A generic handler sees only its
+  own connection context. The AHP binding, not the socket loop, owns fan-out
+  for root and session subscriptions.
 - **Shutdown is bounded.** Clients get up to `shutdownTimeoutMs` to close, then
   remaining sockets and HTTP connections are force-closed; `stop()` still awaits
   local release. A slow remote peer is not guaranteed to observe the close
@@ -128,6 +143,9 @@ const server = createWebSocketServer({
 | Test | Pins |
 | ---- | ---- |
 | [`src/tests/websocket.test.ts`](../tests/websocket.test.ts) | Request/result and error mapping, parse and invalid-request handling, notification silence, binary-frame close, upgrade path/malformed-target rejection, own-property dispatch, lifecycle (stop-races-bind, terminal stop, shared bind, retry after failure, heartbeat cleanup), and bounded shutdown. |
+| [`src/tests/websocket/ahp.test.ts`](../tests/websocket/ahp.test.ts) | Connection lifetime, single publication, pre-initialize rejection, unsupported-version close, and failed-subscribe rollback. |
+| [`src/tests/websocket/composition.test.ts`](../tests/websocket/composition.test.ts) | Two composed hosts do not share sessions, and a stopped host does not restart. |
+| [`src/tests/websocket/sdk.test.ts`](../tests/websocket/sdk.test.ts) | Installed SDK client initializes, observes catalogue fan-out, and receives one accepted rename. |
 
 ## Related Documentation
 
