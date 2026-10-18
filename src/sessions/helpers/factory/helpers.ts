@@ -2,6 +2,7 @@ import type { ActionEnvelope } from "@microsoft/agent-host-protocol";
 
 import { executeCreateSession } from "@/sessions/createSession";
 import { createInMemorySessionRegistry } from "@/sessions/helpers/registry";
+import { createSequenceAllocator } from "@/sessions/helpers/sequence";
 import { buildSessionSnapshot } from "@/sessions/helpers/state";
 import type {
   CatalogueNotification,
@@ -15,35 +16,74 @@ import type {
 /**
  * Creates the host's session factory.
  *
- * The factory owns the provider registry, the in-memory session store, and the
- * event seams a connection layer subscribes to. It knows nothing about the wire
- * protocol, so it can be composed with any transport.
+ * The factory owns the provider registry, the in-memory session store, the
+ * shared action-sequence allocator, and the event seams a connection layer
+ * subscribes to. It is deliberately AHP-aware (parameters, action envelopes,
+ * snapshots, catalogue methods) but transport-agnostic: it imports no network
+ * or JSON-RPC transport and can be composed behind any transport.
  */
 export function createSessionsFactory(options: SessionsFactoryOptions): SessionsFactory {
   const providers = buildProviderMap(options.providers);
   const defaultProviderId = resolveDefaultProviderId(options, providers);
   const sessions = createInMemorySessionRegistry();
   const now = options.now ?? ((): Date => new Date());
+  const nextServerSeq = options.nextServerSeq ?? createSequenceAllocator();
 
   const catalogueListeners = new Set<(notification: CatalogueNotification) => void>();
   const envelopeListeners = new Set<(envelope: ActionEnvelope) => void>();
+
+  let shutdown: Promise<void> | null = null;
 
   const dependencies: SessionsDependencies = {
     providers,
     defaultProviderId,
     sessions,
     now,
+    nextServerSeq,
     emitCatalogueNotification: (notification: CatalogueNotification): void => {
-      for (const listener of [...catalogueListeners]) {
-        listener(notification);
-      }
+      deliver(catalogueListeners, notification);
     },
     emitSessionEnvelope: (envelope: ActionEnvelope): void => {
-      for (const listener of [...envelopeListeners]) {
-        listener(envelope);
-      }
+      deliver(envelopeListeners, envelope);
     },
   };
+
+  const dispose = (): Promise<void> => {
+    // Share one in-flight shutdown so concurrent callers await the same
+    // cleanup, then reset so a later dispose cleans a reused factory again.
+    shutdown ??= performDispose().finally(() => {
+      shutdown = null;
+    });
+    return shutdown;
+  };
+
+  async function performDispose(): Promise<void> {
+    const records = sessions.records();
+    sessions.clear();
+    catalogueListeners.clear();
+    envelopeListeners.clear();
+
+    const failures: unknown[] = [];
+    for (const record of records) {
+      // A record without a backend is still starting; its completion detects
+      // the cleared registry and disposes itself without publishing.
+      if (record.backend === undefined) {
+        continue;
+      }
+      try {
+        await record.backend.dispose();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        "Failed to dispose one or more session backends.",
+      );
+    }
+  }
 
   return {
     createSession: (params: unknown): Promise<void> => executeCreateSession(dependencies, params),
@@ -51,18 +91,32 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
       const record = sessions.get(sessionUri);
       return record === undefined ? undefined : buildSessionSnapshot(record);
     },
-    listAgents: () => [...providers.values()].map((provider) => provider.agentInfo),
+    listAgents: () => [...providers.values()].map((provider) => structuredClone(provider.agentInfo)),
     onCatalogueNotification: (listener) => subscribe(catalogueListeners, listener),
     onSessionEnvelope: (listener) => subscribe(envelopeListeners, listener),
-    dispose: async (): Promise<void> => {
-      for (const record of sessions.records()) {
-        await record.backend?.dispose();
-      }
-      sessions.clear();
-      catalogueListeners.clear();
-      envelopeListeners.clear();
-    },
+    dispose,
   };
+}
+
+/**
+ * Delivers an isolated copy to each listener.
+ *
+ * Per-listener cloning means a mutating observer cannot change authoritative
+ * state or what later observers receive, and a throwing observer cannot block
+ * other observers or the operation that produced the event. Delivery failures
+ * are dropped here; operational diagnostics belong to the composition root.
+ */
+function deliver<TValue>(
+  listeners: ReadonlySet<(value: TValue) => void>,
+  value: TValue,
+): void {
+  for (const listener of [...listeners]) {
+    try {
+      listener(structuredClone(value));
+    } catch {
+      // Isolated intentionally: a broken subscriber must not veto the caller.
+    }
+  }
 }
 
 function buildProviderMap(

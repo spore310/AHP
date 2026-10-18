@@ -41,17 +41,20 @@ export function createInitialSessionState(input: NewSessionStateInput): SessionS
  * Applies a server-originated action to the record and returns the envelope to
  * broadcast.
  *
- * This is the only path that mutates a session's state and the only place the
- * per-channel `serverSeq` advances, so envelopes stay contiguous and replayable
- * through the protocol reducer.
+ * This is the only path that mutates a session's state. The wire-level sequence
+ * comes from the host's shared {@link SessionsDependencies.nextServerSeq}
+ * allocator rather than from the record, so actions across every session share
+ * one ordered, gap-free stream that an ordinary connection-wide replay cursor
+ * can select from.
  */
 export function applySessionAction(
   record: SessionRecord,
   action: SessionAction,
   modifiedAt: string,
+  nextServerSeq: () => number,
 ): ActionEnvelope {
   record.state = sessionReducer(record.state, action);
-  record.serverSeq += 1;
+  record.serverSeq = nextServerSeq();
   record.modifiedAt = modifiedAt;
 
   return {
@@ -62,11 +65,17 @@ export function applySessionAction(
   };
 }
 
-/** Captures a session snapshot at the record's current `serverSeq`. */
+/**
+ * Captures a session snapshot at the record's current `serverSeq`.
+ *
+ * The state is defensively cloned so an in-process consumer cannot mutate
+ * authoritative state, advance the sequence, or affect another observer by
+ * editing a returned snapshot (including nested arrays and error objects).
+ */
 export function buildSessionSnapshot(record: SessionRecord): SessionSnapshot {
   return {
     resource: record.sessionUri,
-    state: record.state,
+    state: structuredClone(record.state),
     fromSeq: record.serverSeq,
   };
 }

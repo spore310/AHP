@@ -1,4 +1,4 @@
-import type { ActionType, SessionState } from "@microsoft/agent-host-protocol";
+import type { ActionType, ErrorInfo, SessionState } from "@microsoft/agent-host-protocol";
 
 /* eslint-disable @typescript-eslint/no-unsafe-enum-assignment --
  * The mirrored literals below must be asserted to the Microsoft enum types
@@ -37,3 +37,16 @@ export const ACTION_TYPE_SESSION_READY = "session/ready" as ActionType.SessionRe
 
 /** `ActionType.SessionCreationFailed` — backend failed to initialise. */
 export const ACTION_TYPE_SESSION_CREATION_FAILED = "session/creationFailed" as ActionType.SessionCreationFailed;
+
+/**
+ * Stable public error for an unexpected backend startup failure.
+ *
+ * Only a provider's deliberate {@link SessionStartError} maps to a descriptive
+ * payload; any other thrown value collapses to this generic category so
+ * credentials, paths, headers, or service details in an arbitrary exception
+ * never reach a session snapshot or the wire.
+ */
+export const SESSION_START_FAILURE_INFO: ErrorInfo = {
+  errorType: "sessionStartFailed",
+  message: "Session backend failed to start.",
+};

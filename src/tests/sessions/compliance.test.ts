@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
   createSessionParamsSchema,
   createSessionsFactory,
+  createSequenceAllocator,
   SESSION_URI_PREFIX,
   type CatalogueNotification,
 } from "@/sessions";
@@ -134,5 +135,41 @@ describe("session state replay conformance", () => {
     }
 
     expect(mirrored).toEqual(finalSnapshot.state);
+  });
+});
+
+describe("action sequence allocator", () => {
+  it("numbers actions across sessions from one gap-free connection stream", async () => {
+    const factory = createSessionsFactory({ providers: [createMockProvider()], now: TEST_NOW });
+    const envelopes: ActionEnvelope[] = [];
+    factory.onSessionEnvelope((envelope) => envelopes.push(envelope));
+    const firstUri = sessionUri("seq-first");
+    const secondUri = sessionUri("seq-second");
+
+    await factory.createSession({ channel: firstUri, provider: "mock" });
+    await factory.createSession({ channel: secondUri, provider: "mock" });
+
+    expect(envelopes.map((envelope) => envelope.serverSeq)).toEqual([1, 2]);
+    expect(envelopes.map((envelope) => envelope.channel)).toEqual([firstUri, secondUri]);
+
+    // A single connection-wide cursor selects actions after seq 1 regardless of
+    // which session produced them.
+    const afterFirst = envelopes.filter((envelope) => envelope.serverSeq > 1);
+    expect(afterFirst).toHaveLength(1);
+    expect(afterFirst[0]?.channel).toBe(secondUri);
+  });
+
+  it("uses an injected allocator instead of a per-factory one", async () => {
+    const factory = createSessionsFactory({
+      providers: [createMockProvider()],
+      now: TEST_NOW,
+      nextServerSeq: createSequenceAllocator(100),
+    });
+    const envelopes: ActionEnvelope[] = [];
+    factory.onSessionEnvelope((envelope) => envelopes.push(envelope));
+
+    await factory.createSession({ channel: sessionUri("injected-seq") });
+
+    expect(envelopes[0]?.serverSeq).toBe(100);
   });
 });

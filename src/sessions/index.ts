@@ -3,8 +3,9 @@ export { DEFAULT_SESSION_TITLE, ROOT_CHANNEL_URI, SESSION_URI_PREFIX } from "./c
 export { createSessionParamsSchema } from "./createSession";
 export type { CreateSessionParams } from "./createSession";
 
-export { SessionStartError, SessionsError } from "./helpers/errors";
+export { SessionConfigError, SessionStartError, SessionsError } from "./helpers/errors";
 export { createSessionsFactory } from "./helpers/factory";
+export { createSequenceAllocator } from "./helpers/sequence";
 
 export { sessionUriSchema } from "./types";
 export type {
@@ -12,6 +13,7 @@ export type {
   ProviderSessionInput,
   SessionAddedCatalogueNotification,
   SessionBackend,
+  SessionConfigContract,
   SessionProvider,
   SessionRecord,
   SessionRegistry,

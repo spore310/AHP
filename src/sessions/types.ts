@@ -28,8 +28,31 @@ export interface ProviderSessionInput {
   readonly sessionUri: string;
   /** Working directories granted to the session's agent. */
   readonly workingDirectories: readonly string[];
-  /** User-supplied configuration values, already checked against the provider schema. */
+  /**
+   * Configuration normalized by the provider's own
+   * {@link SessionConfigContract.parse}, which the factory invokes before any
+   * session is registered or started.
+   */
   readonly config: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * A provider's session configuration contract: the descriptor clients see and
+ * the single runtime parser the factory invokes.
+ *
+ * The provider owns both halves so the advertised schema and the accepted
+ * values cannot drift, and so unknown-key/required/default policy is decided by
+ * the session type rather than assumed from an empty JSON Schema.
+ */
+export interface SessionConfigContract {
+  /** Descriptor advertised to clients for this session type's configuration. */
+  readonly schema: SessionConfigSchema;
+  /**
+   * Validates and normalizes a candidate configuration. Runs before session
+   * registration and startup; throw {@link SessionConfigError} for input the
+   * provider rejects. The returned object is what `startSession` receives.
+   */
+  parse(config: Readonly<Record<string, unknown>>): Record<string, unknown>;
 }
 
 /** The live backend a provider returns for a created session. */
@@ -42,7 +65,7 @@ export interface SessionBackend {
  * Contract every session type implements.
  *
  * A provider owns one agent backend and never touches the wire protocol: it
- * receives the already-validated session inputs and either resolves with a
+ * receives validated, normalized session inputs and either resolves with a
  * backend or throws {@link SessionStartError} to surface `session/creationFailed`.
  */
 export interface SessionProvider {
@@ -51,10 +74,10 @@ export interface SessionProvider {
   /** Agent descriptor advertised on the root channel. */
   readonly agentInfo: AgentInfo;
   /**
-   * Optional session configuration schema. When absent, the provider accepts no
-   * session configuration and non-empty `createSession.config` is rejected.
+   * Optional session configuration contract. When absent the provider accepts no
+   * session configuration, and non-empty `createSession.config` is rejected.
    */
-  readonly configSchema?: SessionConfigSchema;
+  readonly config?: SessionConfigContract;
   /** Initialises the backend for a new session. Resolves ready, rejects failed. */
   startSession(input: ProviderSessionInput): Promise<SessionBackend>;
 }
@@ -83,7 +106,10 @@ export interface SessionRecord {
   modifiedAt: string;
   /** Authoritative session state, advanced only through the session reducer. */
   state: SessionState;
-  /** Monotonic per-channel sequence stamped on emitted action envelopes. */
+  /**
+   * Latest sequence assigned from the host's shared allocator; `0` before any
+   * action. The record never mints wire-level sequence numbers itself.
+   */
   serverSeq: number;
   /** Backend handle once the provider has started; absent while `creating`. */
   backend?: SessionBackend;
@@ -115,6 +141,8 @@ export interface SessionsDependencies {
   readonly defaultProviderId: string;
   readonly sessions: SessionRegistry;
   readonly now: () => Date;
+  /** Host-owned allocator for the connection-wide action sequence. */
+  readonly nextServerSeq: () => number;
   emitCatalogueNotification(notification: CatalogueNotification): void;
   emitSessionEnvelope(envelope: ActionEnvelope): void;
 }
@@ -139,6 +167,12 @@ export interface SessionsFactoryOptions {
   readonly defaultProviderId?: string;
   /** Clock used for session timestamps. Defaults to the system clock. */
   readonly now?: () => Date;
+  /**
+   * Host-owned allocator for the one connection-wide action sequence. Inject a
+   * shared allocator when the host publishes other channels' actions onto the
+   * same stream. Defaults to a fresh monotonic allocator for this factory.
+   */
+  readonly nextServerSeq?: () => number;
 }
 
 /** Transport-agnostic session factory: the host's only way to create sessions. */
