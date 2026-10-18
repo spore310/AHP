@@ -30,11 +30,17 @@ creation, subscription, and chat are not exposed on the wire yet.
 
 Planned milestones, in order:
 
-1. A mock-backed AHP host: wire `initialize`, `createSession`, and session
-   subscription onto the transport ("Providers & Client Connection Plan",
-   `docs/ProvidersPlan.md`).
-2. Chat channels and turn execution.
-3. Client-connection adapters, including a Pi client extension.
+1. A mock-backed AHP host connection: `initialize`, `ping`, `subscribe`,
+   `unsubscribe`, `createSession`, and action echo, proven with a real
+   `AhpClient` over `WebSocketTransport`.
+2. Remote-client identity and presence design.
+3. A Pi client extension in a separate client-side package.
+4. Client-to-client coordination.
+5. Reconnect and replay.
+
+Chat channels and turn execution remain later server capabilities and are not
+yet specified. See [`docs/ProvidersPlan.md`](docs/ProvidersPlan.md) for the
+client-connection milestones.
 
 ## Requirements
 

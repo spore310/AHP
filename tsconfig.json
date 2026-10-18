@@ -23,9 +23,7 @@
       "@sessions": ["./src/sessions/index.ts"],
       "@sessions/*": ["./src/sessions/*"],
       "@websocket": ["./src/websocket/index.ts"],
-      "@websocket/*": ["./src/websocket/*"],
-      "@providers": ["./src/providers/index.ts"],
-      "@providers/*": ["./src/providers/*"]
+      "@websocket/*": ["./src/websocket/*"]
     }
   },
   "include": ["**/*.ts", "**/*.mts", "**/*.cts"],
