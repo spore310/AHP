@@ -228,6 +228,24 @@ describe("AHP connection lifetime", () => {
     expect(outsider.frames.frames.slice(beforeOutsider).filter(methodFrame("action"))).toEqual([]);
   });
 
+  it("rejects a subscribe to an unknown channel scheme", async () => {
+    const { url, factory } = await startHost();
+    const client = await connect(url);
+    await initialize(client.socket, client.frames, "origin");
+
+    send(client.socket, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "subscribe",
+      params: { channel: "ahp-other://example" },
+    });
+    await expect(client.frames.waitFor(responseWithId(2))).resolves.toMatchObject({
+      id: 2,
+      error: { code: JsonRpcErrorCodes.InvalidParams },
+    });
+    expect(factory.listSessionSnapshots()).toHaveLength(0);
+  });
+
   it("rejects a request-shaped dispatch without mutating session state", async () => {
     const { url, factory } = await startHost();
     const origin = await connect(url);

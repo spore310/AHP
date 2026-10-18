@@ -116,7 +116,8 @@ PI CLIENT EXTENSION (separate project; packaging TBD)
 Native AHP (source of truth: the pinned `@microsoft/agent-host-protocol`):
 
 - Commands and notifications used by Milestone 1: `initialize`, `ping`,
-  `subscribe`, `unsubscribe`, `createSession`, `dispatchAction`.
+  `subscribe`, `unsubscribe`, `createSession`, `disposeSession`,
+  `listSessions`, and `dispatchAction`.
 - Contract shapes: `InitializeParams` / `InitializeResult`,
   `Snapshot { resource, state, fromSeq }`,
   `ActionEnvelope { channel, action, serverSeq, origin }`, `RootState`,
@@ -165,11 +166,12 @@ the client.
    must track and expose the sequence current at snapshot time instead of
    inventing one. `InitializeResult.serverSeq` follows the same rule.
 8. **Broadcast** — catalogue notifications (`root/sessionAdded`,
-   `root/sessionSummaryChanged`, and `root/sessionRemoved` when session
-   disposal is included) go only to connections subscribed to `ahp-root://`;
-   session action envelopes go only to connections subscribed to that session
-   channel. Catalogue notifications are not action envelopes and never consume
-   the action sequence.
+   `root/sessionSummaryChanged`, and `root/sessionRemoved`) go to connections
+   subscribed to `ahp-root://`. `root/sessionRemoved` is also sent to a client
+   subscribed only to the disposed session, and that subscription is then
+   dropped without closing the socket. Session action envelopes go only to
+   connections subscribed to that session channel. Catalogue notifications are
+   not action envelopes and never consume the action sequence.
 9. **Action echo** (`dispatchAction` → `action` notification) — validate
    `DispatchActionParams` and apply the action to the target session through
    the existing session reducer. The envelope's
@@ -178,8 +180,9 @@ the client.
    the origin must be passed in rather than invented. Accept only an explicit
    allowlist of client-dispatchable state actions; reject everything else.
    This adds no backend I/O: `SessionBackend` stays `{ dispose() }`.
-10. **Session disposal** — if added in this milestone, `disposeSession` must
-    also emit `root/sessionRemoved` and include it in the root broadcast list.
+10. **Session disposal** — `disposeSession` emits `root/sessionRemoved` to root
+    subscribers and to clients subscribed to that session, then drops that
+    session subscription. It does not close the socket.
 
 Implementation constraints confirmed against the pinned SDK:
 
