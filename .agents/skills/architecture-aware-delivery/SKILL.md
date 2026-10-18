@@ -46,6 +46,12 @@ staged, unstaged, and relevant untracked files when identifying the candidate;
 HEAD alone is insufficient in a dirty tree. Do not reset, stash, switch branches,
 or overwrite other work to manufacture a clean baseline.
 
+In this repository, the native Copilot hook injects the workflow at session
+start and runs `pnpm validate` before stopping when the worktree is dirty.
+Planning, scope, and review decisions remain agent responsibilities; the hook
+does not infer or enforce their quality. See
+[the callback contract](../hooks/task-execution-review.md).
+
 Record available read/edit/test tools, independent subagent capability, and
 known spend/concurrency restrictions. Unknown subagent availability means no
 delegation until verified. Do not install a harness, invoke a paid API, or switch

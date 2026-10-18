@@ -161,10 +161,12 @@ Every source file under `src/` and `env/` must be mapped by its module
 
 # Code Review Documentation Drift
 
-This repository has no executable agent lifecycle callback registry. Instead,
-the root instructions require every explicit production, security, quality,
-architecture, maintainability, performance, API, feature, contract, or general
-code review to use the
+The native Copilot hooks in `.github/hooks/ahp-agent-workflow.json` inject the
+workflow at session start and run `pnpm validate` before stopping when the
+worktree has changes. They do not mechanically review plans or replace the
+instruction-driven checkpoints below. Every explicit production, security,
+quality, architecture, maintainability, performance, API, feature, contract,
+or general code review must use the
 [documentation-drift review skill](skills/code-review-documentation-drift/SKILL.md).
 
 Documentation inspection inherits the review scope.

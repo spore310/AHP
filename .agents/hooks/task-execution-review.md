@@ -1,11 +1,32 @@
 # Task Execution and Review Hook
 
-**Kind:** instruction-driven lifecycle hook. **Version:** 1.0.
+**Kind:** instruction-driven lifecycle guidance with native Copilot callbacks.
+**Version:** 1.1.
 
 This file defines checkpoints the coding agent must follow when routed here by
-`.agents/AGENTS.md`. It is not a Git hook, a native harness callback, a daemon,
-or a security boundary. Merely creating this file does not register a callback.
-Do not add a server runtime or invoke another model to execute this hook.
+`.agents/AGENTS.md`. The native callback registration is
+[`.github/hooks/ahp-agent-workflow.json`](../../.github/hooks/ahp-agent-workflow.json),
+which injects workflow context at session start and runs `pnpm validate` at
+agent stop when the repository has changes.
+
+The callbacks target GitHub Copilot CLI and the VS Code Copilot harness when
+that installed version supports these events. They do not apply to every VS
+Code harness. They do not mechanically assess plan quality, are not Git hooks,
+and are not a security boundary. The planning and review checkpoints below
+remain instruction-driven. Do not add a server runtime or invoke another model
+to execute this workflow.
+
+The registration uses GitHub Copilot's version-1 hook format and `sessionStart`
+and `agentStop` events. VS Code documents that the Copilot harness uses the
+Copilot SDK hook implementation; confirm event availability in the selected
+VS Code version. The Local harness has a separate payload/output contract.
+See [GitHub's hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference)
+and [VS Code's hook guidance](https://code.visualstudio.com/docs/agent-customization/hooks).
+
+The stop callback relies on the repository's installed dependencies and Git
+worktree. A clean worktree is allowed without running validation. A dirty
+worktree cannot complete through the callback if repository inspection or
+`pnpm validate` fails. Run the same command manually to inspect diagnostics.
 
 ## Activation and mode
 
@@ -15,7 +36,9 @@ Skip general explanations, casual discussion, and unrelated work.
 A typo-only edit uses the skill's fast path, not a multi-agent ceremony.
 
 Read [architecture-aware-delivery](../skills/architecture-aware-delivery/SKILL.md)
-once for the task. Treat these as logical checkpoints, not SDK event names:
+once for the task. Treat these as agent checkpoints, not all as callback
+events. The native registration implements only session-start context and the
+stop-time validation gate:
 
 | Checkpoint | Required action | Condition to proceed |
 | --- | --- | --- |
