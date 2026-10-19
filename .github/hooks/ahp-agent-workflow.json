@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "pnpm exec vite-node scripts/run-agent-workflow-hook.ts",
+        "powershell": "pnpm exec vite-node scripts\\run-agent-workflow-hook.ts",
+        "cwd": ".",
+        "timeoutSec": 10
+      }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "pnpm exec vite-node scripts/run-agent-workflow-hook.ts",
+        "powershell": "pnpm exec vite-node scripts\\run-agent-workflow-hook.ts",
+        "cwd": ".",
+        "timeoutSec": 120
+      }
+    ]
+  }
+}

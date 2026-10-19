@@ -221,7 +221,6 @@ Library/framework details should remain behind owned interfaces where portabilit
 Application and domain logic should not unnecessarily depend on:
 
 - Framework request objects
-- JOSE internals
 - ORM-specific entities
 - HTTP response types
 
@@ -266,8 +265,10 @@ Prefer:
 - least-invasive changes
 - DRY without becoming magical
 - clear module boundaries
-- configured aliases such as `@/*`, `@utils/*`, `@jwt/*`, `@jwt`, `@env/*`,
-  and `@env`, declared in `tsconfig.json`
+- configured aliases such as `@env/*`, `@env`, `@jsonrpc/*`, `@jsonrpc`,
+  `@sessions/*`, `@sessions`, `@application`, `@application/*`, `@tools/*`, `@tools`,
+  `@toolClient`, `@toolClient/*`, `@websocket/*`, and `@websocket`, declared in
+  `tsconfig.json`
 
 Use those aliases for cross-folder imports when relative paths would require
 climbing through parent directories. Short same-folder imports such as

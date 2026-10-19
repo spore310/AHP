@@ -1,17 +1,20 @@
 import type { CreateSessionParams as AhpCreateSessionParams } from "@microsoft/agent-host-protocol";
 import { z } from "zod";
 
-import { sessionUriSchema } from "@/sessions/types";
+import { sessionUriSchema } from "@sessions/types";
 
 /**
  * Parameters accepted by `createSession`.
  *
  * `channel` is the client-chosen session URI and is the only required member.
- * `activeClient` and `progressToken` are accepted for protocol completeness but
- * not interpreted yet: active-client tracking and progress reporting are their
- * own capabilities. Unknown members are rejected.
+ * `activeClient` is rejected before registration on typed hosts; an untyped
+ * host accepts but ignores it. Advertise tools after creation instead.
+ * `progressToken` is accepted but not interpreted. Unknown additive members
+ * are discarded rather than rejected,
+ * so a compatible protocol extension does not invalidate an otherwise valid
+ * request; they are never forwarded to the provider.
  */
-export const createSessionParamsSchema = z.strictObject({
+export const createSessionParamsSchema = z.object({
   channel: sessionUriSchema,
   provider: z.string().min(1).optional(),
   workingDirectories: z.array(z.string().min(1)).optional(),

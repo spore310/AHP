@@ -6,11 +6,18 @@ import {
   ACTION_TYPE_SESSION_READY,
   DEFAULT_SESSION_TITLE,
   ROOT_CHANNEL_URI,
-} from "@/sessions/constants";
-import { SessionStartError, SessionsError } from "@/sessions/helpers/errors";
-import { applySessionAction, createInitialSessionState } from "@/sessions/helpers/state";
-import { buildSessionSummary } from "@/sessions/helpers/summary";
-import type { SessionProvider, SessionRecord, SessionsDependencies } from "@/sessions/types";
+  SESSION_START_FAILURE_INFO,
+} from "@sessions/constants";
+import { prepareSessionCreation } from "@sessions/helpers/application";
+import { APPLICATION_META_KEY } from "@tools";
+import {
+  SessionConfigError,
+  SessionStartError,
+  SessionsError,
+} from "@sessions/helpers/errors";
+import { applySessionAction, createInitialSessionState } from "@sessions/helpers/state";
+import { buildSessionSummary } from "@sessions/helpers/summary";
+import type { SessionProvider, SessionRecord, SessionsDependencies } from "@sessions/types";
 
 import { createSessionParamsSchema } from "./types";
 
@@ -18,7 +25,7 @@ import { createSessionParamsSchema } from "./types";
  * Handles one `createSession` request.
  *
  * Enforces the create-time contract in order: params shape, provider
- * resolution, URI uniqueness, configuration support, then registration and
+ * resolution, URI uniqueness, configuration parsing, then registration and
  * catalogue broadcast. The backend is started last so a failure leaves a
  * well-formed, inspectable session rather than a half-registered one.
  */
@@ -35,7 +42,17 @@ export async function executeCreateSession(
   }
 
   const params = parsed.data;
-  const provider = resolveProvider(dependencies, params.provider);
+  const prepared = prepareSessionCreation(dependencies.application, params.provider, params.config);
+  if (dependencies.application !== undefined && params.activeClient !== undefined) {
+    throw new SessionsError(
+      JsonRpcErrorCodes.InvalidParams,
+      "Creation-time active client is not supported on a typed host.",
+    );
+  }
+  const provider = resolveProvider(
+    dependencies,
+    prepared.providerId.length === 0 ? params.provider : prepared.providerId,
+  );
 
   if (dependencies.sessions.has(params.channel)) {
     throw new SessionsError(
@@ -44,7 +61,9 @@ export async function executeCreateSession(
     );
   }
 
-  assertConfigSupported(provider, params.config);
+  // Parsing runs before registration so invalid configuration creates no record
+  // and never reaches the provider.
+  const config = parseSessionConfig(provider, prepared.providerConfig);
 
   // No agent advertises multiple working directories yet, so the host keeps only
   // the first directory, per the `createSession` contract.
@@ -55,12 +74,22 @@ export async function executeCreateSession(
     provider,
     createdAt,
     modifiedAt: createdAt,
-    state: createInitialSessionState({
-      providerId: provider.providerId,
-      title: DEFAULT_SESSION_TITLE,
-      workingDirectories,
-    }),
+    state: {
+      ...createInitialSessionState({
+        providerId: provider.providerId,
+        title: DEFAULT_SESSION_TITLE,
+        workingDirectories,
+      }),
+      ...(prepared.binding === undefined
+        ? {}
+        : {
+            _meta: {
+              [APPLICATION_META_KEY]: prepared.manifest,
+            },
+          }),
+    },
     serverSeq: 0,
+    ...(prepared.binding === undefined ? {} : { application: prepared.binding }),
   };
 
   dependencies.sessions.add(record);
@@ -69,7 +98,7 @@ export async function executeCreateSession(
     params: { channel: ROOT_CHANNEL_URI, summary: buildSessionSummary(record) },
   });
 
-  await startBackend(dependencies, record, workingDirectories, params.config ?? {});
+  await startBackend(dependencies, record, workingDirectories, config);
 }
 
 function resolveProvider(
@@ -88,17 +117,37 @@ function resolveProvider(
   return provider;
 }
 
-function assertConfigSupported(
+/**
+ * Resolves the configuration the provider's backend receives.
+ *
+ * The provider's parser is the single runtime validation owner: it applies
+ * required/default/type/enum and unknown-key policy and returns the normalized
+ * values. A provider without a contract accepts only an empty configuration.
+ */
+function parseSessionConfig(
   provider: SessionProvider,
   config: Record<string, unknown> | undefined,
-): void {
-  if (config === undefined || Object.keys(config).length === 0) {
-    return;
+): Record<string, unknown> {
+  const supplied = config ?? {};
+  if (provider.config === undefined) {
+    if (Object.keys(supplied).length > 0) {
+      throw new SessionsError(
+        JsonRpcErrorCodes.InvalidParams,
+        `Provider "${provider.providerId}" accepts no session configuration.`,
+      );
+    }
+    return {};
   }
-  if (provider.configSchema === undefined) {
+
+  try {
+    return provider.config.parse(supplied);
+  } catch (error) {
+    if (error instanceof SessionConfigError) {
+      throw new SessionsError(JsonRpcErrorCodes.InvalidParams, error.message);
+    }
     throw new SessionsError(
       JsonRpcErrorCodes.InvalidParams,
-      `Provider "${provider.providerId}" accepts no session configuration.`,
+      `Invalid session configuration for provider "${provider.providerId}".`,
     );
   }
 }
@@ -116,13 +165,41 @@ async function startBackend(
       workingDirectories,
       config,
     });
+
+    // The factory may have been disposed (or the URI reused) while the backend
+    // was starting. Release the late backend and publish nothing rather than
+    // attaching it to a detached record or emitting a stale ready action.
+    if (dependencies.sessions.get(record.sessionUri) !== record) {
+      try {
+        await backend.dispose();
+      } catch (error) {
+        // Detached cleanup has no caller to observe it, so report a sanitized
+        // lifecycle diagnostic instead of publishing anything.
+        dependencies.reportDiagnostic({
+          event: "lateBackendDisposeFailed",
+          sessionUri: record.sessionUri,
+          errorType: error instanceof Error ? error.name : "unknown",
+        });
+      }
+      return;
+    }
+
     record.backend = backend;
     action = { type: ACTION_TYPE_SESSION_READY };
   } catch (error) {
     action = { type: ACTION_TYPE_SESSION_CREATION_FAILED, error: toErrorInfo(error) };
   }
 
-  const envelope = applySessionAction(record, action, dependencies.now().toISOString());
+  if (dependencies.sessions.get(record.sessionUri) !== record) {
+    return;
+  }
+
+  const envelope = applySessionAction(
+    record,
+    action,
+    dependencies.now().toISOString(),
+    dependencies.nextServerSeq,
+  );
   dependencies.emitSessionEnvelope(envelope);
   dependencies.emitCatalogueNotification({
     method: "root/sessionSummaryChanged",
@@ -134,13 +211,17 @@ async function startBackend(
   });
 }
 
+/**
+ * Builds the public `session/creationFailed` payload.
+ *
+ * A provider's deliberate {@link SessionStartError} contributes only
+ * `errorType` and `message`; every other thrown value collapses to a generic
+ * category, so arbitrary exception detail never becomes client-visible state.
+ */
 function toErrorInfo(error: unknown): ErrorInfo {
   if (error instanceof SessionStartError) {
-    return error.info;
-  }
-  if (error instanceof Error) {
-    return { errorType: error.name, message: error.message };
+    return { errorType: error.info.errorType, message: error.info.message };
   }
 
-  return { errorType: "sessionStartFailed", message: "Session backend failed to start." };
+  return SESSION_START_FAILURE_INFO;
 }

@@ -2,20 +2,22 @@ import type {
   ActionEnvelope,
   AgentInfo,
   ErrorInfo,
-  SessionConfigSchema,
 } from "@microsoft/agent-host-protocol";
 import { AhpErrorCodes, JsonRpcErrorCodes } from "@microsoft/agent-host-protocol";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import {
   createSessionsFactory,
   SESSION_URI_PREFIX,
+  SessionConfigError,
   type CatalogueNotification,
   type SessionBackend,
+  type SessionConfigContract,
   type SessionProvider,
   type SessionsFactory,
-} from "@/sessions";
-import { createMockProvider } from "@/sessions/mock";
+} from "@sessions";
+import { createMockProvider } from "@sessions/mock";
 
 const TEST_NOW = (): Date => new Date("2026-01-02T03:04:05.000Z");
 
@@ -67,6 +69,50 @@ function deferredProvider(): { provider: SessionProvider; complete: () => void }
   };
 }
 
+/**
+ * A provider with a session configuration contract: `model` is required, `mode`
+ * is an optional enum with a default, and unknown keys are rejected. Records the
+ * normalized config every backend receives.
+ */
+function configurableProvider(): {
+  provider: SessionProvider;
+  received: Record<string, unknown>[];
+} {
+  const received: Record<string, unknown>[] = [];
+  const config: SessionConfigContract = {
+    schema: {
+      type: "object",
+      properties: {
+        model: { type: "string", title: "Model" },
+        mode: { type: "string", title: "Mode", enum: ["fast", "slow"] },
+      },
+      required: ["model"],
+    },
+    parse: (value) => {
+      const result = z
+        .object({ model: z.string(), mode: z.enum(["fast", "slow"]).default("fast") })
+        .strict()
+        .safeParse(value);
+      if (!result.success) {
+        throw new SessionConfigError("Invalid session configuration for provider configurable.");
+      }
+      return result.data;
+    },
+  };
+
+  const provider: SessionProvider = {
+    providerId: "configurable",
+    agentInfo: { ...TEST_AGENT, provider: "configurable" },
+    config,
+    startSession: (input): Promise<SessionBackend> => {
+      received.push(input.config);
+      return Promise.resolve({ dispose: (): void => undefined });
+    },
+  };
+
+  return { provider, received };
+}
+
 describe("createSession: lifecycle", () => {
   it("creates a ready session and emits the creation sequence", async () => {
     const factory = createSessionsFactory({ providers: [createMockProvider()], now: TEST_NOW });
@@ -85,6 +131,12 @@ describe("createSession: lifecycle", () => {
 
     expect(envelopes).toEqual([
       { channel: uri, action: { type: "session/ready" }, serverSeq: 1, origin: undefined },
+      {
+        channel: "ahp-root://",
+        action: { type: "root/activeSessionsChanged", activeSessions: 1 },
+        serverSeq: 2,
+        origin: undefined,
+      },
     ]);
 
     const timestamp = TEST_NOW().toISOString();
@@ -131,6 +183,12 @@ describe("createSession: lifecycle", () => {
         serverSeq: 1,
         origin: undefined,
       },
+      {
+        channel: "ahp-root://",
+        action: { type: "root/activeSessionsChanged", activeSessions: 1 },
+        serverSeq: 2,
+        origin: undefined,
+      },
     ]);
     expect(catalogue.map((notification) => notification.method)).toEqual([
       "root/sessionAdded",
@@ -138,7 +196,7 @@ describe("createSession: lifecycle", () => {
     ]);
   });
 
-  it("maps an unexpected provider rejection to a creation failure", async () => {
+  it("maps an unexpected provider rejection to a generic failure", async () => {
     const provider: SessionProvider = {
       providerId: "boom",
       agentInfo: { ...TEST_AGENT, provider: "boom" },
@@ -146,12 +204,22 @@ describe("createSession: lifecycle", () => {
     };
     const factory = createSessionsFactory({ providers: [provider], now: TEST_NOW });
     const { envelopes } = recordFactoryEvents(factory);
+    const uri = sessionUri("boom");
 
-    await factory.createSession({ channel: sessionUri("boom") });
+    await factory.createSession({ channel: uri });
 
     expect(envelopes[0]?.action).toEqual({
       type: "session/creationFailed",
-      error: { errorType: "Error", message: "kaboom" },
+      error: { errorType: "sessionStartFailed", message: "Session backend failed to start." },
+    });
+    expect(envelopes[1]?.action).toEqual({
+      type: "root/activeSessionsChanged",
+      activeSessions: 1,
+    });
+    expect(JSON.stringify(envelopes)).not.toContain("kaboom");
+    expect(factory.getSessionSnapshot(uri)?.state.creationError).toEqual({
+      errorType: "sessionStartFailed",
+      message: "Session backend failed to start.",
     });
   });
 });
@@ -242,12 +310,13 @@ describe("createSession: parameter validation", () => {
     });
   });
 
-  it("rejects unknown members", async () => {
+  it("discards an unknown additive member and still creates the session", async () => {
     const factory = createSessionsFactory({ providers: [createMockProvider()], now: TEST_NOW });
+    const uri = sessionUri("unknown-member");
 
-    await expect(
-      factory.createSession({ channel: sessionUri("unknown-member"), surprise: true }),
-    ).rejects.toMatchObject({ code: JsonRpcErrorCodes.InvalidParams });
+    await factory.createSession({ channel: uri, surprise: true });
+
+    expect(factory.getSessionSnapshot(uri)?.state.lifecycle).toBe("ready");
   });
 
   it("accepts activeClient, progressToken and _meta for protocol completeness", async () => {
@@ -267,7 +336,7 @@ describe("createSession: parameter validation", () => {
 });
 
 describe("createSession: session configuration", () => {
-  it("rejects non-empty config when the provider exposes no schema", async () => {
+  it("rejects non-empty config when the provider exposes no config contract", async () => {
     const factory = createSessionsFactory({ providers: [createMockProvider()], now: TEST_NOW });
 
     await expect(
@@ -275,7 +344,7 @@ describe("createSession: session configuration", () => {
     ).rejects.toMatchObject({ code: JsonRpcErrorCodes.InvalidParams });
   });
 
-  it("accepts an empty config even when the provider exposes no schema", async () => {
+  it("accepts an empty config when the provider exposes no config contract", async () => {
     const factory = createSessionsFactory({ providers: [createMockProvider()], now: TEST_NOW });
     const uri = sessionUri("config-empty");
 
@@ -284,21 +353,71 @@ describe("createSession: session configuration", () => {
     expect(factory.getSessionSnapshot(uri)?.state.lifecycle).toBe("ready");
   });
 
-  it("accepts config when the provider exposes a schema", async () => {
-    const configSchema: SessionConfigSchema = { type: "object", properties: {} };
-    const provider: SessionProvider = {
-      providerId: "configurable",
-      agentInfo: { ...TEST_AGENT, provider: "configurable" },
-      configSchema,
-      startSession: (): Promise<SessionBackend> =>
-        Promise.resolve({ dispose: (): void => undefined }),
-    };
+  it("passes normalized configuration to the provider", async () => {
+    const { provider, received } = configurableProvider();
     const factory = createSessionsFactory({ providers: [provider], now: TEST_NOW });
-    const uri = sessionUri("config-accepted");
+    const uri = sessionUri("config-normalized");
 
-    await factory.createSession({ channel: uri, config: { model: "x" } });
+    await factory.createSession({ channel: uri, config: { model: "gpt", mode: "slow" } });
 
     expect(factory.getSessionSnapshot(uri)?.state.lifecycle).toBe("ready");
+    expect(received).toEqual([{ model: "gpt", mode: "slow" }]);
+  });
+
+  it("applies contract defaults before the provider starts", async () => {
+    const { provider, received } = configurableProvider();
+    const factory = createSessionsFactory({ providers: [provider], now: TEST_NOW });
+
+    await factory.createSession({ channel: sessionUri("config-defaults"), config: { model: "gpt" } });
+
+    expect(received).toEqual([{ model: "gpt", mode: "fast" }]);
+  });
+
+  it("rejects a wrongly typed value without starting the provider", async () => {
+    const { provider, received } = configurableProvider();
+    const factory = createSessionsFactory({ providers: [provider], now: TEST_NOW });
+    const uri = sessionUri("config-type");
+
+    await expect(
+      factory.createSession({ channel: uri, config: { model: 5 } }),
+    ).rejects.toMatchObject({ code: JsonRpcErrorCodes.InvalidParams });
+
+    expect(factory.getSessionSnapshot(uri)).toBeUndefined();
+    expect(received).toEqual([]);
+  });
+
+  it("rejects an unsupported enum value", async () => {
+    const { provider } = configurableProvider();
+    const factory = createSessionsFactory({ providers: [provider], now: TEST_NOW });
+
+    await expect(
+      factory.createSession({
+        channel: sessionUri("config-enum"),
+        config: { model: "gpt", mode: "turbo" },
+      }),
+    ).rejects.toMatchObject({ code: JsonRpcErrorCodes.InvalidParams });
+  });
+
+  it("rejects a missing required value even for an empty config", async () => {
+    const { provider, received } = configurableProvider();
+    const factory = createSessionsFactory({ providers: [provider], now: TEST_NOW });
+
+    await expect(
+      factory.createSession({ channel: sessionUri("config-required"), config: {} }),
+    ).rejects.toMatchObject({ code: JsonRpcErrorCodes.InvalidParams });
+    expect(received).toEqual([]);
+  });
+
+  it("rejects extra keys the contract prohibits", async () => {
+    const { provider } = configurableProvider();
+    const factory = createSessionsFactory({ providers: [provider], now: TEST_NOW });
+
+    await expect(
+      factory.createSession({
+        channel: sessionUri("config-extra"),
+        config: { model: "gpt", surprise: true },
+      }),
+    ).rejects.toMatchObject({ code: JsonRpcErrorCodes.InvalidParams });
   });
 });
 

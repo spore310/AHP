@@ -1,1 +1,6 @@
-export { SessionStartError, SessionsError } from "./helpers";
+export {
+  SessionConfigError,
+  SessionStartError,
+  SessionsDisposingError,
+  SessionsError,
+} from "./helpers";

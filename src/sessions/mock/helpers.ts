@@ -1,7 +1,7 @@
 import type { AgentInfo } from "@microsoft/agent-host-protocol";
 
-import { SessionStartError } from "@/sessions/helpers/errors";
-import type { SessionBackend, SessionProvider } from "@/sessions/types";
+import { SessionStartError } from "@sessions/helpers/errors";
+import type { SessionBackend, SessionProvider } from "@sessions/types";
 
 import type { MockProviderOptions } from "./types";
 

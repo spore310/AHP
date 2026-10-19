@@ -7,6 +7,8 @@ export {
   JSONRPC_VERSION,
 } from "./constants";
 
+export { isRpcError, JSONRPC_PUBLIC_ERROR_CODES, parseUnknownJson, RpcError } from "./helpers";
+
 export type {
   JsonRpcError,
   JsonRpcErrorResponse,

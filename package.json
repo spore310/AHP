@@ -15,16 +15,17 @@
   "scripts": {
     "build": "vite build",
     "start": "node --enable-source-maps dist/index.js",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "validate": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build"
+    "docs:check": "vite-node scripts/check-docs.ts",
+    "validate": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run docs:check && pnpm run build"
   },
   "dependencies": {
     "@microsoft/agent-host-protocol": "1.0.0",
-    "jose": "6.2.12",
+    "ajv": "8.20.0",
     "ws": "8.22.0",
     "zod": "4.6.5"
   },

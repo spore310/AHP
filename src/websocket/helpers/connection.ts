@@ -3,27 +3,40 @@ import { ZodError } from "zod";
 import type WebSocket from "ws";
 
 import {
+  isRpcError,
   JSONRPC_INTERNAL_ERROR,
   JSONRPC_INVALID_PARAMS,
   JSONRPC_INVALID_REQUEST,
   JSONRPC_METHOD_NOT_FOUND,
   JSONRPC_PARSE_ERROR,
+  JSONRPC_PUBLIC_ERROR_CODES,
   JSONRPC_VERSION,
   jsonRpcMessageSchema,
+  jsonRpcParamsSchema,
+  parseUnknownJson,
   type JsonRpcErrorResponse,
   type JsonRpcMessage,
   type JsonRpcNotification,
+  type JsonRpcParams,
   type JsonRpcRequest,
   type JsonRpcRequestId,
   type JsonRpcResponseId,
   type JsonRpcResultResponse,
-} from "@/jsonrpc";
+} from "@jsonrpc";
 
 import { WEBSOCKET_CLOSE_UNSUPPORTED_DATA } from "../constants";
 import type {
+  JsonRpcHandler,
   JsonRpcHandlers,
+  JsonRpcInvocation,
+  ReplySettlement,
   WebSocketConnectionContext,
+  WebSocketDispatchContext,
 } from "../types";
+
+interface Invocation extends JsonRpcInvocation {
+  settle(settlement: ReplySettlement): void;
+}
 
 const resultResponse = (id: JsonRpcRequestId, result: unknown): JsonRpcResultResponse => ({
   jsonrpc: JSONRPC_VERSION,
@@ -35,11 +48,26 @@ const errorResponse = (
   id: JsonRpcResponseId,
   code: number,
   message: string,
+  data?: unknown,
 ): JsonRpcErrorResponse => ({
   jsonrpc: JSONRPC_VERSION,
   id,
-  error: { code, message },
+  error: data === undefined ? { code, message } : { code, message, data },
 });
+
+// Only own, callable handler properties are dispatchable. A plain object also
+// exposes inherited members (`toString`, `constructor`, ...), which must not be
+// reachable as methods. Lifecycle names are never wire methods.
+const lookupHandler = (
+  handlers: JsonRpcHandlers,
+  method: string,
+): JsonRpcHandler | undefined => {
+  if (method.startsWith("__") || method === "dispose" || !Object.hasOwn(handlers, method)) {
+    return undefined;
+  }
+  const handler = handlers[method];
+  return typeof handler === "function" ? handler : undefined;
+};
 
 const frameToText = (data: WebSocket.RawData): string => {
   if (Array.isArray(data)) {
@@ -70,28 +98,84 @@ const extractRequestId = (value: unknown): JsonRpcRequestId | null => {
   return null;
 };
 
+const createInvocation = (kind: JsonRpcInvocation["kind"]): Invocation => {
+  const listeners = new Set<(settlement: ReplySettlement) => void>();
+  let settled = false;
+
+  return {
+    kind,
+    onReplySettled: (listener: (settlement: ReplySettlement) => void): void => {
+      listeners.add(listener);
+    },
+    settle: (settlement: ReplySettlement): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      for (const listener of [...listeners]) {
+        try {
+          listener(settlement);
+        } catch {
+          // One listener cannot block the others or the socket loop.
+        }
+      }
+    },
+  };
+};
+
+const sendMappedError = (
+  context: WebSocketConnectionContext,
+  id: JsonRpcResponseId,
+  cause: unknown,
+): boolean => {
+  if (cause instanceof ZodError) {
+    return context.send(errorResponse(id, JSONRPC_INVALID_PARAMS, "Invalid params"));
+  }
+  if (isRpcError(cause) && JSONRPC_PUBLIC_ERROR_CODES.has(cause.code)) {
+    return context.send(errorResponse(id, cause.code, cause.message, cause.data));
+  }
+  return context.send(errorResponse(id, JSONRPC_INTERNAL_ERROR, "Internal error"));
+};
+
 const handleRequest = async (
   request: JsonRpcRequest,
   context: WebSocketConnectionContext,
   handlers: JsonRpcHandlers,
+  beforeDispatch: ((dispatch: WebSocketDispatchContext) => void) | undefined,
 ): Promise<void> => {
-  const handler = handlers[request.method];
-  if (!handler) {
-    context.send(errorResponse(request.id, JSONRPC_METHOD_NOT_FOUND, `Method not found: ${request.method}`));
+  const invocation = createInvocation("request");
+  try {
+    beforeDispatch?.({
+      kind: "request",
+      method: request.method,
+      params: request.params,
+      context,
+      invocation,
+    });
+  } catch (cause) {
+    const responseSent = sendMappedError(context, request.id, cause);
+    invocation.settle({ outcome: "failure", responseSent });
+    return;
+  }
+
+  const handler = lookupHandler(handlers, request.method);
+  if (handler === undefined) {
+    const responseSent = context.send(errorResponse(
+      request.id,
+      JSONRPC_METHOD_NOT_FOUND,
+      `Method not found: ${request.method}`,
+    ));
+    invocation.settle({ outcome: "failure", responseSent });
     return;
   }
 
   try {
-    const result = await handler(request.params, context);
-    context.send(resultResponse(request.id, result));
+    const result = await handler(request.params, context, invocation);
+    const responseSent = context.send(resultResponse(request.id, result));
+    invocation.settle({ outcome: "success", responseSent });
   } catch (cause) {
-    // Handler validation failures are the caller's fault; anything else is
-    // reported generically so internal details do not leak to the client.
-    if (cause instanceof ZodError) {
-      context.send(errorResponse(request.id, JSONRPC_INVALID_PARAMS, "Invalid params"));
-      return;
-    }
-    context.send(errorResponse(request.id, JSONRPC_INTERNAL_ERROR, "Internal error"));
+    const responseSent = sendMappedError(context, request.id, cause);
+    invocation.settle({ outcome: "failure", responseSent });
   }
 };
 
@@ -99,15 +183,56 @@ const handleNotification = async (
   notification: JsonRpcNotification,
   context: WebSocketConnectionContext,
   handlers: JsonRpcHandlers,
+  beforeDispatch: ((dispatch: WebSocketDispatchContext) => void) | undefined,
 ): Promise<void> => {
-  const handler = handlers[notification.method];
-  if (!handler) {
+  const invocation = createInvocation("notification");
+  try {
+    beforeDispatch?.({
+      kind: "notification",
+      method: notification.method,
+      params: notification.params,
+      context,
+      invocation,
+    });
+  } catch {
+    invocation.settle({ outcome: "failure", responseSent: false });
     return;
   }
+
+  const handler = lookupHandler(handlers, notification.method);
+  if (handler === undefined) {
+    invocation.settle({ outcome: "success", responseSent: false });
+    return;
+  }
+
   try {
-    await handler(notification.params, context);
+    await handler(notification.params, context, invocation);
+    invocation.settle({ outcome: "success", responseSent: false });
   } catch {
     // Notifications have no reply channel; failures are intentionally dropped.
+    invocation.settle({ outcome: "failure", responseSent: false });
+  }
+};
+
+const frameMethod = (text: string): {
+  readonly method: string;
+  readonly kind: "request" | "notification";
+  readonly params: JsonRpcParams;
+} | undefined => {
+  try {
+    const value = parseUnknownJson(text);
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+    const frame = value as Record<string, unknown>;
+    if (typeof frame.method !== "string") return undefined;
+    const parsedParams = jsonRpcParamsSchema.safeParse(frame.params);
+    if (!parsedParams.success) return undefined;
+    return {
+      method: frame.method,
+      kind: Object.hasOwn(frame, "id") ? "request" : "notification",
+      params: parsedParams.data,
+    };
+  } catch {
+    return undefined;
   }
 };
 
@@ -115,10 +240,13 @@ const handleFrame = async (
   text: string,
   context: WebSocketConnectionContext,
   handlers: JsonRpcHandlers,
+  beforeDispatch: ((dispatch: WebSocketDispatchContext) => void) | undefined,
+  deferredRequests: ReadonlySet<string>,
+  onDeferredRequest: (method: string, promise: Promise<void>) => void,
 ): Promise<void> => {
   let decoded: unknown;
   try {
-    decoded = JSON.parse(text);
+    decoded = parseUnknownJson(text);
   } catch {
     context.send(errorResponse(null, JSONRPC_PARSE_ERROR, "Parse error"));
     return;
@@ -132,11 +260,15 @@ const handleFrame = async (
 
   if ("method" in message) {
     if ("id" in message) {
-      await handleRequest(message, context, handlers);
+      const request = handleRequest(message, context, handlers, beforeDispatch);
+      if (deferredRequests.has(message.method)) {
+        onDeferredRequest(message.method, request);
+        return;
+      }
+      await request;
     } else {
-      await handleNotification(message, context, handlers);
+      await handleNotification(message, context, handlers, beforeDispatch);
     }
-    return;
   }
 
   // Responses are not expected from a client on this transport; drop them.
@@ -145,29 +277,141 @@ const handleFrame = async (
 /**
  * Wire JSON-RPC handling onto an accepted socket.
  *
- * Text frames are parsed and dispatched; binary frames close the connection.
- * Attaches an `error` listener so socket failures surface as a close rather
- * than an unhandled event.
+ * Text frames are parsed and dispatched one at a time so a fatal reply can
+ * settle before the next frame on this socket runs. Binary frames close the
+ * connection. Attaches an `error` listener so socket failures surface as a
+ * close rather than an unhandled event.
  */
-export const attachConnection = (socket: WebSocket, handlers: JsonRpcHandlers): void => {
+export const attachConnection = (
+  socket: WebSocket,
+  handlers: JsonRpcHandlers,
+  beforeDispatch?: (dispatch: WebSocketDispatchContext) => void,
+  deferredRequestCompletionMethods: ReadonlyMap<string, import("../types").DeferredRequestCompletionRule> = new Map(),
+): WebSocketConnectionContext => {
+  const closeHandlers = new Set<() => void>();
+  let closed = false;
+  let processingFrame = false;
+  const deferredRequests = new Set(deferredRequestCompletionMethods.keys());
+  const pendingDeferredRequests = new Map<Promise<void>, string>();
+  const queuedFrames: string[] = [];
+
   const context: WebSocketConnectionContext = {
     connectionId: randomUUID(),
-    send: (message: JsonRpcMessage) => {
-      if (socket.readyState === socket.OPEN) {
+    send: (message: JsonRpcMessage): boolean => {
+      if (closed || socket.readyState !== socket.OPEN) {
+        return false;
+      }
+      try {
         socket.send(JSON.stringify(message));
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    onClose: (handler: () => void): void => {
+      if (closed) {
+        try {
+          handler();
+        } catch {
+          // Intentionally isolated; close cleanup must never throw.
+        }
+        return;
+      }
+      closeHandlers.add(handler);
+    },
+    close: (): void => {
+      try {
+        socket.close();
+      } catch {
+        // Best effort only. The close event still runs local cleanup.
       }
     },
   };
 
+  const runCloseHandlers = (): void => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    queuedFrames.length = 0;
+    for (const handler of [...closeHandlers]) {
+      try {
+        handler();
+      } catch {
+        // Intentionally isolated; close cleanup must never throw.
+      }
+    }
+    closeHandlers.clear();
+  };
+
+  const dispatchDeferred = (method: string, request: Promise<void>): void => {
+    pendingDeferredRequests.set(request, method);
+    void request.then(() => {
+      pendingDeferredRequests.delete(request);
+      pumpFrames();
+    }, () => {
+      pendingDeferredRequests.delete(request);
+      pumpFrames();
+    });
+  };
+
+  const pumpFrames = (): void => {
+    if (closed || processingFrame || queuedFrames.length === 0) return;
+    let nextIndex = 0;
+    if (pendingDeferredRequests.size > 0) {
+      const head = frameMethod(queuedFrames[0] ?? "");
+      const headIsDeferredRequest = head?.kind === "request" && deferredRequests.has(head.method);
+      if (!headIsDeferredRequest) {
+        nextIndex = queuedFrames.findIndex((text) => {
+          const frame = frameMethod(text);
+          return frame?.kind === "notification" && [...pendingDeferredRequests.values()].some((requestMethod) => {
+            const rule = deferredRequestCompletionMethods.get(requestMethod);
+            if (rule === undefined || rule.method !== frame.method) return false;
+            try {
+              return rule.matches(frame.params, context);
+            } catch {
+              // A broken application matcher must not escape the socket loop
+              // or grant permission to bypass ordered frames.
+              return false;
+            }
+          });
+        });
+        if (nextIndex < 0) return;
+      }
+    }
+    const [text] = queuedFrames.splice(nextIndex, 1);
+    if (text === undefined) return;
+    processingFrame = true;
+    void handleFrame(text, context, handlers, beforeDispatch, deferredRequests, dispatchDeferred).then(() => {
+      processingFrame = false;
+      pumpFrames();
+    }, () => {
+      processingFrame = false;
+      pumpFrames();
+    });
+  };
+
   socket.on("message", (data, isBinary) => {
+    if (closed) return;
     if (isBinary) {
       socket.close(WEBSOCKET_CLOSE_UNSUPPORTED_DATA, "Binary frames are not supported");
       return;
     }
-    void handleFrame(frameToText(data), context, handlers);
+    if (queuedFrames.length >= 256) {
+      socket.close(1013, "Too many queued frames");
+      return;
+    }
+    queuedFrames.push(frameToText(data));
+    pumpFrames();
+  });
+
+  socket.on("close", () => {
+    runCloseHandlers();
   });
 
   socket.on("error", () => {
     // Socket errors are followed by a close event; no additional handling.
   });
+
+  return context;
 };

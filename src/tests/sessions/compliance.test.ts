@@ -11,16 +11,17 @@ import { describe, expect, it } from "vitest";
 import {
   createSessionParamsSchema,
   createSessionsFactory,
+  createSequenceAllocator,
   SESSION_URI_PREFIX,
   type CatalogueNotification,
-} from "@/sessions";
+} from "@sessions";
 import {
   ACTION_TYPE_SESSION_CREATION_FAILED,
   ACTION_TYPE_SESSION_READY,
   SESSION_LIFECYCLE_CREATING,
   SESSION_STATUS_IDLE,
-} from "@/sessions/constants";
-import { createMockProvider } from "@/sessions/mock";
+} from "@sessions/constants";
+import { createMockProvider } from "@sessions/mock";
 
 const TEST_NOW = (): Date => new Date("2026-01-02T03:04:05.000Z");
 
@@ -124,15 +125,81 @@ describe("session state replay conformance", () => {
     }
     expect(finalSnapshot.fromSeq).toBe(1);
     expect(finalSnapshot.state.lifecycle).toBe("ready");
-    expect(envelopes).toHaveLength(1);
+    const sessionEnvelopes = envelopes.filter((envelope) => envelope.channel === uri);
+    expect(sessionEnvelopes).toHaveLength(1);
 
     // A client that starts from the creating snapshot and applies every emitted
-    // action must land exactly on the server's authoritative state.
+    // session action must land exactly on the server's authoritative state.
     let mirrored = creatingSnapshot.state;
-    for (const envelope of envelopes) {
+    for (const envelope of sessionEnvelopes) {
       mirrored = sessionReducer(mirrored, envelope.action as SessionAction);
     }
 
     expect(mirrored).toEqual(finalSnapshot.state);
+  });
+});
+
+describe("action sequence allocator", () => {
+  it("numbers actions across sessions from one gap-free connection stream", async () => {
+    const factory = createSessionsFactory({ providers: [createMockProvider()], now: TEST_NOW });
+    const envelopes: ActionEnvelope[] = [];
+    factory.onSessionEnvelope((envelope) => envelopes.push(envelope));
+    const firstUri = sessionUri("seq-first");
+    const secondUri = sessionUri("seq-second");
+
+    await factory.createSession({ channel: firstUri, provider: "mock" });
+    await factory.createSession({ channel: secondUri, provider: "mock" });
+
+    expect(envelopes.map((envelope) => envelope.serverSeq)).toEqual([1, 2, 3, 4]);
+    expect(envelopes.map((envelope) => envelope.channel)).toEqual([
+      firstUri,
+      "ahp-root://",
+      secondUri,
+      "ahp-root://",
+    ]);
+
+    // A single connection-wide cursor selects actions after seq 1 regardless of
+    // which session produced them.
+    const afterFirst = envelopes.filter((envelope) => envelope.serverSeq > 1);
+    expect(afterFirst.map((envelope) => envelope.serverSeq)).toEqual([2, 3, 4]);
+    expect(afterFirst[2]?.channel).toBe("ahp-root://");
+  });
+
+  it("uses an injected allocator instead of a per-factory one", async () => {
+    const factory = createSessionsFactory({
+      providers: [createMockProvider()],
+      now: TEST_NOW,
+      nextServerSeq: createSequenceAllocator(100),
+    });
+    const envelopes: ActionEnvelope[] = [];
+    factory.onSessionEnvelope((envelope) => envelopes.push(envelope));
+
+    await factory.createSession({ channel: sessionUri("injected-seq") });
+
+    expect(envelopes[0]?.serverSeq).toBe(100);
+    expect(envelopes[1]?.serverSeq).toBe(101);
+  });
+
+  it("keeps catalogue notifications outside the numbered action stream", async () => {
+    const factory = createSessionsFactory({ providers: [createMockProvider()], now: TEST_NOW });
+    const catalogue: CatalogueNotification[] = [];
+    const envelopes: ActionEnvelope[] = [];
+    factory.onCatalogueNotification((notification) => catalogue.push(notification));
+    factory.onSessionEnvelope((envelope) => envelopes.push(envelope));
+    const uri = sessionUri("catalogue-outside-stream");
+
+    await factory.createSession({ channel: uri, provider: "mock" });
+
+    expect(catalogue.map((notification) => notification.method)).toEqual([
+      "root/sessionAdded",
+      "root/sessionSummaryChanged",
+    ]);
+    // Catalogue events follow their own protocol shape: they carry no action
+    // envelope and never consume the connection-wide sequence.
+    for (const notification of catalogue) {
+      expect(notification).not.toHaveProperty("serverSeq");
+    }
+    expect(envelopes.map((envelope) => envelope.serverSeq)).toEqual([1, 2]);
+    expect(factory.getSessionSnapshot(uri)?.fromSeq).toBe(1);
   });
 });

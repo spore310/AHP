@@ -25,44 +25,87 @@ export type JsonRpcRequestId = z.infer<typeof jsonRpcRequestIdSchema>;
 export const jsonRpcResponseIdSchema = jsonRpcRequestIdSchema.nullable();
 export type JsonRpcResponseId = z.infer<typeof jsonRpcResponseIdSchema>;
 
-export const jsonRpcErrorSchema = z.strictObject({
+// Known members are validated strictly; unknown additive members are discarded
+// so a compatible protocol extension does not invalidate an otherwise valid
+// error object. Security-sensitive known members stay typed.
+export const jsonRpcErrorSchema = z.object({
   code: z.number().int(),
   message: z.string(),
   data: z.unknown().optional(),
 });
 export type JsonRpcError = z.infer<typeof jsonRpcErrorSchema>;
 
-export const jsonRpcRequestSchema = z.strictObject({
-  jsonrpc: z.literal(JSONRPC_VERSION),
-  method: z.string(),
-  params: jsonRpcParamsSchema,
-  id: jsonRpcRequestIdSchema,
-});
+// A message's kind is decided by its members before any member is validated.
+// Discriminating on shape first is required: validating a request against a
+// stripping notification schema would remove its `id` and misclassify it as a
+// notification. Shaping also preserves request/response and result/error
+// exclusivity while still tolerating unknown additive members.
+const isJsonObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const shapedMessage = <TSchema extends z.ZodType>(
+  isShape: (value: Record<string, unknown>) => boolean,
+  shapeName: string,
+  schema: TSchema,
+): z.ZodType<z.output<TSchema>> =>
+  z
+    .custom<unknown>((value): boolean => isJsonObject(value) && isShape(value), {
+      message: `Not a JSON-RPC ${shapeName}`,
+    })
+    .pipe(schema);
+
+const hasMethod = (value: Record<string, unknown>): boolean => "method" in value;
+const hasId = (value: Record<string, unknown>): boolean => "id" in value;
+const hasResult = (value: Record<string, unknown>): boolean => "result" in value;
+const hasError = (value: Record<string, unknown>): boolean => "error" in value;
+
+export const jsonRpcRequestSchema = shapedMessage(
+  (value): boolean => hasMethod(value) && hasId(value) && !hasResult(value) && !hasError(value),
+  "request",
+  z.object({
+    jsonrpc: z.literal(JSONRPC_VERSION),
+    method: z.string(),
+    params: jsonRpcParamsSchema,
+    id: jsonRpcRequestIdSchema,
+  }),
+);
 export type JsonRpcRequest = z.infer<typeof jsonRpcRequestSchema>;
 
-export const jsonRpcNotificationSchema = z.strictObject({
-  jsonrpc: z.literal(JSONRPC_VERSION),
-  method: z.string(),
-  params: jsonRpcParamsSchema,
-});
+export const jsonRpcNotificationSchema = shapedMessage(
+  (value): boolean => hasMethod(value) && !hasId(value) && !hasResult(value) && !hasError(value),
+  "notification",
+  z.object({
+    jsonrpc: z.literal(JSONRPC_VERSION),
+    method: z.string(),
+    params: jsonRpcParamsSchema,
+  }),
+);
 export type JsonRpcNotification = z.infer<typeof jsonRpcNotificationSchema>;
 
-export const jsonRpcResultResponseSchema = z.strictObject({
-  jsonrpc: z.literal(JSONRPC_VERSION),
-  // Explicit boolean return type: a type predicate would narrow `result`
-  // below `unknown` and break the Microsoft conformance assertions.
-  result: z
-    .unknown()
-    .refine((value): boolean => value !== undefined, "result must not be undefined (it would be dropped by JSON serialization)"),
-  id: jsonRpcResponseIdSchema,
-});
+export const jsonRpcResultResponseSchema = shapedMessage(
+  (value): boolean => !hasMethod(value) && hasId(value) && hasResult(value) && !hasError(value),
+  "success response",
+  z.object({
+    jsonrpc: z.literal(JSONRPC_VERSION),
+    // Explicit boolean return type: a type predicate would narrow `result`
+    // below `unknown` and break the Microsoft conformance assertions.
+    result: z
+      .unknown()
+      .refine((value): boolean => value !== undefined, "result must not be undefined (it would be dropped by JSON serialization)"),
+    id: jsonRpcResponseIdSchema,
+  }),
+);
 export type JsonRpcResultResponse = z.infer<typeof jsonRpcResultResponseSchema>;
 
-export const jsonRpcErrorResponseSchema = z.strictObject({
-  jsonrpc: z.literal(JSONRPC_VERSION),
-  error: jsonRpcErrorSchema,
-  id: jsonRpcResponseIdSchema,
-});
+export const jsonRpcErrorResponseSchema = shapedMessage(
+  (value): boolean => !hasMethod(value) && hasId(value) && !hasResult(value) && hasError(value),
+  "error response",
+  z.object({
+    jsonrpc: z.literal(JSONRPC_VERSION),
+    error: jsonRpcErrorSchema,
+    id: jsonRpcResponseIdSchema,
+  }),
+);
 export type JsonRpcErrorResponse = z.infer<typeof jsonRpcErrorResponseSchema>;
 
 export const jsonRpcResponseSchema = z.union([

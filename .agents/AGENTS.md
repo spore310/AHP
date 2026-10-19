@@ -10,8 +10,9 @@ Use the smallest relevant instruction set.
 | `.agents/skills/code-review-documentation-drift/SKILL.md` | Required instruction-driven procedure for explicit code reviews    |
 | `.agents/skills/documentation/SKILL.md`                   | Documentation creation and updates                                 |
 | `.agents/memory/documentation-review.md`                  | Tracked project setting for the documentation-update prompt        |
-| `docs/gates/` (not yet created)                                             | Gate descriptions and dated validation evidence                    |
-| `docs/plans/` (not yet created)                                             | Plans; honor the status and scope declared by each document        |
+| `docs/gates/`                                             | Gate descriptions and dated validation evidence                    |
+| `docs/plans/`                                             | Plans; honor the status and scope declared by each document        |
+| `docs/architecture/`, `docs/technical/`                   | Cross-cutting architecture and verified technical behavior         |
 
 Read relevant documentation before changing an affected capability.
 
@@ -28,7 +29,6 @@ Established:
 - Vite 8.3.4
 - Vitest 5.0.5
 - vite-node 6.0.0
-- JOSE 6.2.12
 - Zod 4.6.5
 - @microsoft/agent-host-protocol 1.0.0
 
@@ -153,14 +153,20 @@ Detailed rules belong to [the documentation skill](skills/documentation/SKILL.md
 
 Do not duplicate them here.
 
+Every source file under `src/` and `env/` must be mapped by its module
+`README.md`; the documentation gate enforces this. See
+[`../docs/gates/documentation.md`](../docs/gates/documentation.md).
+
 ---
 
 # Code Review Documentation Drift
 
-This repository has no executable agent lifecycle callback registry. Instead,
-the root instructions require every explicit production, security, quality,
-architecture, maintainability, performance, API, feature, contract, or general
-code review to use the
+The native Copilot hooks in `.github/hooks/ahp-agent-workflow.json` inject the
+workflow at session start and run `pnpm validate` before stopping when the
+worktree has changes. They do not mechanically review plans or replace the
+instruction-driven checkpoints below. Every explicit production, security,
+quality, architecture, maintainability, performance, API, feature, contract,
+or general code review must use the
 [documentation-drift review skill](skills/code-review-documentation-drift/SKILL.md).
 
 Documentation inspection inherits the review scope.
@@ -186,6 +192,29 @@ Use:
 - **Deprecated** — deliberately abandoned
 
 Never silently convert a proposal into an established decision.
+
+<!-- architecture-aware-delivery:begin -->
+# Architecture-Aware Task Delivery
+
+For repository task planning, implementation, debugging, refactoring, test work,
+and explicit code/architecture/security/quality reviews, read
+[the task execution and review hook](hooks/task-execution-review.md) and follow
+[architecture-aware-delivery](skills/architecture-aware-delivery/SKILL.md).
+Use its fast path for trivial edits; do not impose a large plan on every task.
+
+Honor plan-only, review-only, and execute permissions. Identify module ownership,
+current-vs-target state, invariants, and acceptance evidence before nontrivial
+changes. Review the plan before implementing and the final candidate before
+claiming completion. Delegate only when supported, authorized, bounded, and
+worthwhile; do not invent subagents or silently change models/accounts.
+
+This is an instruction-driven lifecycle hook, not a Git hook or automatically
+registered native callback. It composes with the existing documentation-drift
+review procedure without duplicating its trigger, prompt, or review scope.
+
+Development subagents remain outside the AHP product: no server-side model
+inference, Pi execution, or agent runtime is authorized by this workflow.
+<!-- architecture-aware-delivery:end -->
 
 # Agent Workflow
 
@@ -228,7 +257,16 @@ Commits must:
 # Validation
 
 Run `pnpm validate` before considering a change complete. It runs lint,
-typecheck, tests, and the production build, in that order.
+typecheck, tests, the documentation gate, and the production build, in that
+order:
+
+```text
+pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run docs:check && pnpm run build
+```
+
+The documentation gate (`pnpm docs:check`) fails when a `src/` or `env/` source
+file is not mapped by its module `README.md`. See
+[`docs/gates/documentation.md`](../docs/gates/documentation.md).
 
 # Guiding Principle
 

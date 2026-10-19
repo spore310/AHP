@@ -1,1 +1,1 @@
-export { buildSessionSummary } from "./helpers";
+export { buildSessionSummary, changedSessionSummaryFields } from "./helpers";
