@@ -54,6 +54,7 @@ export const createWebSocketServer = (
     handlers = {},
     onConnection,
     beforeDispatch,
+    deferredRequestCompletionMethods = new Map(),
     shutdownTimeoutMs = WEBSOCKET_SHUTDOWN_TIMEOUT_MS,
   } = options;
 
@@ -134,7 +135,7 @@ export const createWebSocketServer = (
     socket.on("pong", () => {
       alive.add(socket);
     });
-    const context = attachConnection(socket, handlers, beforeDispatch);
+    const context = attachConnection(socket, handlers, beforeDispatch, deferredRequestCompletionMethods);
     onConnection?.(context);
   });
 

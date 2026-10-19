@@ -86,6 +86,22 @@ assertion; do not widen it.
   sequence rather than inventing one (see
   [`docs/plans/ProvidersPlan.md`](../plans/ProvidersPlan.md)).
 
+## Application tool extension
+
+Typed session snapshots carry the server-authored visible contract manifest
+under `_meta["x-ahp-application"]`. This does not extend AHP's top-level state or
+claim the host implements `serverTools`. Client advertisements use the standard
+`session/activeClientSet` action with exact revision metadata under each tool's
+`_meta["x-ahp-tool-contract"]`; full schemas survive parsing for comparison.
+
+Actual client execution uses explicitly non-standard namespaced methods:
+`x-ahp/tools/call` is a request, `x-ahp/tools/invoke` is a private server
+notification, and `x-ahp/tools/complete` is a client notification. Ordinary
+`AhpClient` users need the [tool client adapter](../../src/toolClient/README.md)
+for this extension. The server validates and routes; a registered local client
+implementation executes. These operations add no persistence or server-side
+filesystem/model runtime. Authentication remains deferred.
+
 ## Gotchas
 
 - Do not read a const enum member directly; add a pinned mirror instead.

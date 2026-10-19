@@ -5,6 +5,7 @@ import type { SessionsFactory } from "@sessions/types";
 
 import { createWebSocketServer } from "../server";
 import { createAHPBinding } from "../ahp";
+import { TOOL_CALL_METHOD, TOOL_COMPLETE_METHOD } from "../ahp/constants";
 import type { AHPServerHandle, AHPServerOptions } from "./types";
 
 const HOST_STOPPED = "AHP host cannot be started after shutdown has begun.";
@@ -38,6 +39,10 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     beforeDispatch: (dispatch) => {
       binding.beforeDispatch(dispatch);
     },
+    deferredRequestCompletionMethods: new Map([[TOOL_CALL_METHOD, {
+      method: TOOL_COMPLETE_METHOD,
+      matches: (params, context) => binding.isToolCompletion(params, context),
+    }]]),
   });
   let stopped = false;
 

@@ -42,6 +42,10 @@ await createApplicationSession(factory, {
 
 The helper calls `factory.createSession`. It does not build a WebSocket frame, choose a provider that can disagree with the type, or compile schemas.
 
+The created snapshot lists the visible contracts under `_meta["x-ahp-application"].toolContracts`, including input schemas. `factory.getSessionToolManifest(channel)` returns that same list and does not allocate a sequence number. A client advertises a subset of those contracts with `session/activeClientSet`, using descriptors from `toAhpToolDefinition`. A different contract or schema is rejected and does not change the session.
+
+`createBaselineSessionApplication()` supplies `code-review@1` and `coding@1` for the example host. Those contracts do not read or write files.
+
 ## Not current
 
-`createApplicationHost` is not implemented. The caller still composes the catalogue, the tool map, and the factory. Authentication that can promote a connection to `admin` is not implemented. Hiding a tool is not execution control.
+`createApplicationHost` is not implemented. Authentication that can promote a connection to `admin` is not implemented. Hiding or admitting a tool is not execution control.

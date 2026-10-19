@@ -18,6 +18,7 @@ the binding does not import sockets into that module.
 | `helpers/connection.ts` | `attachConnection`: per-socket framing, serialized dispatch, reply settlement, and error mapping. |
 | `helpers/ahp/index.ts` | Public AHP binding exports. |
 | `helpers/ahp/helpers.ts` | `createAHPBinding`: initialize, subscriptions, publication, and connection lifetime. |
+| `helpers/ahp/toolInvocation.ts` | Namespaced client-executed tool calls, accepted executor ownership, contract validation, and settlement. |
 | `helpers/ahp/types.ts` | AHP peer, adapter, and parameter schemas. |
 | `helpers/ahp/constants.ts` | Method kinds, baseline action inventory, and pending-delivery limit. |
 | `helpers/host/index.ts` | Public composed-host exports. |
@@ -149,6 +150,25 @@ const server = createWebSocketServer({
 | [`src/tests/websocket/composition.test.ts`](../tests/websocket/composition.test.ts) | Two composed hosts do not share sessions; stop and failed start are terminal for start and session mutations. |
 | [`src/tests/websocket/sdk.test.ts`](../tests/websocket/sdk.test.ts) | Installed SDK client initializes, observes catalogue fan-out, and receives one accepted rename. |
 | [`src/tests/websocket/sessionTypeCapacity.test.ts`](../tests/websocket/sessionTypeCapacity.test.ts) | A header-enum session type accepts creation, omits admin tools, and rejects object or unmapped headers. |
+| [`src/tests/websocket/toolInvocation.test.ts`](../tests/websocket/toolInvocation.test.ts) | Real SDK sockets: matching manifests, atomic/private advertisement denial, local calls/results and privacy, outsider/schema rejection, forged/stale/ambiguous executors, disconnect/URI reuse, concurrent self-calls, capacity/release, and empty registration. |
+| [`src/tests/websocket/deferred.test.ts`](../tests/websocket/deferred.test.ts) | A broken completion predicate cannot escape the ordered socket queue. |
+
+## Namespaced client tool invocation
+
+The opt-in `x-ahp/tools/call` request validates against the session's issued
+manifest and routes work only to the unique connected peer that both submitted
+an accepted advertisement and is still subscribed to that session. Duplicate
+claimed client IDs are ambiguous and rejected; a stale advertisement never
+routes to a replacement connection. The server never executes tool code.
+Invocation and completion are namespaced extensions, not standard AHP methods;
+inputs and results are not fanned out. Completion is accepted only from the
+exact executor connection that received the call. The caller must also be
+subscribed to the session. The raw receive loop defers
+only the invocation request response and permits only its matching completion
+notification through that pending request; other frames remain serialized. This
+allows self-calls without changing ordinary AHP request ordering. See
+[`src/toolClient/README.md`](../toolClient/README.md) for the client adapter and
+its trust limitations.
 
 ## Related Documentation
 

@@ -2,8 +2,9 @@
 
 `src/` is a capability-oriented modular monolith. Each capability below is a
 folder with its own colocated `README.md` and an `index.ts` that defines its
-public surface. `src/index.ts` is the **composition root**: the only place that
-wires capabilities together and the process entrypoint.
+public surface. `src/index.ts` is the **process composition root**. It combines
+validated environment settings, the baseline application policy and the composed
+AHP server.
 
 Start here, then read the README of the capability you are changing.
 
@@ -13,7 +14,10 @@ Start here, then read the README of the capability you are changing.
 | ---------- | ------ | -------------- |
 | `jsonrpc/` | [`jsonrpc/README.md`](jsonrpc/README.md) | JSON-RPC 2.0 message schemas, the owned `RpcError`, and the allowlisted error codes. No transport, no I/O. |
 | `sessions/` | [`sessions/README.md`](sessions/README.md) | The session engine: provider registry, session store, state reducer, sequencing, and lifecycle. AHP-aware but transport-agnostic. |
-| `websocket/` | [`websocket/README.md`](websocket/README.md) | JSON-RPC over WebSocket transport: upgrade handling, per-socket dispatch, heartbeat, and race-safe start/stop. |
+| `websocket/` | [`websocket/README.md`](websocket/README.md) | Raw transport, AHP subscriptions/publication, and the composed host. |
+| `tools/` | [`tools/README.md`](tools/README.md) | Immutable exact-revision contracts, schema validation and descriptor projection. |
+| `application/` | [`application/README.md`](application/README.md) | Fresh baseline policy for `code-review` and `coding` sessions. |
+| `toolClient/` | [`toolClient/README.md`](toolClient/README.md) | Public SDK adapter for local implementations and namespaced tool invocation. |
 | `tests/` | see per-module **Testing** sections | All tests. Never colocated with source. |
 
 Cross-cutting behavior that no single capability owns lives in
@@ -35,8 +39,8 @@ Exported from `src/index.ts`:
 - `installShutdownHandlers(server: WebSocketServerHandle): () => void` — wires
   `SIGINT`/`SIGTERM` to `server.stop()` and returns a function that removes the
   handlers.
-- `main(): Promise<void>` — loads config, creates the server, starts it, and logs
-  the bound address.
+- `main(): Promise<void>` — loads config, composes the mock provider with
+  `createBaselineSessionApplication()`, starts the AHP server and logs its address.
 
 ## 5-Minute Usage
 
@@ -71,9 +75,11 @@ void main; // only call main() when you actually want the default wiring
 
 ## Caveats
 
-- **Only `ping` is wired today.** `main()` passes `handlers: { ping: () => null }`.
-  Session creation, subscription, and chat are not exposed on the wire yet; see
-  [`docs/plans/ProvidersPlan.md`](../docs/plans/ProvidersPlan.md).
+- **The default host is typed.** Native creation without a selector uses
+  `code-review@1`; `config["x-ahp-session-type"] = "coding"` selects the larger
+  contract set. Initialize, create, subscribe, list/dispose and the supported
+  session actions are wired. Chat/model execution is not implemented. The
+  server lists contracts; client implementations execute tools.
 - **Import is inert.** The entrypoint guard compares `process.argv[1]` to this
   module's path, so importing `src/index.ts` from tests or tools never starts a
   listener. Running `vite-node src/index.ts` directly does **not** satisfy the

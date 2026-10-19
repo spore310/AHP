@@ -12,10 +12,12 @@ import {
   JSONRPC_PUBLIC_ERROR_CODES,
   JSONRPC_VERSION,
   jsonRpcMessageSchema,
+  jsonRpcParamsSchema,
   parseUnknownJson,
   type JsonRpcErrorResponse,
   type JsonRpcMessage,
   type JsonRpcNotification,
+  type JsonRpcParams,
   type JsonRpcRequest,
   type JsonRpcRequestId,
   type JsonRpcResponseId,
@@ -212,11 +214,35 @@ const handleNotification = async (
   }
 };
 
+const frameMethod = (text: string): {
+  readonly method: string;
+  readonly kind: "request" | "notification";
+  readonly params: JsonRpcParams;
+} | undefined => {
+  try {
+    const value = parseUnknownJson(text);
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+    const frame = value as Record<string, unknown>;
+    if (typeof frame.method !== "string") return undefined;
+    const parsedParams = jsonRpcParamsSchema.safeParse(frame.params);
+    if (!parsedParams.success) return undefined;
+    return {
+      method: frame.method,
+      kind: Object.hasOwn(frame, "id") ? "request" : "notification",
+      params: parsedParams.data,
+    };
+  } catch {
+    return undefined;
+  }
+};
+
 const handleFrame = async (
   text: string,
   context: WebSocketConnectionContext,
   handlers: JsonRpcHandlers,
   beforeDispatch: ((dispatch: WebSocketDispatchContext) => void) | undefined,
+  deferredRequests: ReadonlySet<string>,
+  onDeferredRequest: (method: string, promise: Promise<void>) => void,
 ): Promise<void> => {
   let decoded: unknown;
   try {
@@ -234,7 +260,12 @@ const handleFrame = async (
 
   if ("method" in message) {
     if ("id" in message) {
-      await handleRequest(message, context, handlers, beforeDispatch);
+      const request = handleRequest(message, context, handlers, beforeDispatch);
+      if (deferredRequests.has(message.method)) {
+        onDeferredRequest(message.method, request);
+        return;
+      }
+      await request;
     } else {
       await handleNotification(message, context, handlers, beforeDispatch);
     }
@@ -255,10 +286,14 @@ export const attachConnection = (
   socket: WebSocket,
   handlers: JsonRpcHandlers,
   beforeDispatch?: (dispatch: WebSocketDispatchContext) => void,
+  deferredRequestCompletionMethods: ReadonlyMap<string, import("../types").DeferredRequestCompletionRule> = new Map(),
 ): WebSocketConnectionContext => {
   const closeHandlers = new Set<() => void>();
   let closed = false;
-  let tail: Promise<void> = Promise.resolve();
+  let processingFrame = false;
+  const deferredRequests = new Set(deferredRequestCompletionMethods.keys());
+  const pendingDeferredRequests = new Map<Promise<void>, string>();
+  const queuedFrames: string[] = [];
 
   const context: WebSocketConnectionContext = {
     connectionId: randomUUID(),
@@ -298,6 +333,7 @@ export const attachConnection = (
       return;
     }
     closed = true;
+    queuedFrames.length = 0;
     for (const handler of [...closeHandlers]) {
       try {
         handler();
@@ -308,17 +344,65 @@ export const attachConnection = (
     closeHandlers.clear();
   };
 
+  const dispatchDeferred = (method: string, request: Promise<void>): void => {
+    pendingDeferredRequests.set(request, method);
+    void request.then(() => {
+      pendingDeferredRequests.delete(request);
+      pumpFrames();
+    }, () => {
+      pendingDeferredRequests.delete(request);
+      pumpFrames();
+    });
+  };
+
+  const pumpFrames = (): void => {
+    if (closed || processingFrame || queuedFrames.length === 0) return;
+    let nextIndex = 0;
+    if (pendingDeferredRequests.size > 0) {
+      const head = frameMethod(queuedFrames[0] ?? "");
+      const headIsDeferredRequest = head?.kind === "request" && deferredRequests.has(head.method);
+      if (!headIsDeferredRequest) {
+        nextIndex = queuedFrames.findIndex((text) => {
+          const frame = frameMethod(text);
+          return frame?.kind === "notification" && [...pendingDeferredRequests.values()].some((requestMethod) => {
+            const rule = deferredRequestCompletionMethods.get(requestMethod);
+            if (rule === undefined || rule.method !== frame.method) return false;
+            try {
+              return rule.matches(frame.params, context);
+            } catch {
+              // A broken application matcher must not escape the socket loop
+              // or grant permission to bypass ordered frames.
+              return false;
+            }
+          });
+        });
+        if (nextIndex < 0) return;
+      }
+    }
+    const [text] = queuedFrames.splice(nextIndex, 1);
+    if (text === undefined) return;
+    processingFrame = true;
+    void handleFrame(text, context, handlers, beforeDispatch, deferredRequests, dispatchDeferred).then(() => {
+      processingFrame = false;
+      pumpFrames();
+    }, () => {
+      processingFrame = false;
+      pumpFrames();
+    });
+  };
+
   socket.on("message", (data, isBinary) => {
-    tail = tail.then(async () => {
-      if (closed) {
-        return;
-      }
-      if (isBinary) {
-        socket.close(WEBSOCKET_CLOSE_UNSUPPORTED_DATA, "Binary frames are not supported");
-        return;
-      }
-      await handleFrame(frameToText(data), context, handlers, beforeDispatch);
-    }).catch(() => undefined);
+    if (closed) return;
+    if (isBinary) {
+      socket.close(WEBSOCKET_CLOSE_UNSUPPORTED_DATA, "Binary frames are not supported");
+      return;
+    }
+    if (queuedFrames.length >= 256) {
+      socket.close(1013, "Too many queued frames");
+      return;
+    }
+    queuedFrames.push(frameToText(data));
+    pumpFrames();
   });
 
   socket.on("close", () => {

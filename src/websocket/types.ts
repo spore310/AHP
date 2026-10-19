@@ -64,6 +64,12 @@ export type JsonRpcHandler = (
 /** JSON-RPC methods the server can dispatch, keyed by method name. */
 export type JsonRpcHandlers = Readonly<Record<string, JsonRpcHandler>>;
 
+/** A completion that may bypass a deferred request on the same socket. */
+export interface DeferredRequestCompletionRule {
+  readonly method: string;
+  matches(params: JsonRpcParams, context: WebSocketConnectionContext): boolean;
+}
+
 /** Options for {@link createWebSocketServer}. */
 export interface WebSocketServerOptions {
   /** Network interface to bind. */
@@ -82,6 +88,12 @@ export interface WebSocketServerOptions {
    * and sends no response.
    */
   readonly beforeDispatch?: (dispatch: WebSocketDispatchContext) => void;
+  /**
+   * Opts selected request methods into deferred replies so matching completion
+   * notifications can be processed on the same socket. All other methods retain
+   * serialized frame handling.
+   */
+  readonly deferredRequestCompletionMethods?: ReadonlyMap<string, DeferredRequestCompletionRule>;
   /**
    * Upper bound on graceful shutdown before remaining clients and connections
    * are force-closed. Shutdown still waits for local release after a forced

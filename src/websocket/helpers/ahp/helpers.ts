@@ -32,7 +32,10 @@ import {
   PENDING_DELIVERY_LIMIT,
   ROOT_SCHEME,
   SESSION_SCHEME,
+  TOOL_CALL_METHOD,
+  TOOL_COMPLETE_METHOD,
 } from "./constants";
+import { createToolInvocationBroker } from "./toolInvocation";
 import {
   channelParamsSchema,
   dispatchActionParamsSchema,
@@ -77,6 +80,7 @@ const assertBaselinePayload = (action: Record<string, unknown>): void => {
 
 export interface AHPBinding {
   readonly handlers: JsonRpcHandlers;
+  isToolCompletion(params: unknown, context: WebSocketConnectionContext): boolean;
   onConnection(context: WebSocketConnectionContext): void;
   beforeDispatch(dispatch: WebSocketDispatchContext): void;
   dispose(): void;
@@ -186,6 +190,8 @@ export const createAHPBinding = (
     return peer;
   };
 
+  const toolInvocations = createToolInvocationBroker(factory, peers, requirePeer);
+
   const beginPending = (peer: AHPPeer, uri: string): void => {
     if (!peer.pending.has(uri)) {
       peer.pending.set(uri, []);
@@ -216,6 +222,7 @@ export const createAHPBinding = (
       return;
     }
     const session = notification.params.session;
+    toolInvocations.removeSession(session);
     for (const peer of peers.values()) {
       const subscribedToSession = peer.subscriptions.has(session) || peer.pending.has(session);
       if (subscribedToSession && !peer.subscriptions.has(ROOT_SCHEME)) {
@@ -338,6 +345,7 @@ export const createAHPBinding = (
       const parsed = channelParamsSchema.parse(params);
       peer.subscriptions.delete(parsed.channel);
       peer.pending.delete(parsed.channel);
+      toolInvocations.unsubscribe(peer, parsed.channel);
       return null;
     },
 
@@ -357,6 +365,10 @@ export const createAHPBinding = (
       requirePeer(context);
       return factory.listSessions(params);
     },
+
+    [TOOL_CALL_METHOD]: (params: unknown, context: WebSocketConnectionContext): Promise<unknown> => toolInvocations.call(params, context),
+
+    [TOOL_COMPLETE_METHOD]: (params: unknown, context: WebSocketConnectionContext): null => toolInvocations.complete(params, context),
 
     dispatchAction: (params: unknown, context: WebSocketConnectionContext): null => {
       const peer = requirePeer(context);
@@ -378,7 +390,9 @@ export const createAHPBinding = (
         clientId: peer.clientId,
       });
       if (envelope.rejectionReason !== undefined) {
-        publish(envelope.channel, actionNotification(envelope), peer.clientId);
+        sendToPeer(peer, actionNotification(envelope));
+      } else {
+        toolInvocations.rememberAdvertisement(peer, parsed.channel, envelope.action);
       }
       return null;
     },
@@ -386,6 +400,9 @@ export const createAHPBinding = (
 
   return {
     handlers,
+    isToolCompletion: (params: unknown, context: WebSocketConnectionContext): boolean => (
+      toolInvocations.isCompletion(params, context)
+    ),
     onConnection: (context: WebSocketConnectionContext): void => {
       if (disposed) {
         context.close();
@@ -405,6 +422,7 @@ export const createAHPBinding = (
         }
         peer.closeNotified = true;
         peer.phase = "closed";
+        toolInvocations.removeConnection(context.connectionId);
         peer.pending.clear();
         peer.subscriptions.clear();
         peers.delete(context.connectionId);
@@ -443,6 +461,7 @@ export const createAHPBinding = (
       } catch {
         // Continue releasing peers even if one unsubscribe fails.
       }
+      toolInvocations.dispose();
       for (const peer of [...peers.values()]) {
         peer.phase = "closed";
         peer.pending.clear();
