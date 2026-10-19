@@ -1,5 +1,5 @@
+import { SESSION_TYPE_KEY_PATTERN } from "@sessions/constants";
 import {
-  CONTRACT_KEY_PATTERN,
   MAX_CONTRACT_VERSION,
   MAX_MANIFEST_BYTES,
   MAX_TOOLS_PER_TYPE,
@@ -84,7 +84,7 @@ function captureDefinition(definition: SessionTypeDefinition): SessionTypeDefini
 }
 
 function assertIdentity(definition: SessionTypeDefinition): void {
-  if (!UUID_PATTERN.test(definition.id) || !CONTRACT_KEY_PATTERN.test(definition.key)) {
+  if (!UUID_PATTERN.test(definition.id) || !SESSION_TYPE_KEY_PATTERN.test(definition.key)) {
     throw new SessionTypeError("invalid-definition", "Invalid session type identity.");
   }
   if (!Number.isSafeInteger(definition.version) || definition.version < 1 || definition.version > MAX_CONTRACT_VERSION) {

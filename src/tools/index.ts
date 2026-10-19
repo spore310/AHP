@@ -15,6 +15,7 @@ export {
 
 export { createToolCatalogue } from "./helpers/catalogue";
 export { defineToolContract } from "./helpers/contracts";
+export { canonicalJsonEqual, toAhpToolDefinition } from "./helpers/protocol";
 export { ToolContractError } from "./types";
 export type {
   ToolCatalogue,

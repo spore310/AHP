@@ -1,10 +1,12 @@
 import { JsonRpcErrorCodes } from "@microsoft/agent-host-protocol";
 
+import { SESSION_TYPE_KEY_PATTERN } from "@sessions/constants";
 import { SessionsError } from "@sessions/helpers/errors";
 import { SessionTypeError } from "@sessions/helpers/sessionTypes";
-import { CONTRACT_KEY_PATTERN, SESSION_TYPE_SELECTOR_KEY, type ToolContractRef } from "@tools";
+import { SESSION_TYPE_SELECTOR_KEY, type ToolContractRef } from "@tools";
 
 import { ClientAccessRole, ToolAccessLevel } from "./constants";
+import { projectSessionToolManifest, type SessionToolManifest } from "./manifest";
 import type {
   AuthorizedToolGrant,
   SessionApplicationBinding,
@@ -16,7 +18,34 @@ export interface PreparedSessionCreation {
   readonly providerId: string;
   readonly providerConfig: Record<string, unknown>;
   readonly binding?: SessionApplicationBinding;
-  readonly visibleTools?: readonly ToolContractRef[];
+  readonly manifest?: SessionToolManifest;
+}
+
+/** Capture host policy once; later caller edits cannot switch a live factory's policy. */
+export function captureSessionApplication(
+  application: SessionApplicationOptions | undefined,
+): SessionApplicationOptions | undefined {
+  if (application === undefined) {
+    return undefined;
+  }
+  const { catalogue } = application;
+  return {
+    catalogue: {
+      list: catalogue.list.bind(catalogue),
+      resolveExisting: catalogue.resolveExisting.bind(catalogue),
+      resolveForCreation: catalogue.resolveForCreation.bind(catalogue),
+    },
+    ...(application.defaultType === undefined ? {} : { defaultType: { ...application.defaultType } }),
+    ...(application.role === undefined ? {} : { role: application.role }),
+    ...(application.authorizedTools === undefined
+      ? {}
+      : {
+          authorizedTools: new Map([...application.authorizedTools].map(([header, grants]) => [
+            header,
+            grants.map((grant) => ({ access: grant.access, ref: { ...grant.ref } })),
+          ])),
+        }),
+  };
 }
 
 /** Builds the header-enum map. Each session-type key points at its authorized tools. */
@@ -25,7 +54,7 @@ export function createSessionTypeToolMap(
 ): SessionTypeToolMap {
   const map = new Map<string, readonly AuthorizedToolGrant[]>();
   for (const [header, grants] of Object.entries(entries)) {
-    if (!CONTRACT_KEY_PATTERN.test(header)) {
+    if (!SESSION_TYPE_KEY_PATTERN.test(header)) {
       throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid session type header.");
     }
     map.set(header, grants.map((grant) => ({ ...grant, ref: { ...grant.ref } })));
@@ -59,7 +88,7 @@ export function prepareSessionCreation(
     if (split.selector !== undefined) {
       throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Session type selector is not supported.");
     }
-    return { providerId: providerId ?? "", providerConfig: split.providerConfig };
+    return { providerId: providerId ?? "", providerConfig: split.rest };
   }
 
   const selected = split.selector ?? application.defaultType;
@@ -88,7 +117,7 @@ export function prepareSessionCreation(
 
   let applicationConfig: Record<string, unknown>;
   try {
-    applicationConfig = resolved.config.parse(split.applicationConfig);
+    applicationConfig = resolved.config.parse(split.rest);
   } catch {
     throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid session type configuration.");
   }
@@ -97,38 +126,48 @@ export function prepareSessionCreation(
   if (application.authorizedTools !== undefined && grants === undefined) {
     throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid session type header.");
   }
+  if (grants?.some((grant) => !resolved.tools.some(
+    (tool) => tool.key === grant.ref.key && tool.version === grant.ref.version,
+  )) === true) {
+    throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Session type grant is not assigned to this type.");
+  }
   const role = application.role ?? ClientAccessRole.Anonymous;
   const visible = grants === undefined
     ? resolved.tools.map((tool) => ({ key: tool.key, version: tool.version }))
     : visibleTools(grants, role);
+  const binding: SessionApplicationBinding = {
+    typeId: resolved.definition.id,
+    key: resolved.definition.key,
+    version: resolved.definition.version,
+    config: applicationConfig,
+    tools: visible,
+  };
 
   return {
     providerId: resolved.definition.providerId,
-    providerConfig: split.providerConfig,
-    binding: {
-      typeId: resolved.definition.id,
-      key: resolved.definition.key,
-      version: resolved.definition.version,
-      config: applicationConfig,
-    },
-    visibleTools: visible,
+    providerConfig: {},
+    binding,
+    manifest: projectSessionToolManifest(
+      { id: binding.typeId, key: binding.key, version: binding.version },
+      resolved.tools,
+      visible,
+    ),
   };
 }
 
 function splitSelector(config: Readonly<Record<string, unknown>> | undefined): {
   readonly selector: { readonly key: string; readonly version?: number } | undefined;
-  readonly applicationConfig: Record<string, unknown>;
-  readonly providerConfig: Record<string, unknown>;
+  readonly rest: Record<string, unknown>;
 } {
   const supplied = config === undefined ? {} : { ...config };
-  const { [SESSION_TYPE_SELECTOR_KEY]: raw, ...providerConfig } = supplied;
+  const { [SESSION_TYPE_SELECTOR_KEY]: raw, ...rest } = supplied;
   if (raw === undefined) {
-    return { selector: undefined, applicationConfig: {}, providerConfig };
+    return { selector: undefined, rest };
   }
-  if (typeof raw !== "string" || !CONTRACT_KEY_PATTERN.test(raw)) {
+  if (typeof raw !== "string" || !SESSION_TYPE_KEY_PATTERN.test(raw)) {
     throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid session type header.");
   }
-  return { selector: { key: raw }, applicationConfig: providerConfig, providerConfig: {} };
+  return { selector: { key: raw }, rest };
 }
 
 function enabledVersion(application: SessionApplicationOptions, key: string): number {

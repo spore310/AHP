@@ -11,6 +11,9 @@ import {
   toClientSessionAction,
   toSupportedSessionAction,
 } from "@sessions/helpers/actions";
+import { admitTypedAdvertisement } from "@sessions/helpers/application/admission";
+import { captureSessionApplication } from "@sessions/helpers/application/helpers";
+import { projectSessionToolManifest } from "@sessions/helpers/application/manifest";
 import { SessionsDisposingError, SessionsError } from "@sessions/helpers/errors";
 import { createInMemorySessionRegistry } from "@sessions/helpers/registry";
 import {
@@ -41,6 +44,17 @@ import type {
 export function createSessionsFactory(options: SessionsFactoryOptions): SessionsFactory {
   const providers = buildProviderMap(options.providers);
   const defaultProviderId = resolveDefaultProviderId(options, providers);
+  const application = captureSessionApplication(options.application);
+  if (application !== undefined) {
+    for (const definition of application.catalogue.list()) {
+      if (!providers.has(definition.providerId)) {
+        throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Session type provider is not registered.");
+      }
+    }
+    if (application.defaultType !== undefined) {
+      application.catalogue.resolveForCreation(application.defaultType);
+    }
+  }
   const sessions = options.registryFactory === undefined
     ? createInMemorySessionRegistry()
     : options.registryFactory();
@@ -57,7 +71,7 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
     providers,
     defaultProviderId,
     sessions,
-    application: options.application,
+    application,
     now,
     nextServerSeq,
     emitCatalogueNotification: (notification: CatalogueNotification): void => {
@@ -154,6 +168,25 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
       const record = sessions.get(sessionUri);
       return record === undefined ? undefined : buildSessionSnapshot(record);
     },
+    getSessionToolManifest: (sessionUri: string) => {
+      const record = sessions.get(sessionUri);
+      if (record?.application === undefined || application === undefined) {
+        return undefined;
+      }
+      const resolved = application.catalogue.resolveExisting({
+        key: record.application.key,
+        version: record.application.version,
+      });
+      return structuredClone(projectSessionToolManifest(
+        {
+          id: record.application.typeId,
+          key: record.application.key,
+          version: record.application.version,
+        },
+        resolved.tools,
+        record.application.tools,
+      ));
+    },
     listSessionSnapshots: (): SessionSnapshot[] => {
       return sessions.records().map((record) => buildSessionSnapshot(record));
     },
@@ -220,10 +253,35 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
         } satisfies ActionEnvelope;
       }
 
+      const admitted = admitTypedAdvertisement(
+        record,
+        dependencies.application,
+        parsedAction,
+        clientId,
+      );
+      if ("rejectionReason" in admitted) {
+        return {
+          channel,
+          action: toClientSessionAction(parsedAction),
+          serverSeq: sequence.next(),
+          origin: { clientId, clientSeq: parsedClientSeq },
+          rejectionReason: admitted.rejectionReason,
+        } satisfies ActionEnvelope;
+      }
+      if (!isBaselineSupportedSessionAction(admitted.accepted)) {
+        return {
+          channel,
+          action: toClientSessionAction(parsedAction),
+          serverSeq: sequence.next(),
+          origin: { clientId, clientSeq: parsedClientSeq },
+          rejectionReason: BASELINE_UNSUPPORTED_ACTION_REASON,
+        } satisfies ActionEnvelope;
+      }
+
       const before = buildSessionSummary(record);
       const envelope = applySessionAction(
         record,
-        toSupportedSessionAction(parsedAction),
+        toSupportedSessionAction(admitted.accepted),
         now().toISOString(),
         nextServerSeq,
       );

@@ -17,6 +17,14 @@ export const ROOT_CHANNEL_URI = "ahp-root://";
 /** Scheme prefix every session channel URI starts with (`ahp-session:/<id>`). */
 export const SESSION_URI_PREFIX = "ahp-session:/";
 
+/**
+ * Session-type header key.
+ *
+ * A single segment such as `coding` is allowed. Tool keys stay on the stricter
+ * catalogue pattern.
+ */
+export const SESSION_TYPE_KEY_PATTERN = /^[a-z][a-z0-9]*([.-][a-z0-9]+)*$/;
+
 /** Title a session carries until the host generates a real one. */
 export const DEFAULT_SESSION_TITLE = "New Session";
 

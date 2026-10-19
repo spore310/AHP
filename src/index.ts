@@ -3,8 +3,9 @@ import { fileURLToPath } from "node:url";
 
 import { loadEnv } from "@env";
 
-import { createAHPServer, type WebSocketServerHandle } from "./websocket";
+import { createBaselineSessionApplication } from "./application";
 import { mockProvider } from "@sessions/mock";
+import { createAHPServer, type WebSocketServerHandle } from "./websocket";
 
 export const APP_NAME = "Agent Hosting Protocol";
 
@@ -36,7 +37,10 @@ export const main = async (): Promise<void> => {
   const server = createAHPServer({
     host: config.AGENT_HOSTING_PROTOCOL_WEBSOCKET_HOST,
     port: config.AGENT_HOSTING_PROTOCOL_WEBSOCKET_PORT,
-    sessions: { providers: [mockProvider] },
+    sessions: {
+      providers: [mockProvider],
+      application: createBaselineSessionApplication(),
+    },
   });
 
   const address = await server.start();

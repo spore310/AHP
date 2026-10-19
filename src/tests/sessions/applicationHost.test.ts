@@ -68,7 +68,7 @@ describe("createApplicationSession", () => {
     });
 
     expect(factory.getSessionSnapshot(channel)?.state._meta).toMatchObject({
-      "x-ahp-application": { key: "code.review" },
+      "x-ahp-application": { sessionType: { key: "code.review" } },
     });
   });
 

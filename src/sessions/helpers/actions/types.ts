@@ -36,11 +36,16 @@ const jsonSchemaPropertySchema = z.custom<object>(
   (value): value is object => typeof value === "object" && value !== null && !Array.isArray(value),
 );
 
+// JSON Schema is an opaque data language, not the tool descriptor envelope.
+// Preserve its root keywords for exact contract comparison without compiling
+// client data. Known outer fields stay validated; the admission comparator is
+// bounded and rejects non-JSON values.
 const toolSchemaObject = z.object({
   type: z.literal("object"),
   properties: z.record(z.string(), jsonSchemaPropertySchema).optional(),
   required: z.array(z.string()).optional(),
-});
+  additionalProperties: z.union([z.boolean(), jsonSchemaPropertySchema]).optional(),
+}).catchall(z.unknown());
 
 const toolDefinitionSchema = z.object({
   name: z.string().min(1),

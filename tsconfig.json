@@ -22,8 +22,12 @@
       "@jsonrpc/*": ["./src/jsonrpc/*"],
       "@sessions": ["./src/sessions/index.ts"],
       "@sessions/*": ["./src/sessions/*"],
+      "@application": ["./src/application/index.ts"],
+      "@application/*": ["./src/application/*"],
       "@tools": ["./src/tools/index.ts"],
       "@tools/*": ["./src/tools/*"],
+      "@toolClient": ["./src/toolClient/index.ts"],
+      "@toolClient/*": ["./src/toolClient/*"],
       "@websocket": ["./src/websocket/index.ts"],
       "@websocket/*": ["./src/websocket/*"]
     }

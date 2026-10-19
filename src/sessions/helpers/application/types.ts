@@ -33,4 +33,6 @@ export interface SessionApplicationBinding {
   readonly key: string;
   readonly version: number;
   readonly config: Readonly<Record<string, unknown>>;
+  /** Visible tool revisions pinned at creation. Definitions stay in the catalogue. */
+  readonly tools: readonly ToolContractRef[];
 }

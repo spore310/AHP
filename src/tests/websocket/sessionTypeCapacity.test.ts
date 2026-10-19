@@ -130,10 +130,17 @@ describe("session type capacity", () => {
     await expect(frames.waitFor(responseWithId(2))).resolves.toMatchObject({ id: 2, result: null });
     expect(host.sessions.getSessionSnapshot(accepted)?.state._meta).toMatchObject({
       "x-ahp-application": {
-        key: defined.header,
-        tools: [{ key: standardTool.key, version: standardTool.version }],
+        sessionType: { key: defined.header, version: 1 },
+        toolContracts: [{
+          key: standardTool.key,
+          version: standardTool.version,
+          definition: { name: standardTool.name, inputSchema: standardTool.inputSchema },
+        }],
       },
     });
+    expect(host.sessions.getSessionToolManifest(accepted)?.toolContracts).toEqual([
+      expect.objectContaining({ key: standardTool.key, version: standardTool.version }),
+    ]);
     expect(JSON.stringify(host.sessions.getSessionSnapshot(accepted)?.state._meta)).not.toContain(adminTool.key);
 
     const objectChannel = `${SESSION_URI_PREFIX}capacity-object`;

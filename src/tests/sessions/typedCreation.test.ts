@@ -67,9 +67,17 @@ describe("typed session creation", () => {
     const snapshot = factory.getSessionSnapshot(channel);
     expect(snapshot?.state._meta).toMatchObject({
       "x-ahp-application": {
-        typeId: "22222222-2222-4222-8222-222222222222",
-        key: "code.review",
-        version: 1,
+        schemaVersion: 1,
+        sessionType: {
+          id: "22222222-2222-4222-8222-222222222222",
+          key: "code.review",
+          version: 1,
+        },
+        toolContracts: [{
+          key: "workspace.read-file",
+          version: 1,
+          definition: { name: "read_file" },
+        }],
       },
     });
   });

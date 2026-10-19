@@ -55,6 +55,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
       return sessions.createSession(params);
     },
     getSessionSnapshot: (sessionUri: string) => sessions.getSessionSnapshot(sessionUri),
+    getSessionToolManifest: (sessionUri: string) => sessions.getSessionToolManifest(sessionUri),
     listSessionSnapshots: () => sessions.listSessionSnapshots(),
     listSessions: (params) => {
       assertSessionsOpen();

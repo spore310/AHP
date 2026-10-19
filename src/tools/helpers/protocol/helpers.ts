@@ -1,6 +1,6 @@
 import type { ToolDefinition } from "@microsoft/agent-host-protocol";
 
-import { TOOL_CONTRACT_META_KEY } from "@tools/constants";
+import { MAX_TOOL_DEFINITION_BYTES, MAX_TOOL_DEFINITION_DEPTH, TOOL_CONTRACT_META_KEY } from "@tools/constants";
 import type { ToolContractDefinition } from "@tools/types";
 
 /**
@@ -49,24 +49,80 @@ export function toAhpToolDefinition(definition: ToolContractDefinition): ToolDef
  * schema-equivalence proof.
  */
 export function canonicalJsonEqual(left: unknown, right: unknown): boolean {
-  return canonicalKey(left) === canonicalKey(right);
+  const leftKey = canonicalKey(left, 0, new WeakSet(), { remaining: MAX_TOOL_DEFINITION_BYTES });
+  if (leftKey === undefined) {
+    return false;
+  }
+  const rightKey = canonicalKey(right, 0, new WeakSet(), { remaining: MAX_TOOL_DEFINITION_BYTES });
+  return rightKey !== undefined && leftKey === rightKey;
 }
 
-function canonicalKey(value: unknown): string {
-  if (value === null || typeof value === "string" || typeof value === "boolean") {
-    return JSON.stringify(value);
+function canonicalKey(
+  value: unknown,
+  depth: number,
+  ancestors: WeakSet<object>,
+  budget: { remaining: number },
+): string | undefined {
+  if (depth > MAX_TOOL_DEFINITION_DEPTH) {
+    return undefined;
   }
-  if (typeof value === "number") {
-    return JSON.stringify(value);
+  if (typeof value === "string" && value.length > budget.remaining) {
+    return undefined;
   }
-  if (Array.isArray(value)) {
-    return `[${value.map((entry) => canonicalKey(entry)).join(",")}]`;
+  if (value === null || typeof value === "string" || typeof value === "boolean"
+    || (typeof value === "number" && Number.isFinite(value))) {
+    const encoded = JSON.stringify(value);
+    return consume(encoded, budget) ? encoded : undefined;
   }
-  if (typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalKey(nested)}`);
-    return `{${entries.join(",")}}`;
+  if (typeof value !== "object" || ancestors.has(value)) {
+    return undefined;
   }
-  return JSON.stringify(null);
+  const prototype: unknown = Object.getPrototypeOf(value);
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
+    return undefined;
+  }
+  if (Object.getOwnPropertySymbols(value).length > 0) {
+    return undefined;
+  }
+  if (Array.isArray(value) && value.length > budget.remaining) {
+    return undefined;
+  }
+  const keys = Array.isArray(value)
+    ? Array.from({ length: value.length }, (_entry, index) => String(index))
+    : Object.keys(value).sort();
+  if (keys.length > budget.remaining || !consume("{}" + ",".repeat(Math.max(0, keys.length - 1)), budget)) {
+    return undefined;
+  }
+  ancestors.add(value);
+  try {
+    const entries: string[] = [];
+    for (const key of keys) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor === undefined || !("value" in descriptor)) {
+        return undefined;
+      }
+      const nested: unknown = descriptor.value;
+      const encoded = canonicalKey(nested, depth + 1, ancestors, budget);
+      if (encoded === undefined) {
+        return undefined;
+      }
+      if (Array.isArray(value)) {
+        entries.push(encoded);
+      } else {
+        const label = `${JSON.stringify(key)}:`;
+        if (!consume(label, budget)) {
+          return undefined;
+        }
+        entries.push(`${label}${encoded}`);
+      }
+    }
+    return Array.isArray(value) ? `[${entries.join(",")}]` : `{${entries.join(",")}}`;
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
+function consume(text: string, budget: { remaining: number }): boolean {
+  budget.remaining -= Buffer.byteLength(text);
+  return budget.remaining >= 0;
 }

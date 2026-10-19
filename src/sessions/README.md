@@ -6,7 +6,7 @@ exposes creation, snapshots, the agent catalogue, and two event seams a
 connection layer subscribes to.
 
 It is **AHP-aware but transport-agnostic**: it speaks protocol parameters,
-action envelopes, and snapshots, but imports no network or JSON-RPC code. A
+action envelopes, and snapshots, but imports no network transport. A
 *provider* here means an **agent backend** (`SessionProvider`), not a
 client-connection adapter; see
 [`docs/plans/ProvidersPlan.md`](../../docs/plans/ProvidersPlan.md).
@@ -41,6 +41,8 @@ client-connection adapter; see
 | `helpers/application/types.ts` | Typed-host options, the header tool map, and the live session-type binding. |
 | `helpers/application/define.ts` | `defineApplicationSession`: domain registration, header enum, and tool grants. |
 | `helpers/application/helpers.ts` | `prepareSessionCreation`: selector extraction without mutating caller config. |
+| `helpers/application/manifest.ts` | Projects the visible tool contracts into the session manifest. |
+| `helpers/application/admission.ts` | Checks a typed advertisement before the reducer. |
 | `helpers/application/host.ts` | `createApplicationSession`: factory createSession with a header-enum type string. |
 | `helpers/application/index.ts` | Re-exports typed session preparation. |
 | `helpers/state/helpers.ts` | Initial state, `applySessionAction` (reducer + envelope), and `buildSessionSnapshot`. |
@@ -61,6 +63,9 @@ client-connection adapter; see
   `root/sessionAdded`, then settle with `session/ready` or
   `session/creationFailed`.
 - `getSessionSnapshot(sessionUri): SessionSnapshot | undefined`
+- `getSessionToolManifest(sessionUri): SessionToolManifest | undefined` — the
+  visible tool contracts for a typed session. Missing and untyped sessions
+  return `undefined`. This read does not allocate a sequence number.
 - `listSessionSnapshots(): SessionSnapshot[]`
 - `getCurrentServerSeq(): number`
 - `listAgents(): AgentInfo[]`
@@ -105,13 +110,21 @@ Typed session surface:
 `defineApplicationSession` returns the header and the registration to pass into
 the catalogue. `createApplicationSession` returns `Promise<void>`. The created
 session snapshot carries `_meta["x-ahp-application"]` with the type identity
-and only the tools visible for the server role.
+and the visible tool contracts, including their input schemas. Admin tools are
+omitted unless the server role is `admin`. A client may advertise a subset of
+those contracts with `session/activeClientSet`. A different contract, schema, or
+nested client id is rejected without changing the session. Hiding or admitting a
+tool does not execute it. Authentication is not implemented.
 
 #### Caveats
 
 A client cannot submit an object selector or choose the role. An unknown header
 creates no session. Hiding an admin tool does not execute or authorize the
-tool. Authentication is not implemented.
+tool. Authentication is not implemented. Client advertisements are claims and
+may remain stale after disconnect under the deferred presence policy. They do
+not prove that a tool can execute. Creation-time `activeClient` is rejected on a
+typed host; create, subscribe, then advertise instead. An explicitly untyped
+host keeps its legacy advertisement behavior.
 
 Errors: `SessionsError`, `SessionsDisposingError`, `SessionConfigError`,
 `SessionStartError`. Sequence: `createActionSequence`, `createSequenceAllocator`.
@@ -264,6 +277,8 @@ than publishing a stale `session/ready`.
 | [`src/tests/sessions/sessionTypes.test.ts`](../tests/sessions/sessionTypes.test.ts) | Exact type resolution, disabled-type lookup, and missing tool rejection. |
 | [`src/tests/sessions/typedCreation.test.ts`](../tests/sessions/typedCreation.test.ts) | String header binding and untyped-host rejection. |
 | [`src/tests/sessions/toolAccess.test.ts`](../tests/sessions/toolAccess.test.ts) | Anonymous clients do not see admin tools. |
+| [`src/tests/sessions/toolManifest.test.ts`](../tests/sessions/toolManifest.test.ts) | Full visible schemas, detached reads, captured policy, legacy absence, and different per-type tool sets. |
+| [`src/tests/sessions/toolAdmission.test.ts`](../tests/sessions/toolAdmission.test.ts) | Exact schema/revision admission, atomic rejection, schema preservation, self-only updates, empty/subset registration, and state ownership. |
 | [`src/tests/sessions/applicationHost.test.ts`](../tests/sessions/applicationHost.test.ts) | `createApplicationSession` stamps the header and rejects an unknown type. |
 | [`src/tests/websocket/sessionTypeCapacity.test.ts`](../tests/websocket/sessionTypeCapacity.test.ts) | Wire threshold: accepted header, hidden admin tool, rejected object and unmapped headers. |
 

@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { createToolCatalogue, defineToolContract, TOOL_CONTRACT_META_KEY } from "@tools";
-import { canonicalJsonEqual, toAhpToolDefinition } from "@tools/helpers/protocol";
+import {
+  canonicalJsonEqual,
+  createToolCatalogue,
+  defineToolContract,
+  MAX_TOOL_DEFINITION_BYTES,
+  MAX_TOOL_DEFINITION_DEPTH,
+  TOOL_CONTRACT_META_KEY,
+  toAhpToolDefinition,
+} from "@tools";
 
 const definition = defineToolContract({
   id: "11111111-1111-4111-8111-111111111111",
@@ -29,6 +36,31 @@ describe("tool protocol projection", () => {
   it("treats array order as significant", () => {
     expect(canonicalJsonEqual(["a", "b"], ["a", "b"])).toBe(true);
     expect(canonicalJsonEqual(["a", "b"], ["b", "a"])).toBe(false);
+  });
+
+  it("rejects invalid, cyclic, over-deep and oversized JSON instead of comparing it as null", () => {
+    expect(canonicalJsonEqual(undefined, null)).toBe(false);
+    expect(canonicalJsonEqual({ value: undefined }, { value: null })).toBe(false);
+    expect(canonicalJsonEqual({ value: Number.NaN }, { value: null })).toBe(false);
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    expect(canonicalJsonEqual(cycle, cycle)).toBe(false);
+    let deep: unknown = "leaf";
+    for (let index = 0; index < MAX_TOOL_DEFINITION_DEPTH + 2; index += 1) {
+      deep = { nested: deep };
+    }
+    expect(canonicalJsonEqual(deep, deep)).toBe(false);
+    const huge = { value: "x".repeat(MAX_TOOL_DEFINITION_BYTES) };
+    expect(canonicalJsonEqual(huge, huge)).toBe(false);
+    let getterCalls = 0;
+    const getter = {
+      get value() {
+        getterCalls += 1;
+        return null;
+      },
+    };
+    expect(canonicalJsonEqual(getter, { value: null })).toBe(false);
+    expect(getterCalls).toBe(0);
   });
 
   it("projects an AHP descriptor with authoritative revision metadata", () => {

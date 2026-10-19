@@ -53,7 +53,9 @@ export function applySessionAction(
   modifiedAt: string,
   nextServerSeq: () => number,
 ): ActionEnvelope {
-  record.state = sessionReducer(record.state, action);
+  // The reducer may retain nested payloads (notably activeClient.tools).
+  // Published/returned envelopes must not be writable aliases of live state.
+  record.state = sessionReducer(record.state, structuredClone(action));
   record.serverSeq = nextServerSeq();
   record.modifiedAt = modifiedAt;
 

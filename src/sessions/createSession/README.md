@@ -86,10 +86,11 @@ const provider: SessionProvider = {
 
 ## Caveats
 
-- **Enforced order:** params shape → provider resolution → URI uniqueness →
-  config parsing → registration + `root/sessionAdded` → backend start. Parsing
-  before registration means invalid configuration creates no record and never
-  reaches the provider.
+- **Enforced order:** params shape → typed selection/application configuration
+  and manifest preparation → provider resolution → URI uniqueness → provider
+  config parsing → registration + `root/sessionAdded` → backend start. All
+  deterministic configuration/manifest failures happen before registration.
+  Application settings never enter the mock provider's config bag.
 - **The backend starts last** so a failure leaves a well-formed, inspectable
   session (registered, lifecycle `creating`) rather than a half-registered one.
 - **Late-backend race:** if the factory was disposed or the URI was reused while
@@ -101,9 +102,12 @@ const provider: SessionProvider = {
   the generic `sessionStartFailed` payload, so credentials, paths, or service
   details never reach the wire.
 - **`workingDirectories` is truncated to the first entry.**
-- **Accepted but uninterpreted:** `activeClient`, `progressToken`, and `_meta`
-  are validated for protocol completeness and discarded; unknown additive
-  members are discarded rather than rejected.
+- **No eager typed advertisement:** a non-undefined `activeClient` rejects on a
+  typed host before registration. Create, subscribe, then advertise using
+  `session/activeClientSet`. An untyped host accepts but ignores this field.
+- **Accepted but uninterpreted:** `progressToken` and caller `_meta` are
+  discarded; caller metadata cannot replace the server-authored tool manifest.
+  Unknown additive members are discarded rather than rejected.
 
 ## Testing
 

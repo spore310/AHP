@@ -12,6 +12,7 @@ import { z } from "zod";
 
 import { SESSION_URI_PREFIX } from "./constants";
 import type { SessionApplicationBinding, SessionApplicationOptions } from "./helpers/application";
+import type { SessionToolManifest } from "./helpers/application/manifest";
 import type { ActionSequence } from "./helpers/sequence";
 
 /**
@@ -246,6 +247,11 @@ export interface SessionsFactory {
   createSession(params: unknown): Promise<void>;
   /** Current snapshot for a session, or `undefined` when no such session exists. */
   getSessionSnapshot(sessionUri: string): SessionSnapshot | undefined;
+  /**
+   * Allowed tool contracts for a typed session, or `undefined` when the session
+   * is missing or untyped. Does not create a session or allocate a sequence number.
+   */
+  getSessionToolManifest(sessionUri: string): SessionToolManifest | undefined;
   /** Root-state snapshot of all sessions, or the current server-sequence cursor. */
   listSessionSnapshots(): SessionSnapshot[];
   /**

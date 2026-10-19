@@ -10,7 +10,7 @@ Trusted, in-memory tool-contract definitions. A contract describes an allowed to
 | ---- | -------------- |
 | `types.ts` | `ToolContractRef`, `ToolContractDefinition`, `ToolCatalogue`, and validation results. |
 | `constants.ts` | Identity patterns, schema dialect, and size limits. |
-| `index.ts` | Public exports. |
+| `index.ts` | Public exports, including `toAhpToolDefinition`. |
 | `helpers/contracts/helpers.ts` | `defineToolContract`. |
 | `helpers/contracts/index.ts` | Re-exports `defineToolContract`. |
 | `helpers/validation/helpers.ts` | Ajv adapter. Trusted schemas only. No `$ref`, `pattern`, or `format`. |
@@ -19,6 +19,12 @@ Trusted, in-memory tool-contract definitions. A contract describes an allowed to
 | `helpers/catalogue/index.ts` | Re-exports `createToolCatalogue`. |
 | `helpers/protocol/helpers.ts` | Project a contract to an AHP tool descriptor without claiming it is executable. |
 | `helpers/protocol/index.ts` | Re-exports protocol projection helpers. |
+
+## Public projection
+
+`toAhpToolDefinition(contract)` produces a detached client advertisement with exact revision identity under `_meta["x-ahp-tool-contract"]`. It preserves schema keywords such as `additionalProperties` and does not register or execute the tool. Typed sessions admit subsets of their visible contracts and normalize accepted text/annotations from these trusted definitions.
+
+`canonicalJsonEqual(left, right)` performs bounded JSON comparison. Object-key order is ignored; array order matters. Invalid, cyclic, over-deep or oversized data compares unequal, never as `null`. Client schemas are compared, not compiled.
 
 ## Testing
 

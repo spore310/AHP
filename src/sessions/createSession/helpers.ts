@@ -9,6 +9,7 @@ import {
   SESSION_START_FAILURE_INFO,
 } from "@sessions/constants";
 import { prepareSessionCreation } from "@sessions/helpers/application";
+import { APPLICATION_META_KEY } from "@tools";
 import {
   SessionConfigError,
   SessionStartError,
@@ -42,6 +43,12 @@ export async function executeCreateSession(
 
   const params = parsed.data;
   const prepared = prepareSessionCreation(dependencies.application, params.provider, params.config);
+  if (dependencies.application !== undefined && params.activeClient !== undefined) {
+    throw new SessionsError(
+      JsonRpcErrorCodes.InvalidParams,
+      "Creation-time active client is not supported on a typed host.",
+    );
+  }
   const provider = resolveProvider(
     dependencies,
     prepared.providerId.length === 0 ? params.provider : prepared.providerId,
@@ -77,12 +84,7 @@ export async function executeCreateSession(
         ? {}
         : {
             _meta: {
-              "x-ahp-application": {
-                typeId: prepared.binding.typeId,
-                key: prepared.binding.key,
-                version: prepared.binding.version,
-                tools: prepared.visibleTools ?? [],
-              },
+              [APPLICATION_META_KEY]: prepared.manifest,
             },
           }),
     },

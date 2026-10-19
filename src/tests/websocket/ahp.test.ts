@@ -713,6 +713,7 @@ describe("AHP snapshot reply barrier", () => {
     let injected = false;
     const factory: SessionsFactory = {
       createSession: (params) => inner.createSession(params),
+      getSessionToolManifest: (sessionUri) => inner.getSessionToolManifest(sessionUri),
       getSessionSnapshot: (sessionUri) => {
         const snapshot = inner.getSessionSnapshot(sessionUri);
         if (!injected && sessionUri === channel && snapshot !== undefined) {
