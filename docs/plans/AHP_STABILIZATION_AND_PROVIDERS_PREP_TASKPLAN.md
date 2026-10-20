@@ -3,8 +3,8 @@
 **Repository:** https://github.com/spore310/AHP  
 **Starting branch:** `develop`  
 **Reviewed baseline:** `1c5f4fc3572f1af9797a59d59d1b3f915761f178` (2026-10-18)  
-**Status:** **Approved direction / work not yet performed by this document**  
-**Intended audience:** Local coding agents (implementers, reviewer, integrator).  
+**Status:** **Historical handoff — stabilization work has since landed.** This document was an approved direction when written; it is not a current work queue. See `docs/plans/ProvidersPlan.md` and the code for current behavior.
+**Intended audience:** Local coding agents (implementers, reviewer, integrator).
 **Related review:** `AHP_DEVELOP_REVIEW_2026-10-18.md` (8 fixed, 3 partial).  
 **Target plan to prepare:** `docs/plans/ProvidersPlan.md` (**do not implement its feature milestones in this task**).
 
@@ -23,7 +23,10 @@ Resolve the three remaining review issues and make `docs/plans/ProvidersPlan.md`
 - [ ] Tests are added to `src/tests/` and `pnpm validate` passes on the repo's pinned Node 24/pnpm toolchain.
 - [ ] Changes are reviewed for code/documentation drift; each implementation unit has a focused commit and short handoff notes.
 
-**Do not silently broaden this task into an AHP host implementation.** Current runtime wiring remains ping-only until `ProvidersPlan.md` is approved for implementation.
+**Do not silently broaden this task into an AHP host implementation.** At the
+time this plan was written, runtime wiring was ping-only until
+`ProvidersPlan.md` was approved for implementation. That plan and its
+implementation have since landed; this sentence records the original boundary.
 
 ## 1. Architectural invariants (non-negotiable)
 

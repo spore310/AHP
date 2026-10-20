@@ -1,6 +1,6 @@
 # Application capacity follow-up
 
-Status: implemented and validated against `ba6ba17` plus the uncommitted working tree. This follow-up closes the four reviewed application gaps and adds client-executed invocation; it does not claim every scenario in the original 100-case plan is complete.
+Status: implemented and validated at `2f9900a65386f8ebc03feebc694c2c61c2b3c332` (`develop`, 2026-10-18). This follow-up closes the four reviewed application gaps and adds client-executed invocation; it does not claim every scenario in the original 100-case plan is complete.
 
 ## Accepted scope
 

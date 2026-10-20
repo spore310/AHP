@@ -1,6 +1,6 @@
 # Agent Hosting Protocol — Milestone 1 repair and reusable baseline
 
-Status: **IMPLEMENTED — repository gate passed on the integrated worktree. Not the full AHP specification. Snapshot/action race (T19) and failed-startup cleanup (T24) do not yet have dedicated tests.**
+Status: **IMPLEMENTED — historical repair handoff against candidate `ff95b99`; repository gate passed on the integrated worktree. Not the full AHP specification. Snapshot/action race (T19) and failed-startup cleanup (T24) do not yet have dedicated tests. Current code has advanced beyond this candidate; see [`ProvidersPlan.md`](ProvidersPlan.md).**
 
 Repository: `spore310/AHP`  
 Reviewed branch: `develop`  

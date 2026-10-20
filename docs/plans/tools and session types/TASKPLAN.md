@@ -1,12 +1,16 @@
 # Agent Hosting Protocol — Code-First Tool Contracts and Application Session Types
 
-**Status:** PLAN READY for local execution; no implementation or independent review has been performed by this document's author.  
+**Status:** Historical target-state plan. It was `PLAN READY` when written; the
+code-first baseline has since been implemented through `2f9900a`. Current
+behavior, divergences, and evidence are summarized in
+[CURRENT_STATE.md](CURRENT_STATE.md). This document remains the detailed design
+rationale, not a current work queue.
 **Repository:** `spore310/AHP`.  
 **Inspected branch/checkpoint:** `develop` at `3eeb31eebb0498d4fb1f0a5de60ca3b5677f744e`, checked October 18, 2026.  
 **Execution target:** Grok in the user's existing local coding harness, including goal mode when that harness actually supports it.  
 **Risk:** Elevated: public factories, runtime validation, versioned contracts, session creation, and client-controlled action payloads.  
-**Current implementation phase:** Application code and in-memory catalogues only.  
-**Later, separately authorized phase:** SQL persistence; Redis remains deferred.  
+**Current implementation phase:** In-memory tool contracts, typed sessions, manifests, admission, and client-executed invocation. Authentication, persistence, replay, and model/Pi runtime remain out of scope.
+**Later, separately authorized phase:** SQL persistence; Redis remains deferred.
 **Protocol source of truth:** Installed, pinned `@microsoft/agent-host-protocol@1.0.0`; check the lockfile and declarations before changing protocol-facing code.
 
 ## Navigation
@@ -123,7 +127,7 @@ Do not copy older review conclusions as if they were freshly tested. At intake, 
 | `SessionTypeCatalogue` | Resolved immutable definitions and creation availability | Internal closures only | Per composed application/host |
 | Application binding on `SessionRecord` | Exact selected type reference and normalized type config | Data only | Existing live record; later projected selectively |
 | `SessionState` | Standard protocol state plus server-authored namespaced manifest metadata | No handles in wire snapshot | Existing live session state |
-| Active-client tool advertisement | Client-supplied declaration, checked against the typed manifest | No implementation | Existing ephemeral `activeClients` state |
+| Active-client tool advertisement | Client-supplied declaration, checked against the typed manifest | Implemented as admission checks, not an executor | Existing ephemeral `activeClients` state; see `src/sessions/helpers/application/admission.ts` |
 
 ### 2.2 Relationship
 
@@ -1611,7 +1615,9 @@ Persistence/Redis/execution features deliberately not implemented:
 Next separate phase:
 ```
 
-Do not use `VERIFIED` in this template until the actual evidence supports it. The plan's own status is **PLAN READY**, not implementation verified.
+Do not use `VERIFIED` in this template until the actual evidence supports it. This
+document is the original **PLAN READY** design input; current implementation
+evidence is tracked separately in [CURRENT_STATE.md](CURRENT_STATE.md).
 
 
 # Appendix A — Deferred Persistence

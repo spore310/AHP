@@ -1,5 +1,12 @@
 # Milestone 1 AHP Host Connection Review
 
+> **Historical review.** This report evaluates candidate `ff95b99`; its
+> "open" findings are not a statement about current `develop`. The findings
+> were carried into
+> [`ProvidersPlan-Milestone1-FIX-TASKPLAN.md`](../plans/ProvidersPlan-Milestone1-FIX-TASKPLAN.md)
+> and subsequent commits. See [`ProvidersPlan.md`](../plans/ProvidersPlan.md)
+> for current milestone status.
+
 ## Scope and evidence
 
 - Mode: implementation review of the unstaged Milestone 1 candidate.

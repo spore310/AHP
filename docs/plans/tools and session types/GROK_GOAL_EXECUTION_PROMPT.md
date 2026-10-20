@@ -1,5 +1,10 @@
 # Local Goal-Mode Execution Prompt
 
+> **Historical prompt.** The code-first goal described here has already been
+> implemented through `2f9900a`. Do not re-run this prompt as a current task.
+> See [CURRENT_STATE.md](CURRENT_STATE.md) for current behavior and remaining
+> deferred work.
+
 Implement the code-first phase of `TASKPLAN.md` in the current `spore310/AHP` checkout. Use the existing repository's `.agents` workflow. The intended executor is the user's chosen Grok model, but do not assume a particular runner, command syntax, free quota, or subagent capability from that name.
 
 ## Goal

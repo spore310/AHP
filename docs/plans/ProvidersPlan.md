@@ -2,9 +2,12 @@
 
 Status: **Agreed direction. Milestone 1 is implemented: an SDK client can
 initialize, subscribe, create a session, list sessions, dispose a session, and
-observe the same catalogue and accepted action as a second client. Milestones
-2–5 are not started. This is not authentication, a Pi extension, client-to-client
-conversation, or reconnect/replay.**
+observe the same catalogue and accepted action as a second client. An
+independently authorized follow-up also added typed tool contracts and
+client-executed invocation (see
+[`CURRENT_STATE.md`](tools%20and%20session%20types/CURRENT_STATE.md)).
+Milestones 2–5 are not started. This is not authentication, a Pi extension,
+client-to-client conversation, or reconnect/replay.**
 
 This is a target-state plan for connecting independent AHP clients (Pi and
 others) to this server. It describes intended behavior, not current behavior;
@@ -74,8 +77,24 @@ frames.
   for the other client actions, and factory disposal that rejects creation
   while in flight. `SessionBackend` is only `{ dispose() }`;
   `src/sessions/mock/` is deterministic test scaffolding, not an agent runtime.
+- `src/tools/` — immutable exact tool revisions, bounded JSON data, a
+  restricted JSON Schema profile, atomic in-memory catalogues, trusted-schema
+  validation, and detached descriptor projection.
+- `src/sessions/helpers/application/` and `src/sessions/helpers/sessionTypes/`
+  — typed session policy, exact type-to-tool resolution, visible
+  standard/admin tool grants, session manifests under
+  `_meta["x-ahp-application"]`, and atomic advertisement admission.
+- `src/websocket/helpers/ahp/toolInvocation.ts` and `src/toolClient/` — the
+  namespaced `x-ahp/tools/*` client-executed invocation extension. The server
+  validates and routes; a connected advertising client runs its local handler.
+  This is an application extension, not a native AHP method.
+- `src/application/` — the inert baseline `code-review@1` / `coding@1`
+  policies used by the default host.
 - `src/tests/` — all tests. Tests are never colocated with source and never
-  live at a root `tests/` directory.
+  live at a root `tests/` directory. The current baseline is 31 test files and
+  230 tests; see
+  [`CURRENT_STATE.md`](tools%20and%20session%20types/CURRENT_STATE.md) for
+  coverage and limits.
 - `@microsoft/agent-host-protocol` is pinned at `1.0.0`. The sessions
   capability uses its types, literal mirrors, error codes, and runtime
   reducer (`sessionReducer`); its client classes are not used by server code

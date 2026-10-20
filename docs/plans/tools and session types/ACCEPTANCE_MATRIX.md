@@ -1,6 +1,14 @@
 # Acceptance Matrix — Code-First Phase
 
-Every case starts **NOT RUN**. Related cases may be parameterized in one test; this is not a requirement for one test function per row. Record actual candidate, command, and result in the task ledger. The listed test files are proposed paths under the repository's existing test root.
+> **Status: historical target inventory.** This file preserves the original
+> plan's 100 proposed scenarios and proposed test paths. It is not the current
+> execution ledger, and no row below is a claim that the scenario passed.
+> The implementation has landed since this matrix was written; see
+> [CURRENT_STATE.md](CURRENT_STATE.md) for actual coverage, divergences, and
+> the test files that now exist. Several proposed paths differ from the
+> implemented tests.
+
+Every case was marked **NOT RUN** when the plan was prepared. Related cases may be parameterized in one test; this is not a requirement for one test function per row. The listed test files are proposed paths under the repository's existing test root.
 
 | ID | Proposed test / gate | Scenario | Required evidence |
 |---|---|---|---|

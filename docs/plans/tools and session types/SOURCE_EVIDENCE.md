@@ -1,5 +1,9 @@
 # Source Evidence and Verification Limits
 
+> **Historical planning input.** This evidence describes the repository before
+> implementation. Current behavior and verification are tracked in
+> [CURRENT_STATE.md](CURRENT_STATE.md).
+
 ## Inspected checkpoint
 
 `spore310/AHP`, branch `develop`, commit `3eeb31eebb0498d4fb1f0a5de60ca3b5677f744e`, checked October 18, 2026. The branch may move after this document is written; WP-00 must refresh it and reconcile source rather than overwrite the local tree.
@@ -50,6 +54,14 @@ Primary protocol companion references:
 
 ## Verification performed for this handoff
 
-Source inspection and document construction only. Static delivery checks cover file presence, Markdown structure, JSON examples, requirement/test/work-packet identifiers, links inside the bundle, and archive integrity. No implementation has been applied to GitHub. No Grok, Luna, Haiku, Codex, Pi, or independent reviewer run was launched. No repo `pnpm validate`, schema deployment, application integration test, or live double-blind experiment has been performed for this plan.
+Source inspection and document construction only **at the time this evidence was
+captured**. Static delivery checks covered file presence, Markdown structure,
+JSON examples, requirement/test/work-packet identifiers, links inside the
+bundle, and archive integrity. No implementation had been applied to GitHub.
+No Grok, Luna, Haiku, Codex, Pi, or independent reviewer run was launched for
+this plan. No repo `pnpm validate`, schema deployment, application integration
+test, or live double-blind experiment had been performed for this plan.
+Implementation and test evidence were produced later; see
+[CURRENT_STATE.md](CURRENT_STATE.md).
 
 Any source-level planning review in this handoff is the author's own review. The supplied independent-review process still needs to run in the local harness and must report its actual isolation and test evidence.
