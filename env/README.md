@@ -14,7 +14,8 @@ building the server. See [`src/README.md`](../src/README.md).
 | ---- | -------------- |
 | `types.ts` | `envSchema` / `EnvConfig`: the declared keys, coercion, and defaults. |
 | `helpers.ts` | `loadEnv`: validate a source and throw a value-free message on failure. |
-| `index.ts` | Public surface: `loadEnv`, `envSchema`, and `EnvConfig`. |
+| `parse.ts` | `parseAuthTokens` and `parseAllowedKinds`: validate compound values without echoing secrets. |
+| `index.ts` | Public surface: `loadEnv`, `envSchema`, `EnvConfig`, and the compound parsers. |
 
 ## API
 
@@ -23,6 +24,11 @@ building the server. See [`src/README.md`](../src/README.md).
 - `loadEnv(source?: NodeJS.ProcessEnv): EnvConfig` — validates `process.env` by
   default; tests pass an explicit record for determinism. Throws on invalid
   input.
+- `parseAuthTokens(value?)` — parses the JSON object of bearer tokens to
+  principal subjects. An absent value is an empty map; a supplied value must be a
+  non-empty object of non-empty strings.
+- `parseAllowedKinds(value)` — splits, trims, rejects empty or duplicate work
+  kinds, and returns a set.
 
 Declared keys:
 
@@ -30,6 +36,11 @@ Declared keys:
 | --- | ---- | ------- | ----- |
 | `AGENT_HOSTING_PROTOCOL_WEBSOCKET_HOST` | non-empty string | `127.0.0.1` | Bind interface. |
 | `AGENT_HOSTING_PROTOCOL_WEBSOCKET_PORT` | integer `1`–`65535` | `12345` | Coerced from the string form. |
+| `AGENT_HOSTING_PROTOCOL_DATABASE_URL` | non-empty string | unset | PostgreSQL connection string. Required with auth tokens to enable durable agent/work features. |
+| `AGENT_HOSTING_PROTOCOL_AUTH_TOKENS` | JSON object string | unset | Bearer token → trusted principal subject. Never log this value. |
+| `AGENT_HOSTING_PROTOCOL_PRESENCE_TTL_SECONDS` | integer `5`–`600` | `90` | In-memory presence lifetime. |
+| `AGENT_HOSTING_PROTOCOL_WORK_LEASE_SECONDS` | integer `5`–`3600` | `60` | Work lease lifetime, evaluated by the database clock. |
+| `AGENT_HOSTING_PROTOCOL_ALLOWED_WORK_KINDS` | comma-separated string | `code.patch,code.review` | Kinds accepted by submit/claim. |
 
 ## 5-Minute Usage
 
@@ -72,12 +83,19 @@ const config = loadEnv({
   out-of-range value throws.
 - **Defaults are bind-safe.** The default host is loopback; binding a
   non-loopback interface is a deliberate configuration choice.
+- **Agent/work configuration is all-or-nothing.** Supplying only the database
+  URL or only auth tokens is a startup error. Supplying neither leaves the
+  baseline host unchanged and does not register the extension methods.
+- **Token maps are secrets.** `parseAuthTokens` reports shape errors only; it
+  never includes a token or subject in the message.
 
 ## Testing
 
 | Test | Pins |
 | ---- | ---- |
 | [`src/tests/env.test.ts`](../src/tests/env.test.ts) | Defaults when absent, explicit values, out-of-range and non-numeric ports, empty host, and that errors do not echo the offending value. |
+| [`src/tests/env/parse.test.ts`](../src/tests/env/parse.test.ts) | Token-map shape, secret non-disclosure, allowed-kind parsing, fail-closed partial configuration, and optional extension composition. |
+| [`src/tests/index.test.ts`](../src/tests/index.test.ts) | Composition exports, optional agent/work configuration, entrypoint guard, and shutdown handlers. |
 
 ## Related Documentation
 

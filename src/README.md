@@ -14,10 +14,13 @@ Start here, then read the README of the capability you are changing.
 | ---------- | ------ | -------------- |
 | `jsonrpc/` | [`jsonrpc/README.md`](jsonrpc/README.md) | JSON-RPC 2.0 message schemas, the owned `RpcError`, and the allowlisted error codes. No transport, no I/O. |
 | `sessions/` | [`sessions/README.md`](sessions/README.md) | The session engine: provider registry, session store, state reducer, sequencing, and lifecycle. AHP-aware but transport-agnostic. |
-| `websocket/` | [`websocket/README.md`](websocket/README.md) | Raw transport, AHP subscriptions/publication, and the composed host. |
+| `websocket/` | [`websocket/README.md`](websocket/README.md) | Raw transport, AHP subscriptions/publication, handshake authentication, and the composed host. |
 | `tools/` | [`tools/README.md`](tools/README.md) | Immutable exact-revision contracts, schema validation and descriptor projection. |
 | `application/` | [`application/README.md`](application/README.md) | Fresh baseline policy for `code-review` and `coding` sessions. |
 | `toolClient/` | [`toolClient/README.md`](toolClient/README.md) | Public SDK adapter for local implementations and namespaced tool invocation. |
+| `agents/` | [`agents/README.md`](agents/README.md) | Static bearer authentication, durable agent registration, and in-memory generation-fenced presence. |
+| `persistence/` | [`persistence/README.md`](persistence/README.md) | Async durable ports and parameterized PostgreSQL adapters. No SQL in the live session engine. |
+| `work/` | [`work/README.md`](work/README.md) | Principal/session authorization, bounded work validation, and the work-lease application service. |
 | `tests/` | see per-module **Testing** sections | All tests. Never colocated with source. |
 
 Cross-cutting behavior that no single capability owns lives in
@@ -36,11 +39,16 @@ Cross-cutting behavior that no single capability owns lives in
 Exported from `src/index.ts`:
 
 - `APP_NAME: string` — the product name used in startup logging.
+- `createAgentWorkOptions(config): AHPServerAgentWorkOptions | undefined` — builds
+  the optional static-token authenticator and PostgreSQL-backed registration/work
+  adapters. Both database and token configuration are required together; a
+  partial pair is a startup error.
 - `installShutdownHandlers(server: WebSocketServerHandle): () => void` — wires
   `SIGINT`/`SIGTERM` to `server.stop()` and returns a function that removes the
   handlers.
 - `main(): Promise<void>` — loads config, composes the mock provider with
-  `createBaselineSessionApplication()`, starts the AHP server and logs its address.
+  `createBaselineSessionApplication()`, optionally enables the authenticated
+  agent/work extension, starts the AHP server and logs its address.
 
 ## 5-Minute Usage
 
@@ -85,6 +93,11 @@ void main; // only call main() when you actually want the default wiring
   listener. Running `vite-node src/index.ts` directly does **not** satisfy the
   guard and will exit without listening; use `pnpm start` (the built entry) or
   call `main()` yourself.
+- **The agent/work extension is opt-in.** Without both
+  `AGENT_HOSTING_PROTOCOL_DATABASE_URL` and
+  `AGENT_HOSTING_PROTOCOL_AUTH_TOKENS`, the server runs the baseline host and the
+  namespaced methods are not registered. Supplying only one of the pair throws
+  before startup rather than silently disabling authorization.
 - **Shutdown failures set `process.exitCode = 1`** instead of throwing from the
   signal handler, so a failed shutdown is observable without crashing the
   process.

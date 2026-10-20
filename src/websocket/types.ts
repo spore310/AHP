@@ -1,11 +1,20 @@
 import type { AddressInfo } from "node:net";
 
+import type { AuthenticatedPrincipal, ConnectionAuthenticator } from "@agents";
 import type { JsonRpcMessage, JsonRpcParams } from "@jsonrpc";
 
 /** Per-connection surface handed to JSON-RPC method handlers. */
 export interface WebSocketConnectionContext {
   /** Identifier for the connection, unique within the server. */
   readonly connectionId: string;
+  /**
+   * Server-authenticated principal for the upgrade request.
+   *
+   * `undefined` when no authenticator is configured or the credential was not
+   * accepted. Sensitive extensions must fail closed in that case; this value is
+   * never derived from AHP `initialize.clientId`.
+   */
+  readonly principal?: AuthenticatedPrincipal;
   /**
    * Send a JSON-RPC message to this connection. A no-op once the connection
    * is no longer open.
@@ -80,6 +89,15 @@ export interface WebSocketServerOptions {
   readonly path?: string;
   /** JSON-RPC methods to dispatch. Unknown methods answer `MethodNotFound`. */
   readonly handlers?: JsonRpcHandlers;
+  /**
+   * Optional server-side credential verification for the WebSocket upgrade.
+   *
+   * Runs once before the connection context is created. A resolved principal is
+   * attached to the context; an unresolved credential leaves it `undefined`.
+   * A thrown authentication failure closes that socket without stopping the
+   * server.
+   */
+  readonly authenticator?: ConnectionAuthenticator;
   /** Called once when a socket is accepted, before any frame is dispatched. */
   readonly onConnection?: (context: WebSocketConnectionContext) => void;
   /**

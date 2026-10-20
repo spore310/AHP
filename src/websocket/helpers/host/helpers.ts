@@ -1,11 +1,14 @@
 import type { AddressInfo } from "node:net";
 
+import { createAgentDirectory } from "@agents";
+import type { DurableSessionInput } from "@persistence";
 import { createActionSequence, createSessionsFactory } from "@sessions";
 import type { SessionsFactory } from "@sessions/types";
+import { createSessionOwnerRegistry, createWorkService } from "@work";
 
-import { createWebSocketServer } from "../server";
 import { createAHPBinding } from "../ahp";
 import { TOOL_CALL_METHOD, TOOL_COMPLETE_METHOD } from "../ahp/constants";
+import { createWebSocketServer } from "../server";
 import type { AHPServerHandle, AHPServerOptions } from "./types";
 
 const HOST_STOPPED = "AHP host cannot be started after shutdown has begun.";
@@ -14,6 +17,40 @@ const HOST_SESSIONS_STOPPED = "AHP host sessions cannot be used after shutdown h
 const collectFailure = (failures: unknown[], error: unknown): void => {
   failures.push(error);
 };
+
+/**
+ * Project the live session snapshot into the durable row shape.
+ *
+ * Only the session URI should reach this function. The provider is read from
+ * the session state the factory exposes; an absent provider is treated as an
+ * unavailable projection rather than inventing metadata.
+ */
+const describeSession = (
+  sessions: SessionsFactory,
+): ((sessionUri: string) => DurableSessionInput | undefined) =>
+  (sessionUri: string): DurableSessionInput | undefined => {
+    const snapshot = sessions.getSessionSnapshot(sessionUri);
+    if (snapshot === undefined) {
+      return undefined;
+    }
+    const state = snapshot.state as { readonly provider?: unknown };
+    if (typeof state.provider !== "string") {
+      return undefined;
+    }
+    const now = new Date().toISOString();
+    return {
+      sessionUri,
+      ownerPrincipalSubject: "",
+      providerId: state.provider,
+      createdAt: now,
+      modifiedAt: now,
+      lastServerSeq: snapshot.fromSeq,
+      durableState: {
+        fromSeq: snapshot.fromSeq,
+        state: snapshot.state,
+      },
+    };
+  };
 
 /**
  * Compose one sequence allocator, session factory, AHP binding, and transport.
@@ -27,12 +64,56 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     ...options.sessions,
     sequence,
   });
-  const binding = createAHPBinding(sessions, () => undefined);
+  const sessionOwners = createSessionOwnerRegistry();
+  const agents = options.agentWork === undefined
+    ? undefined
+    : createAgentDirectory({
+        registrations: options.agentWork.registrations,
+        ...(options.agentWork.presenceTtlMs !== undefined
+          ? { presenceTtlMs: options.agentWork.presenceTtlMs }
+          : {}),
+        ...(options.agentWork.now !== undefined ? { now: options.agentWork.now } : {}),
+      });
+  const describe = describeSession(sessions);
+  const work = options.agentWork === undefined || agents === undefined
+    ? undefined
+    : createWorkService({
+        repository: options.agentWork.work,
+        sessions: sessionOwners,
+        presence: agents,
+        registrations: options.agentWork.registrations,
+        describeSession: (sessionUri): DurableSessionInput | undefined => {
+          const projection = describe(sessionUri);
+          if (projection === undefined) {
+            return undefined;
+          }
+          const owner = sessionOwners.owner(sessionUri);
+          return owner === undefined
+            ? undefined
+            : { ...projection, ownerPrincipalSubject: owner };
+        },
+        allowedKinds: options.agentWork.allowedKinds,
+        ...(options.agentWork.now !== undefined ? { now: options.agentWork.now } : {}),
+      });
+  const binding = createAHPBinding(
+    sessions,
+    () => undefined,
+    options.agentWork === undefined || agents === undefined || work === undefined
+      ? undefined
+      : {
+          agents,
+          work,
+          sessionOwners,
+        },
+  );
   const transport = createWebSocketServer({
     host: options.host,
     port: options.port,
     path: options.path,
     handlers: binding.handlers,
+    ...(options.agentWork !== undefined
+      ? { authenticator: options.agentWork.authenticator }
+      : {}),
     onConnection: (context) => {
       binding.onConnection(context);
     },
@@ -52,6 +133,14 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     }
   };
 
+  const channelFromParams = (params: unknown): string | undefined => {
+    if (typeof params !== "object" || params === null || !("channel" in params)) {
+      return undefined;
+    }
+    const { channel } = params;
+    return typeof channel === "string" ? channel : undefined;
+  };
+
   const hostedSessions: SessionsFactory = {
     createSession: (params: unknown): Promise<void> => {
       if (stopped) {
@@ -66,11 +155,18 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
       assertSessionsOpen();
       return sessions.listSessions(params);
     },
-    disposeSession: (params) => {
+    disposeSession: async (params) => {
       if (stopped) {
-        return Promise.reject(new Error(HOST_SESSIONS_STOPPED));
+        throw new Error(HOST_SESSIONS_STOPPED);
       }
-      return sessions.disposeSession(params);
+      const channel = channelFromParams(params);
+      if (work !== undefined && channel !== undefined) {
+        await work.assertSessionDisposable(channel);
+      }
+      await sessions.disposeSession(params);
+      if (channel !== undefined) {
+        sessionOwners.unbind(channel);
+      }
     },
     getCurrentServerSeq: () => sessions.getCurrentServerSeq(),
     listAgents: () => sessions.listAgents(),
@@ -83,12 +179,20 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     dispose: () => sessions.dispose(),
   };
 
+  const disposeAgentWork = async (): Promise<void> => {
+    if (options.agentWork?.dispose === undefined) {
+      return;
+    }
+    await options.agentWork.dispose();
+  };
+
   const stop = async (): Promise<void> => {
     if (stopped) {
       await transport.stop();
       return;
     }
     stopped = true;
+    sessionOwners.clear();
     const failures: unknown[] = [];
     try {
       await transport.stop();
@@ -102,6 +206,11 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     }
     try {
       await sessions.dispose();
+    } catch (error) {
+      collectFailure(failures, error);
+    }
+    try {
+      await disposeAgentWork();
     } catch (error) {
       collectFailure(failures, error);
     }

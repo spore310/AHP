@@ -1,8 +1,10 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 import { WebSocketServer } from "ws";
 import type WebSocket from "ws";
+
+import type { AuthenticatedPrincipal } from "@agents";
 
 import {
   WEBSOCKET_CLOSE_GOING_AWAY,
@@ -17,6 +19,9 @@ import type {
   WebSocketServerOptions,
 } from "../types";
 import { attachConnection } from "./connection";
+
+/** Free-form close code used only when handshake authentication throws. */
+const WEBSOCKET_CLOSE_AUTHENTICATION_FAILED = 1011;
 
 /**
  * Lifecycle of a server: bound lazily, single-flight while starting, and
@@ -52,6 +57,7 @@ export const createWebSocketServer = (
     port,
     path = WEBSOCKET_DEFAULT_PATH,
     handlers = {},
+    authenticator,
     onConnection,
     beforeDispatch,
     deferredRequestCompletionMethods = new Map(),
@@ -130,13 +136,79 @@ export const createWebSocketServer = (
     }
   });
 
-  wsServer.on("connection", (socket) => {
-    alive.add(socket);
-    socket.on("pong", () => {
-      alive.add(socket);
+  const authenticate = async (
+    request: IncomingMessage,
+  ): Promise<AuthenticatedPrincipal | undefined> => {
+    if (authenticator === undefined) {
+      return undefined;
+    }
+    return authenticator.authenticate({
+      headers: request.headers,
+      ...(request.socket.remoteAddress !== undefined
+        ? { remoteAddress: request.socket.remoteAddress }
+        : {}),
     });
-    const context = attachConnection(socket, handlers, beforeDispatch, deferredRequestCompletionMethods);
-    onConnection?.(context);
+  };
+
+  wsServer.on("connection", (socket, request) => {
+    const establish = (principal: AuthenticatedPrincipal | undefined): void => {
+      if (socket.readyState !== socket.OPEN) {
+        return;
+      }
+      alive.add(socket);
+      socket.on("pong", () => {
+        alive.add(socket);
+      });
+      const context = attachConnection(
+        socket,
+        handlers,
+        beforeDispatch,
+        deferredRequestCompletionMethods,
+        principal,
+      );
+      onConnection?.(context);
+    };
+
+    if (authenticator === undefined) {
+      establish(undefined);
+      return;
+    }
+
+    // A socket that errors while authentication is in flight still closes; do
+    // not let that event escape as unhandled.
+    socket.on("error", () => undefined);
+    // Hold frames until the authenticated context is attached. Otherwise a
+    // client that sends immediately after `open` could have its first frames
+    // dropped while an asynchronous authenticator is still running.
+    socket.pause();
+    void (async (): Promise<void> => {
+      let principal: AuthenticatedPrincipal | undefined;
+      try {
+        principal = await authenticate(request);
+      } catch {
+        try {
+          socket.resume();
+          socket.close(WEBSOCKET_CLOSE_AUTHENTICATION_FAILED, "Connection rejected");
+        } catch {
+          // The close event still runs local socket cleanup.
+        }
+        return;
+      }
+      try {
+        establish(principal);
+      } catch {
+        try {
+          socket.resume();
+          socket.close(WEBSOCKET_CLOSE_AUTHENTICATION_FAILED, "Connection rejected");
+        } catch {
+          // The close event still runs local socket cleanup.
+        }
+      } finally {
+        if (socket.readyState === socket.OPEN) {
+          socket.resume();
+        }
+      }
+    })();
   });
 
   const startHeartbeat = (): void => {

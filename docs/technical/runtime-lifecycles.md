@@ -88,6 +88,11 @@ idle ──start()──> starting ──bind ok──> listening ──stop()�
   forced close itself throws.
 - **A permanent HTTP error listener** absorbs late server-level errors so they
   cannot crash the process.
+- **Authentication precedes AHP dispatch.** When configured, the upgrade
+  authenticator resolves a principal before the connection context exists.
+  Frames are paused while an asynchronous authenticator runs, so an early
+  `initialize` is not dropped. A thrown/rejected authenticator closes only that
+  socket with `1011`; the listener keeps running.
 
 ## Connection framing
 
@@ -96,6 +101,22 @@ parse error, a shape-invalid message answers invalid-request (with its id
 recovered when possible), and binary frames close the connection (`1003`). The
 own-property dispatch guard means inherited members such as `toString` are not
 reachable as methods.
+
+## Agent presence and work lifecycle
+
+- `createSession` on an authenticated connection binds the live session URI to
+  that principal. A different principal cannot rebind or dispose it.
+- `disposeSession` checks ownership first, then dependent work. A work conflict
+  leaves the session, its owner binding, and all work rows intact.
+- Agent registration is durable; presence is not. Closing a connection releases
+  only that connection's binding, and a late close cannot remove a newer
+  generation.
+- A work lease is a SQL row with a token and a database-clock deadline. Losing
+  presence stops new mutations but does not delete the lease; it expires and may
+  be reclaimed with a new token and attempt.
+- Host shutdown stops the transport, disposes the binding, disposes sessions,
+  then releases the optional database pool. A failed cleanup is aggregated
+  rather than silently ignored.
 
 ## Gotchas
 

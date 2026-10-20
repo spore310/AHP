@@ -13,14 +13,15 @@ the binding does not import sockets into that module.
 
 | File | Responsibility |
 | ---- | -------------- |
-| `types.ts` | `WebSocketServerOptions`, `WebSocketServerHandle`, `JsonRpcHandler(s)`, and `WebSocketConnectionContext`. |
-| `helpers/server.ts` | `createWebSocketServer`: HTTP/WebSocket lifecycle, upgrade checks, heartbeat, and shutdown. |
-| `helpers/connection.ts` | `attachConnection`: per-socket framing, serialized dispatch, reply settlement, and error mapping. |
+| `types.ts` | `WebSocketServerOptions`, `WebSocketServerHandle`, `JsonRpcHandler(s)`, `WebSocketConnectionContext`, and the optional handshake authenticator. |
+| `helpers/server.ts` | `createWebSocketServer`: HTTP/WebSocket lifecycle, upgrade checks, handshake authentication, heartbeat, and shutdown. |
+| `helpers/connection.ts` | `attachConnection`: per-socket framing, serialized dispatch, reply settlement, principal attachment, and error mapping. |
 | `helpers/ahp/index.ts` | Public AHP binding exports. |
-| `helpers/ahp/helpers.ts` | `createAHPBinding`: initialize, subscriptions, publication, and connection lifetime. |
+| `helpers/ahp/helpers.ts` | `createAHPBinding`: initialize, subscriptions, publication, connection lifetime, session-owner binding, and extension wiring. |
+| `helpers/ahp/agentWork.ts` | Authenticated agent registration/presence and work request handlers, schemas, and error mapping. |
 | `helpers/ahp/toolInvocation.ts` | Namespaced client-executed tool calls, accepted executor ownership, contract validation, and settlement. |
-| `helpers/ahp/types.ts` | AHP peer, adapter, and parameter schemas. |
-| `helpers/ahp/constants.ts` | Method kinds, baseline action inventory, and pending-delivery limit. |
+| `helpers/ahp/types.ts` | AHP peer, adapter, parameter schemas, and `AHPBindingOptions`. |
+| `helpers/ahp/constants.ts` | Method kinds, authenticated extension method inventory, baseline action inventory, and pending-delivery limit. |
 | `helpers/host/index.ts` | Public composed-host exports. |
 | `helpers/host/helpers.ts` | `createAHPServer`: owns sequence injection, sessions, binding, transport, and shutdown. |
 | `helpers/host/types.ts` | `AHPServerOptions` and `AHPServerHandle`. |
@@ -35,6 +36,8 @@ the binding does not import sockets into that module.
   - `options.path` — required upgrade path (default `WEBSOCKET_DEFAULT_PATH`,
     `"/"`).
   - `options.handlers` — `Readonly<Record<string, JsonRpcHandler>>`.
+  - `options.authenticator` — optional handshake credential verifier. A resolved
+    principal is attached to `WebSocketConnectionContext.principal`.
   - `options.shutdownTimeoutMs` — graceful-shutdown deadline (default `5000`).
 - `handle.start(): Promise<AddressInfo>` — resolves with the bound address.
 - `handle.stop(): Promise<void>` — resolves once local resources are released.
@@ -43,11 +46,15 @@ the binding does not import sockets into that module.
   - `invocation.onReplySettled` runs after that invocation's response is enqueued.
 - `WebSocketConnectionContext.send(message)` — enqueue a JSON-RPC message.
   Returns whether the open socket accepted the frame.
-- `createAHPConnectionModule(factory)` — wire-only handlers plus `onConnection`,
-  `beforeDispatch`, and `dispose`. Cleanup is not an RPC method.
-- `createAHPServer({ host, port, path, sessions })` — composed host. `stop()`
-  releases transport, binding, and sessions. It is terminal, including after a
-  failed `start()`. `host.sessions.createSession` and
+- `createAHPConnectionModule(factory, reportDiagnostic?, options?)` — wire-only
+  handlers plus `onConnection`, `beforeDispatch`, and `dispose`. Cleanup is not
+  an RPC method. The optional third argument enables the agent/work extension
+  with `agents`, `work`, and `sessionOwners`.
+- `createAHPServer({ host, port, path, sessions, agentWork? })` — composed host.
+  `agentWork` optionally adds the static-token authenticator, PostgreSQL-backed
+  registration/work ports, allowed kinds, presence TTL, and pool cleanup. `stop()`
+  releases transport, binding, sessions, and the optional pool. It is terminal,
+  including after a failed `start()`. `host.sessions.createSession` and
   `host.sessions.dispatchAction` then reject; a second `start()` rejects.
 
 ## 5-Minute Usage
@@ -140,6 +147,19 @@ const server = createWebSocketServer({
   remaining sockets and HTTP connections are force-closed; `stop()` still awaits
   local release. A slow remote peer is not guaranteed to observe the close
   handshake.
+- **Authentication is opt-in and fail-closed for the extension.** Only the
+  upgrade `Authorization` header is read; `initialize.clientId` is a label, not
+  identity. A missing credential still permits baseline methods but every
+  agent/work method rejects. Static bearer tokens are POC-grade, not production
+  identity.
+- **Work is not tool invocation.** `x-ahp/tools/*` is short-lived and private;
+  `x-ahp/work/*` is durable coordination with a database lease. The server never
+  executes stored work.
+- **Host-side session creation has no authenticated owner.** Calling
+  `host.sessions.createSession` bypasses a WebSocket principal, so the resulting
+  session cannot own or accept work. Create work-enabled sessions through an
+  authenticated AHP `createSession`. Direct host disposal checks dependent work
+  and unbinds the owner on success, but it does not add authorization.
 
 ## Testing
 
@@ -152,6 +172,12 @@ const server = createWebSocketServer({
 | [`src/tests/websocket/sessionTypeCapacity.test.ts`](../tests/websocket/sessionTypeCapacity.test.ts) | A header-enum session type accepts creation, omits admin tools, and rejects object or unmapped headers. |
 | [`src/tests/websocket/toolInvocation.test.ts`](../tests/websocket/toolInvocation.test.ts) | Real SDK sockets: matching manifests, atomic/private advertisement denial, local calls/results and privacy, outsider/schema rejection, forged/stale/ambiguous executors, disconnect/URI reuse, concurrent self-calls, capacity/release, and empty registration. |
 | [`src/tests/websocket/deferred.test.ts`](../tests/websocket/deferred.test.ts) | A broken completion predicate cannot escape the ordered socket queue. |
+| [`src/tests/agents/authenticator.test.ts`](../tests/agents/authenticator.test.ts) | Bearer parsing, exact token lookup, missing/unknown credentials, repeated headers, and value-free errors. |
+| [`src/tests/agents/directory.test.ts`](../tests/agents/directory.test.ts) | Stable registration, cross-principal denial, disabled agents, one live binding, generation fencing, expiry, and stale release. |
+| [`src/tests/websocket/agentWork.test.ts`](../tests/websocket/agentWork.test.ts) | Extension request/notification kinds, strict v1 schemas, authenticated identity derivation, exact replies, and sanitized errors. |
+| [`src/tests/websocket/agentWork.binding.test.ts`](../tests/websocket/agentWork.binding.test.ts) | Session-owner binding, disposal ownership/conflict, and presence release on close/dispose. |
+| [`src/tests/websocket/agentWork.transport.test.ts`](../tests/websocket/agentWork.transport.test.ts) | Handshake auth vs. `clientId`, delayed auth frame buffering, thrown-authenticator containment, and real-socket extension calls. |
+| [`src/tests/websocket/agentWork.integration.test.ts`](../tests/websocket/agentWork.integration.test.ts) | Composed host: authenticated A/B submit → register → claim → renew → complete → get through the real work service, with owner and secret checks. |
 
 ## Namespaced client tool invocation
 

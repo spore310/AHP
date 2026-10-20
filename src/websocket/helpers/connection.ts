@@ -25,6 +25,7 @@ import {
 } from "@jsonrpc";
 
 import { WEBSOCKET_CLOSE_UNSUPPORTED_DATA } from "../constants";
+import type { AuthenticatedPrincipal } from "@agents";
 import type {
   JsonRpcHandler,
   JsonRpcHandlers,
@@ -287,6 +288,7 @@ export const attachConnection = (
   handlers: JsonRpcHandlers,
   beforeDispatch?: (dispatch: WebSocketDispatchContext) => void,
   deferredRequestCompletionMethods: ReadonlyMap<string, import("../types").DeferredRequestCompletionRule> = new Map(),
+  principal?: AuthenticatedPrincipal,
 ): WebSocketConnectionContext => {
   const closeHandlers = new Set<() => void>();
   let closed = false;
@@ -297,6 +299,7 @@ export const attachConnection = (
 
   const context: WebSocketConnectionContext = {
     connectionId: randomUUID(),
+    ...(principal !== undefined ? { principal } : {}),
     send: (message: JsonRpcMessage): boolean => {
       if (closed || socket.readyState !== socket.OPEN) {
         return false;

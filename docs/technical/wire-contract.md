@@ -100,7 +100,31 @@ notification, and `x-ahp/tools/complete` is a client notification. Ordinary
 `AhpClient` users need the [tool client adapter](../../src/toolClient/README.md)
 for this extension. The server validates and routes; a registered local client
 implementation executes. These operations add no persistence or server-side
-filesystem/model runtime. Authentication remains deferred.
+filesystem/model runtime.
+
+## Authenticated agent/work extension
+
+The optional extension is also namespaced and versioned. Every method is a
+request using `version: 1`:
+
+- `x-ahp/agents/register`, `renew`, `unregister` — durable registration plus a
+  live in-memory presence binding.
+- `x-ahp/work/submit`, `claim`, `renew`, `complete`, `fail`, `cancel`, `get` —
+  durable work and its current execution lease.
+
+Only `x-ahp/work/claim` returns a lease token, and only to the current claimant.
+`get` redacts lease-holder and token fields. A client cannot supply a principal,
+agent ID, connection ID, or presence generation in request JSON; those come from
+the authenticated connection and live directory. The work extension is separate
+from `x-ahp/tools/*`: tools are short-lived private invocation, while work is a
+durable record that survives a disconnect.
+
+When configured, the upgrade may carry `Authorization: Bearer <token>`; the
+resolved subject is attached to the connection before AHP dispatch. Missing or
+unknown credentials leave the connection unauthenticated, so agent/work methods
+fail closed while baseline AHP methods remain available under the host's
+deployment policy. `initialize.clientId` is never identity. See
+[`../architecture/agent-task-lifecycle.md`](../architecture/agent-task-lifecycle.md).
 
 ## Gotchas
 

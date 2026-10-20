@@ -18,5 +18,31 @@ export const envSchema = z.object({
     .min(1, "must be at least 1")
     .max(65535, "must be at most 65535")
     .default(12345),
+  /**
+   * Optional PostgreSQL connection string. Agent registration and durable work
+   * are disabled unless this and at least one auth token are configured.
+   */
+  AGENT_HOSTING_PROTOCOL_DATABASE_URL: z.string().min(1).optional(),
+  /**
+   * JSON object mapping bearer tokens to trusted principal subjects. Never log
+   * this value. Example: {"token-a":"alice","token-b":"bob"}.
+   */
+  AGENT_HOSTING_PROTOCOL_AUTH_TOKENS: z.string().min(1).optional(),
+  AGENT_HOSTING_PROTOCOL_PRESENCE_TTL_SECONDS: z.coerce
+    .number()
+    .int("must be an integer")
+    .min(5, "must be at least 5")
+    .max(600, "must be at most 600")
+    .default(90),
+  AGENT_HOSTING_PROTOCOL_WORK_LEASE_SECONDS: z.coerce
+    .number()
+    .int("must be an integer")
+    .min(5, "must be at least 5")
+    .max(3600, "must be at most 3600")
+    .default(60),
+  AGENT_HOSTING_PROTOCOL_ALLOWED_WORK_KINDS: z
+    .string()
+    .min(1)
+    .default("code.patch,code.review"),
 });
 export type EnvConfig = z.infer<typeof envSchema>;

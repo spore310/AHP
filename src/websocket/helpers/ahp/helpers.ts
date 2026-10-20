@@ -18,6 +18,7 @@ import {
   type JsonRpcParams,
 } from "@jsonrpc";
 import type { SessionsFactory } from "@sessions/types";
+import type { SessionOwnerRegistry } from "@work";
 import type {
   JsonRpcHandler,
   JsonRpcHandlers,
@@ -35,11 +36,13 @@ import {
   TOOL_CALL_METHOD,
   TOOL_COMPLETE_METHOD,
 } from "./constants";
+import { createAgentWorkExtension, mapWorkError } from "./agentWork";
 import { createToolInvocationBroker } from "./toolInvocation";
 import {
   channelParamsSchema,
   dispatchActionParamsSchema,
   initializeParamsSchema,
+  type AHPBindingOptions,
   type AHPDiagnostic,
   type AHPPeer,
   type ChannelAdapter,
@@ -86,13 +89,29 @@ export interface AHPBinding {
   dispose(): void;
 }
 
+const NOOP_SESSION_OWNERS: SessionOwnerRegistry = {
+  bind: (): void => undefined,
+  owner: (): string | undefined => undefined,
+  unbind: (): void => undefined,
+  clear: (): void => undefined,
+};
+
 export const createAHPBinding = (
   factory: SessionsFactory,
   reportDiagnostic: (diagnostic: AHPDiagnostic) => void = () => undefined,
+  options?: AHPBindingOptions,
 ): AHPBinding => {
   const peers = new Map<string, AHPPeer>();
   const adapters: ChannelAdapter[] = [];
   let disposed = false;
+
+  const extension = options === undefined
+    ? undefined
+    : createAgentWorkExtension({
+        agents: options.agents,
+        work: options.work,
+        sessionOwners: options.sessionOwners ?? NOOP_SESSION_OWNERS,
+      });
 
   const registerAdapter = (adapter: ChannelAdapter): void => {
     if (adapters.some((existing) => existing.scheme === adapter.scheme)) {
@@ -239,7 +258,7 @@ export const createAHPBinding = (
     publish(envelope.channel, actionNotification(envelope));
   });
 
-  const handlers: Record<string, JsonRpcHandler> = {
+  const baselineHandlers: Record<string, JsonRpcHandler> = {
     initialize: (params: unknown, context: WebSocketConnectionContext, invocation: JsonRpcInvocation): InitializeResult => {
       const peer = requirePeer(context);
       if (peer.phase !== "new") {
@@ -352,12 +371,29 @@ export const createAHPBinding = (
     createSession: async (params: unknown, context: WebSocketConnectionContext): Promise<null> => {
       requirePeer(context);
       await factory.createSession(params);
+      const parsed = channelParamsSchema.safeParse(params);
+      const { principal } = context;
+      if (parsed.success && principal !== undefined) {
+        options?.sessionOwners?.bind(parsed.data.channel, principal.subject);
+      }
       return null;
     },
 
     disposeSession: async (params: unknown, context: WebSocketConnectionContext): Promise<null> => {
       requirePeer(context);
+      const parsed = channelParamsSchema.parse(params);
+      try {
+        const owner = options?.sessionOwners?.owner(parsed.channel);
+        if (owner !== undefined
+          && (context.principal === undefined || owner !== context.principal.subject)) {
+          throw new RpcError(JsonRpcErrorCodes.InvalidParams, "Session not found");
+        }
+        await options?.work?.assertSessionDisposable(parsed.channel);
+      } catch (error) {
+        mapWorkError(error);
+      }
       await factory.disposeSession(params);
+      options?.sessionOwners?.unbind(parsed.channel);
       return null;
     },
 
@@ -398,6 +434,15 @@ export const createAHPBinding = (
     },
   };
 
+  const handlers: Record<string, JsonRpcHandler> = { ...baselineHandlers };
+  for (const [method, handler] of Object.entries(extension?.handlers ?? {})) {
+    // Baseline methods are authoritative and cannot be overridden by the
+    // optional authenticated extension.
+    if (!Object.hasOwn(handlers, method)) {
+      handlers[method] = handler;
+    }
+  }
+
   return {
     handlers,
     isToolCompletion: (params: unknown, context: WebSocketConnectionContext): boolean => (
@@ -423,6 +468,7 @@ export const createAHPBinding = (
         peer.closeNotified = true;
         peer.phase = "closed";
         toolInvocations.removeConnection(context.connectionId);
+        extension?.onConnectionClose(context.connectionId);
         peer.pending.clear();
         peer.subscriptions.clear();
         peers.delete(context.connectionId);
@@ -463,10 +509,12 @@ export const createAHPBinding = (
       }
       toolInvocations.dispose();
       for (const peer of [...peers.values()]) {
+        extension?.onConnectionClose(peer.context.connectionId);
         peer.phase = "closed";
         peer.pending.clear();
         peer.subscriptions.clear();
       }
+      extension?.dispose();
       peers.clear();
     },
   };
