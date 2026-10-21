@@ -124,7 +124,7 @@ heartbeat cannot prove agent identity.
 | `kind` | `TEXT NOT NULL` | 1–128 chars; additionally allowlisted by the service. |
 | `input` | `JSONB NOT NULL` | Must be a JSON object; bounded by the wire/service layer. |
 | `status` | `TEXT NOT NULL DEFAULT 'queued'` | One of `queued`, `leased`, `completed`, `failed`, `cancelled`. |
-| `target_agent_id` | `UUID NULL` | Optional intended agent; must belong to the session owner. |
+| `target_agent_id` | `UUID NULL` | Optional intended agent; must belong to the session owner. The DDL cannot express this across tables — the FK only anchors the row — so the invariant is enforced at write time by `WorkService.submit` (`src/work/helpers/helpers.ts`), not by the schema. Direct repository callers bypass the service check. |
 | `lease_agent_id` | `UUID NULL` | Current holder only while `leased`. |
 | `lease_token` | `UUID NULL` | Rotated on every claim/reclaim; sensitive; never returned by `get`. |
 | `lease_expires_at` | `TIMESTAMPTZ NULL` | Evaluated with the database clock, never the process clock. |
@@ -210,7 +210,12 @@ stateDiagram-v2
 - No background scheduler is included. Claim selects expired rows; callers may
   invoke reconciliation.
 - No cross-principal grant model exists yet. Targeted work must be for the same
-  principal as the session owner.
+  principal as the session owner; that invariant is enforced by
+  `WorkService.submit` at write time, not by this DDL (an FK cannot express it
+  across tables).
+- A submission whose repository write settles after its live session was
+  disposed is reconciled, not orphaned: the work service cancels the row and
+  reports a conflict to the caller.
 
 ## Related documentation
 

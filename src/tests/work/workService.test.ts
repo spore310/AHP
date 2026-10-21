@@ -122,6 +122,7 @@ const createFakes = () => {
     owners,
     service,
     submit,
+    cancel,
     complete,
     hasDependentWork,
     getById,
@@ -191,6 +192,84 @@ describe("work service", () => {
       kind: "code.patch",
       input: { payload: "x".repeat(300) },
     })).rejects.toMatchObject({ code: "invalid" });
+  });
+
+  it("rejects blank session URIs, oversized URIs, blank request keys and kinds", async () => {
+    const { service } = createFakes();
+    await expect(service.submit(principal, {
+      sessionUri: "ahp-session:/" + "x".repeat(2_049),
+      requestKey: "request-1",
+      kind: "code.patch",
+      input: {},
+    })).rejects.toMatchObject({ code: "invalid" });
+    await expect(service.submit(principal, {
+      sessionUri: session.sessionUri,
+      requestKey: "   ",
+      kind: "code.patch",
+      input: {},
+    })).rejects.toMatchObject({ code: "invalid" });
+    await expect(service.submit(principal, {
+      sessionUri: session.sessionUri,
+      requestKey: "request-1",
+      kind: " ",
+      input: {},
+    })).rejects.toMatchObject({ code: "invalid" });
+  });
+
+  it("rejects input carrying PostgreSQL-JSONB-unsafe text", async () => {
+    const { service } = createFakes();
+    await expect(service.submit(principal, {
+      sessionUri: session.sessionUri,
+      requestKey: "request-1",
+      kind: "code.patch",
+      input: { note: "a\u0000b" },
+    })).rejects.toMatchObject({ code: "invalid" });
+    await expect(service.submit(principal, {
+      sessionUri: session.sessionUri,
+      requestKey: "request-2",
+      kind: "code.patch",
+      input: { note: "\ud800" },
+    })).rejects.toMatchObject({ code: "invalid" });
+  });
+
+  it("refuses a submission that races a disposal and cancels the durable row", async () => {
+    const { cancel, owners, service, submit } = createFakes();
+    let release: () => void = (): void => undefined;
+    submit.mockImplementationOnce((): Promise<{ readonly id: string; readonly created: boolean }> => (
+      new Promise((resolve) => {
+        release = (): void => {
+          resolve({ id: "work-race", created: true });
+        };
+      })
+    ));
+    const pending = service.submit(principal, {
+      sessionUri: session.sessionUri,
+      requestKey: "request-race",
+      kind: "code.patch",
+      input: { instruction: "change" },
+    });
+    // The disposal removes the live session and its owner binding while the
+    // repository write is still in flight.
+    owners.unbind(session.sessionUri);
+    release();
+    await expect(pending).rejects.toMatchObject({ code: "conflict" });
+    expect(cancel).toHaveBeenCalledWith({
+      workId: "work-race",
+      principalSubject: "alice",
+    });
+  });
+
+  it("exposes ownership conflicts as typed work-domain errors", () => {
+    const { owners } = createFakes();
+    expect(() => {
+      owners.bind(session.sessionUri, "bob");
+    }).toThrow(WorkError);
+    expect(() => {
+      owners.bind(session.sessionUri, "bob");
+    }).toThrow("The session already belongs to another principal.");
+    expect(() => {
+      owners.bind(session.sessionUri, principal.subject);
+    }).not.toThrow();
   });
 
   it("rejects a missing, expired, or mismatched presence binding", async () => {

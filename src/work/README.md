@@ -61,9 +61,33 @@ registration fails closed.
 - Session URI and request key are non-empty; request key is at most 256 chars.
 - Kind must be in the configured allowed set and at most 128 chars.
 - Input/result must be JSON objects; default limits are 64 KiB input and 256 KiB
-  result.
-- Failure messages are 1–2,000 chars; the wire adapter further caps them.
+  result. Values the PostgreSQL JSONB format cannot store (NUL code units,
+  unpaired surrogates) are rejected before SQL is attempted.
+- Failure messages are 1–2,000 chars; the wire adapter further caps them. The
+  message is validated and then dropped: the frozen v1 reply contract is
+  `{ status }` and no failure-message column exists, so the reason lives only in
+  the worker's own logs.
 - Work IDs and lease tokens must be UUID-shaped before SQL is attempted.
+
+## Caveats
+
+- **No server-side execution.** A work row is coordination state; the server
+  never runs a model, process, or filesystem executor.
+- **At-least-once.** A worker may retry after a lease expires; completion is
+  fenced but side effects are not transactional with the database.
+- **No cross-principal grants.** Targeting another principal's agent is denied.
+- **No push guarantee.** v1 implements no work-available push; clients discover
+  work by claiming. Any future hint would be a best-effort signal, never proof of
+  assignment.
+- **Reconcile per claim.** Every claim first issues a global expired-lease
+  reconciliation statement. The claim CTE re-checks the DB clock itself, so
+  correctness never depends on the reconciler; the statement is accepted
+  overhead for refresh breadth on the claim path. A scheduler-based variant is a
+  possible follow-up, not a v1 contract change.
+- **Reserving `"exhausted"`.** The wire vocabulary maps `"exhausted"`, but v1
+  service code never produces it: budget-exhausted leases terminalize to
+  `failed` status instead of throwing a fresh observable error. Keep the mapping
+  as reserved behavior until a producer exists.
 
 ## Testing
 

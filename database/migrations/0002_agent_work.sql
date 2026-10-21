@@ -57,3 +57,7 @@ CREATE INDEX work_items_expired_claim_idx
 
 CREATE INDEX work_items_session_idx
   ON work_items (session_uri, created_at DESC);
+
+-- Record this script's applied version alongside the baseline row from
+-- `0001_session_tool_baseline.sql`.
+INSERT INTO schema_migrations (version) VALUES ('0002_agent_work');

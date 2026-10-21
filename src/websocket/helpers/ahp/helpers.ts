@@ -370,11 +370,25 @@ export const createAHPBinding = (
 
     createSession: async (params: unknown, context: WebSocketConnectionContext): Promise<null> => {
       requirePeer(context);
-      await factory.createSession(params);
       const parsed = channelParamsSchema.safeParse(params);
       const { principal } = context;
+      // Fail closed before touching live state when another principal already
+      // holds the owner binding. Creating first would leave the caller with a
+      // live record its true owner can neither bind nor dispose.
+      if (options?.sessionOwners !== undefined && parsed.success) {
+        const owner = options.sessionOwners.owner(parsed.data.channel);
+        if (owner !== undefined
+          && (principal === undefined || owner !== principal.subject)) {
+          throw new RpcError(JsonRpcErrorCodes.InvalidParams, "Session not found");
+        }
+      }
+      await factory.createSession(params);
       if (parsed.success && principal !== undefined) {
-        options?.sessionOwners?.bind(parsed.data.channel, principal.subject);
+        try {
+          options?.sessionOwners?.bind(parsed.data.channel, principal.subject);
+        } catch (error) {
+          mapWorkError(error);
+        }
       }
       return null;
     },
@@ -392,8 +406,14 @@ export const createAHPBinding = (
       } catch (error) {
         mapWorkError(error);
       }
-      await factory.disposeSession(params);
-      options?.sessionOwners?.unbind(parsed.channel);
+      try {
+        await factory.disposeSession(params);
+      } finally {
+        // Removal from the sessions registry is the authoritative release
+        // point for the owner binding: it must survive backend disposal
+        // failures, which resolve after the record is already gone.
+        options?.sessionOwners?.unbind(parsed.channel);
+      }
       return null;
     },
 

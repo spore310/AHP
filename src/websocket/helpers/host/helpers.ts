@@ -163,9 +163,14 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
       if (work !== undefined && channel !== undefined) {
         await work.assertSessionDisposable(channel);
       }
-      await sessions.disposeSession(params);
-      if (channel !== undefined) {
-        sessionOwners.unbind(channel);
+      try {
+        await sessions.disposeSession(params);
+      } finally {
+        // Mirror the AHP handler: the owner binding is released when the
+        // record is removed, even when backend disposal fails.
+        if (channel !== undefined) {
+          sessionOwners.unbind(channel);
+        }
       }
     },
     getCurrentServerSeq: () => sessions.getCurrentServerSeq(),

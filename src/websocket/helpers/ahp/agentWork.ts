@@ -5,14 +5,13 @@ import { AgentDirectoryError, type AgentDirectory, type AuthenticatedPrincipal, 
 import { RpcError } from "@jsonrpc";
 import { RepositoryError } from "@persistence";
 import { sessionUriSchema } from "@sessions/types";
-import { WorkError, type AuthorizedAgentContext, type SessionOwnerRegistry, type WorkService } from "@work";
+import { WorkError, isJsonbSafe, WORK_MAX_INPUT_BYTES, WORK_MAX_RESULT_BYTES, type AuthorizedAgentContext, type SessionOwnerRegistry, type WorkService } from "@work";
 
 import type { JsonRpcHandler, JsonRpcHandlers, WebSocketConnectionContext } from "../../types";
 import {
   AGENT_REGISTER_METHOD,
   AGENT_RENEW_METHOD,
   AGENT_UNREGISTER_METHOD,
-  MAX_AGENT_WORK_PAYLOAD_BYTES,
   WORK_CANCEL_METHOD,
   WORK_CLAIM_METHOD,
   WORK_COMPLETE_METHOD,
@@ -41,7 +40,10 @@ const agentKey = z.string().min(1).max(128).refine(
   (value) => value.trim().length > 0,
   { message: "Agent key must not be blank" },
 );
-const displayName = z.string().min(1).max(128);
+const displayName = z.string().min(1).max(128).refine(
+  (value) => value.trim().length > 0,
+  { message: "Display name must not be blank" },
+);
 const requestKey = z.string().min(1).max(128).refine(
   (value) => value.trim().length > 0,
   { message: "Request key must not be blank" },
@@ -57,22 +59,40 @@ const failureMessage = z.string().min(1).max(512).refine(
   { message: "Failure message must not be blank" },
 );
 
-const isBoundedJson = (value: unknown): boolean => {
-  if (value === undefined || typeof value === "function" || typeof value === "symbol") {
+const isPayloadInvalid = (value: unknown): boolean => (
+  value === undefined
+  || typeof value === "function"
+  || typeof value === "symbol"
+  || !isJsonbSafe(value)
+);
+
+const isBoundedInput = (value: unknown): boolean => {
+  if (isPayloadInvalid(value)) {
     return false;
   }
   try {
-    return Buffer.byteLength(JSON.stringify(value)) <= MAX_AGENT_WORK_PAYLOAD_BYTES;
+    return Buffer.byteLength(JSON.stringify(value)) <= WORK_MAX_INPUT_BYTES;
   } catch {
     return false;
   }
 };
 
-const boundedJson = z.unknown().refine(isBoundedJson, {
+const isBoundedResult = (value: unknown): boolean => {
+  if (isPayloadInvalid(value)) {
+    return false;
+  }
+  try {
+    return Buffer.byteLength(JSON.stringify(value)) <= WORK_MAX_RESULT_BYTES;
+  } catch {
+    return false;
+  }
+};
+
+const boundedObject = z.record(z.string(), z.unknown()).refine(isBoundedInput, {
   message: "Payload must be bounded JSON",
 });
 
-const boundedObject = z.record(z.string(), z.unknown()).refine(isBoundedJson, {
+const boundedResult = z.record(z.string(), z.unknown()).refine(isBoundedResult, {
   message: "Payload must be bounded JSON",
 });
 
@@ -110,7 +130,7 @@ const completeSchema = z.object({
   version,
   workId,
   leaseToken,
-  result: boundedJson,
+  result: boundedResult,
 }).strict();
 
 const failSchema = z.object({
@@ -267,6 +287,19 @@ export const createAgentWorkExtension = (
       const principal = requirePrincipal(context);
       const agents = requireAgents();
       const parsed = registerSchema.parse(params);
+      // A connection holding another live agent can never bind a new one, so
+      // refuse before a durable registration row is created; there is no delete
+      // path to clean a stranded row up later. Re-registering the connection's
+      // own agent key stays allowed (the binding is idempotent).
+      const connected = agents.getByConnection(context.connectionId);
+      if (connected !== undefined) {
+        const bound = await agents.getRegistration(connected.agentId);
+        if (bound === undefined
+          || bound.principalSubject !== principal.subject
+          || bound.agentKey !== parsed.agentKey) {
+          conflict();
+        }
+      }
       try {
         const registration = await agents.register(
           principal,

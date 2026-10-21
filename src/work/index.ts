@@ -1,5 +1,11 @@
 export { WorkError } from "./helpers/errors";
-export { createSessionOwnerRegistry, createWorkService } from "./helpers/helpers";
+export {
+  createSessionOwnerRegistry,
+  createWorkService,
+  isJsonbSafe,
+  WORK_MAX_INPUT_BYTES,
+  WORK_MAX_RESULT_BYTES,
+} from "./helpers/helpers";
 export type {
   AuthorizedAgentContext,
   SessionOwnerRegistry,

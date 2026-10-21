@@ -47,6 +47,22 @@ describe("createStaticTokenAuthenticator", () => {
     })).resolves.toBeUndefined();
   });
 
+  it("distinguishes tokens that are prefixes of one another", async () => {
+    const authenticator = createStaticTokenAuthenticator(new Map([
+      ["token", "short-owner"],
+      ["token-extended", "long-owner"],
+    ]));
+    await expect(authenticator.authenticate({
+      headers: { authorization: "Bearer token" },
+    })).resolves.toEqual({ subject: "short-owner" });
+    await expect(authenticator.authenticate({
+      headers: { authorization: "Bearer token-extended" },
+    })).resolves.toEqual({ subject: "long-owner" });
+    await expect(authenticator.authenticate({
+      headers: { authorization: "Bearer token-extr" },
+    })).resolves.toBeUndefined();
+  });
+
   it("rejects an empty token or subject at construction", () => {
     expect(() => createStaticTokenAuthenticator(new Map([["", "alice"]])))
       .toThrow("non-empty tokens and subjects");

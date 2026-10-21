@@ -72,3 +72,8 @@ CREATE INDEX sessions_modified_idx
   ON sessions (modified_at DESC, session_uri);
 CREATE INDEX sessions_owner_idx
   ON sessions (owner_principal_subject);
+
+-- Record this script's applied version so a reader or future runner of the
+-- bookkeeping table can see the baseline was applied. The table is created at
+-- the top of this file.
+INSERT INTO schema_migrations (version) VALUES ('0001_session_tool_baseline');

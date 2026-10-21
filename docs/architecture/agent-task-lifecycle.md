@@ -24,7 +24,7 @@ sequenceDiagram
     B->>H: Authenticate, register/reclaim agent identity
     H->>H: Bind live presence lease to actual connection
     H-->>B: agentId + presence expiry
-    Note over H,B: v1 has no work-available push; the worker claims explicitly
+    Note over H,B: v1 has no work-available push#59; the worker claims explicitly
 
     B->>H: Claim eligible work in authorized session
     H->>H: Verify principal, session, kind and live presence
@@ -123,7 +123,8 @@ and
 Only `agent_registrations` and `work_items` are new for this slice. Presence,
 sockets, subscriptions, active client tools, and replay state intentionally have
 no SQL tables. Session disposal is rejected while any work row references the
-session.
+session; a submission that settles after its live session was disposed in a
+concurrent request is cancelled and reported as a conflict rather than kept.
 
 ## Failure cases
 
@@ -177,7 +178,12 @@ Treat the SQL acceptance gates as **BLOCKED**, not passed.
 
 **Not implemented:** production identity/OIDC, cross-principal sharing, durable
 presence, event replay, server-side execution, workflow DAGs, and automatic
-wind-down of a worker that lost its lease.
+wind-down of a worker that lost its lease. Work-kind eligibility is host-global
+in V1 — one configurable allow-list shared by every agent; per-agent kind grants
+from the task plan are deferred (a contract change, not a configuration task).
+There is also no retention path: `work_items` rows and the durable `sessions` row
+they first landed are never deleted (live disposal only removes in-memory
+state), so a retain/cancel-and-archive policy is required before production use.
 
 ## Related documentation
 

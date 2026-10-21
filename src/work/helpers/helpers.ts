@@ -15,11 +15,55 @@ const DEFAULT_MAX_RESULT_BYTES = 256 * 1024;
 const MAX_REQUEST_KEY_LENGTH = 256;
 const MAX_KIND_LENGTH = 128;
 const MAX_FAILURE_MESSAGE_LENGTH = 2_000;
+const MAX_SESSION_URI_LENGTH = 2_048;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Service-side caps exposed so the wire schemas and the service agree. */
+export const WORK_MAX_INPUT_BYTES = DEFAULT_MAX_INPUT_BYTES;
+export const WORK_MAX_RESULT_BYTES = DEFAULT_MAX_RESULT_BYTES;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === "object" && value !== null && !Array.isArray(value)
 );
+
+/**
+ * Rejects strings that PostgreSQL JSONB cannot store: a NUL code unit and an
+ * unpaired surrogate. This keeps service validation in step with the storage
+ * layer instead of letting such payload surfaces as unclassified failures.
+ */
+const isJsonbSafeText = (text: string): boolean => {
+  for (let index = 0; index < text.length; index += 1) {
+    const unit = text.charCodeAt(index);
+    if (unit === 0) {
+      return false;
+    }
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = text.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) {
+        return false;
+      }
+      index += 1;
+      continue;
+    }
+    if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+};
+
+export const isJsonbSafe = (value: unknown): boolean => {
+  if (typeof value === "string") {
+    return isJsonbSafeText(value);
+  }
+  if (Array.isArray(value)) {
+    return value.every(isJsonbSafe);
+  }
+  if (!isRecord(value)) {
+    return true;
+  }
+  return [...Object.values(value)].every(isJsonbSafe);
+};
 
 const boundedJsonBytes = (value: unknown, label: string, limit: number): void => {
   let serialized: string;
@@ -30,6 +74,9 @@ const boundedJsonBytes = (value: unknown, label: string, limit: number): void =>
   }
   if (Buffer.byteLength(serialized, "utf8") > limit) {
     throw new WorkError("invalid", `${label} exceeds the size limit.`);
+  }
+  if (!isJsonbSafe(value)) {
+    throw new WorkError("invalid", `${label} contains text JSONB cannot store.`);
   }
 };
 
@@ -60,16 +107,20 @@ const assertSubmission = (
   allowedKinds: ReadonlySet<string>,
   limit: number,
 ): void => {
-  if (typeof submission.sessionUri !== "string" || submission.sessionUri.length === 0) {
+  if (typeof submission.sessionUri !== "string"
+    || submission.sessionUri.length === 0
+    || submission.sessionUri.length > MAX_SESSION_URI_LENGTH) {
     throw new WorkError("invalid", "A session URI is required.");
   }
   if (typeof submission.requestKey !== "string"
     || submission.requestKey.length === 0
+    || submission.requestKey.trim().length === 0
     || submission.requestKey.length > MAX_REQUEST_KEY_LENGTH) {
     throw new WorkError("invalid", "A bounded request key is required.");
   }
   if (typeof submission.kind !== "string"
     || submission.kind.length === 0
+    || submission.kind.trim().length === 0
     || submission.kind.length > MAX_KIND_LENGTH
     || !allowedKinds.has(submission.kind)) {
     throw new WorkError("invalid", "The work kind is not allowed.");
@@ -140,7 +191,7 @@ export const createSessionOwnerRegistry = (): SessionOwnerRegistry => {
     bind(sessionUri, principalSubject) {
       const current = owners.get(sessionUri);
       if (current !== undefined && current !== principalSubject) {
-        throw new Error("The session already belongs to another principal.");
+        throw new WorkError("conflict", "The session already belongs to another principal.");
       }
       owners.set(sessionUri, principalSubject);
     },
@@ -188,6 +239,25 @@ export const createWorkService = (options: WorkServiceOptions): WorkService => {
           input: submission.input,
           targetAgentId: submission.targetAgentId,
         });
+        // A settlement never attaches durable work to a session that no longer
+        // exists live and owned by the caller. The disposal races checked the
+        // same facts before the repository call, so reconcile instead: cancel
+        // the just-recorded row and surface the conflict.
+        const boundOwner = options.sessions.owner(submission.sessionUri);
+        const stillLive = options.describeSession(submission.sessionUri);
+        if (boundOwner !== principal.subject
+          || stillLive === undefined
+          || stillLive.ownerPrincipalSubject !== principal.subject) {
+          try {
+            await options.repository.cancel({
+              workId: result.id,
+              principalSubject: principal.subject,
+            });
+          } catch {
+            // The ownership problem outranks a reconciliation failure.
+          }
+          throw new WorkError("conflict", "The live session changed while the submission was recorded.");
+        }
         return { id: result.id };
       } catch (error) {
         return mapRepositoryFailure(error);
@@ -197,7 +267,9 @@ export const createWorkService = (options: WorkServiceOptions): WorkService => {
     async claim(agent, sessionUri) {
       presentAgent(options, agent);
       await enabledAgent(options, agent);
-      if (typeof sessionUri !== "string" || sessionUri.length === 0) {
+      if (typeof sessionUri !== "string"
+        || sessionUri.length === 0
+        || sessionUri.length > MAX_SESSION_URI_LENGTH) {
         throw new WorkError("invalid", "A session URI is required.");
       }
       try {

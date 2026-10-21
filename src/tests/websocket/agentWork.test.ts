@@ -270,6 +270,71 @@ describe("agent work extension request surface", () => {
     expect(work.calls).toHaveLength(0);
   });
 
+  it("rejects blank display names, JSONB-unsafe payloads, and non-object results", async () => {
+    const { registrations, work, extension } = setup();
+    const alice = contextFor("connection-1", "alice");
+
+    await expect(invoke(
+      extension,
+      AGENT_REGISTER_METHOD,
+      { version: 1, agentKey: "coding-worker", displayName: "   " },
+      alice,
+    )).rejects.toBeInstanceOf(ZodError);
+    expect(registrations.registerCalls).toHaveLength(0);
+
+    await registerAgent(extension, alice);
+    await expect(invoke(
+      extension,
+      WORK_SUBMIT_METHOD,
+      {
+        version: 1,
+        sessionUri: SESSION_URI,
+        requestKey: "request-1",
+        kind: WORK_KIND,
+        input: { note: "a\u0000b" },
+      },
+      alice,
+    )).rejects.toBeInstanceOf(ZodError);
+    expect(work.calls).toHaveLength(0);
+
+    await expect(invoke(
+      extension,
+      WORK_COMPLETE_METHOD,
+      {
+        version: 1,
+        workId: WORK_ID,
+        leaseToken: LEASE_TOKEN,
+        result: "not-an-object",
+      },
+      alice,
+    )).rejects.toBeInstanceOf(ZodError);
+  });
+
+  it("does not create a durable registration row behind a connection conflict", async () => {
+    const { registrations, extension } = setup();
+    const alice = contextFor("connection-1", "alice");
+
+    const first = await registerAgent(extension, alice);
+    expect(registrations.records.size).toBe(1);
+
+    // Another agentKey from the same connection can never bind, so it is
+    // rejected before a durable row is created.
+    await expect(invoke(
+      extension,
+      AGENT_REGISTER_METHOD,
+      { version: 1, agentKey: "other-worker" },
+      alice,
+    )).rejects.toMatchObject({ code: AhpErrorCodes.Conflict, message: "Conflict" });
+    expect(registrations.registerCalls).toHaveLength(1);
+    expect(registrations.records.size).toBe(1);
+
+    // Re-registering the connection's own agent key stays allowed.
+    const again = await registerAgent(extension, alice);
+    expect(again.agentId).toBe(first.agentId);
+    expect(registrations.registerCalls).toHaveLength(2);
+    expect(registrations.records.size).toBe(1);
+  });
+
   it("maps a live-connection conflict to a generic conflict", async () => {
     const { extension } = setup();
     const first = contextFor("connection-1", "alice");

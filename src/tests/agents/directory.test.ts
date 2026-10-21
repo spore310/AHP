@@ -34,7 +34,7 @@ describe("createAgentDirectory registration", () => {
     await expect(directory.getRegistration(first.id)).resolves.toMatchObject({
       id: first.id,
       principalSubject: "alice",
-      displayName: "Worker",
+      displayName: "Renamed",
     });
   });
 

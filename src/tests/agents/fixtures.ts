@@ -51,7 +51,15 @@ export const createRegistrationFixture = (): RegistrationFixture => {
       const key = `${input.principalSubject}\u0000${input.agentKey}`;
       const existing = byKey.get(key);
       if (existing !== undefined) {
-        return Promise.resolve(existing);
+        // Mirror the real upsert: a provided display name replaces the stored
+        // one on conflict (COALESCE(EXCLUDED.display_name, ...)), and `enabled`
+        // is left untouched.
+        const updated: AgentRegistrationRecord = input.displayName === undefined
+          ? existing
+          : { ...existing, displayName: input.displayName };
+        byKey.set(key, updated);
+        records.set(existing.id, updated);
+        return Promise.resolve(updated);
       }
       sequence += 1;
       const record: AgentRegistrationRecord = {
