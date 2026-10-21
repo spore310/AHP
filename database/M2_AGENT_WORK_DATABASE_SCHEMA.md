@@ -214,8 +214,11 @@ stateDiagram-v2
   `WorkService.submit` at write time, not by this DDL (an FK cannot express it
   across tables).
 - A submission whose repository write settles after its live session was
-  disposed is reconciled, not orphaned: the work service cancels the row and
-  reports a conflict to the caller.
+  disposed is best-effort reconciled: the work service cancels the just-recorded
+  row (a failed cancel is tolerated) and reports a conflict to the caller. The
+  reconciliation compares the session-owner binding and liveness only; the
+  projection carries no stable session-generation field, so a same-owner
+  recreate landing inside the write window is the documented residual.
 
 ## Related documentation
 

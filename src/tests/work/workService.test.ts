@@ -56,7 +56,9 @@ const workItem = (overrides: Partial<WorkItemRecord> = {}): WorkItemRecord => ({
   ...overrides,
 });
 
-const createFakes = () => {
+const createFakes = (overrides: {
+  readonly describeSession?: (sessionUri: string) => DurableSessionInput | undefined;
+} = {}) => {
   const submit = vi.fn((): Promise<{ readonly id: string; readonly created: boolean }> => (
     Promise.resolve({ id: "work-1", created: true })
   ));
@@ -109,7 +111,8 @@ const createFakes = () => {
       getByConnection: (connectionId) => bindings.get(connectionId),
     },
     registrations,
-    describeSession: (sessionUri) => (sessionUri === session.sessionUri ? session : undefined),
+    describeSession: overrides.describeSession
+      ?? ((sessionUri) => (sessionUri === session.sessionUri ? session : undefined)),
     allowedKinds: new Set(["code.patch"]),
     now: () => Date.now(),
     maxInputBytes: 256,
@@ -124,6 +127,7 @@ const createFakes = () => {
     submit,
     cancel,
     complete,
+    get,
     hasDependentWork,
     getById,
   };
@@ -259,6 +263,30 @@ describe("work service", () => {
     });
   });
 
+  it("reports the reconciled conflict even when the cancel itself fails", async () => {
+    const { cancel, owners, service, submit } = createFakes();
+    let release: () => void = (): void => undefined;
+    submit.mockImplementationOnce((): Promise<{ readonly id: string; readonly created: boolean }> => (
+      new Promise((resolve) => {
+        release = (): void => {
+          resolve({ id: "work-race", created: true });
+        };
+      })
+    ));
+    const pending = service.submit(principal, {
+      sessionUri: session.sessionUri,
+      requestKey: "request-race-cancel-fails",
+      kind: "code.patch",
+      input: { instruction: "change" },
+    });
+    cancel.mockRejectedValueOnce(new Error("storage unavailable"));
+    owners.unbind(session.sessionUri);
+    release();
+    // The ownership problem outranks the reconciliation failure, and the typed
+    // conflict is exactly what the caller sees — never a false success.
+    await expect(pending).rejects.toMatchObject({ code: "conflict" });
+  });
+
   it("exposes ownership conflicts as typed work-domain errors", () => {
     const { owners } = createFakes();
     expect(() => {
@@ -270,6 +298,79 @@ describe("work service", () => {
     expect(() => {
       owners.bind(session.sessionUri, principal.subject);
     }).not.toThrow();
+  });
+
+  it("rejects unstorable text in scalar submission and claim fields", async () => {
+    const { service } = createFakes();
+    await expect(service.submit(principal, {
+      sessionUri: "ahp-session:/work\u0000-unit",
+      requestKey: "request-1",
+      kind: "code.patch",
+      input: { instruction: "change" },
+    })).rejects.toMatchObject({ code: "invalid", message: "A session URI is required." });
+
+    await expect(service.submit(principal, {
+      sessionUri: session.sessionUri,
+      requestKey: "request\u0000-1",
+      kind: "code.patch",
+      input: { instruction: "change" },
+    })).rejects.toMatchObject({ code: "invalid", message: "A bounded request key is required." });
+
+    await expect(service.claim(agentContext, "ahp-session:/work\u0000-unit"))
+      .rejects.toMatchObject({ code: "invalid" });
+  });
+
+  it("refuses a durable projection JSONB cannot store", async () => {
+    const { service } = createFakes({
+      describeSession: (sessionUri) => (sessionUri === session.sessionUri
+        ? { ...session, durableState: { workingDirectories: ["a\u0000b"] } }
+        : undefined),
+    });
+    await expect(service.submit(principal, {
+      sessionUri: session.sessionUri,
+      requestKey: "request-projection",
+      kind: "code.patch",
+      input: { instruction: "change" },
+    })).rejects.toMatchObject({
+      code: "invalid",
+      message: "The session projection cannot be stored as JSON.",
+    });
+  });
+
+  it("refuses a replayed request key whose landed row is terminal", async () => {
+    const { cancel, get, service, submit } = createFakes();
+    submit.mockResolvedValue({ id: "work-1", created: false });
+    const submission = {
+      sessionUri: session.sessionUri,
+      requestKey: "request-1",
+      kind: "code.patch",
+      input: { instruction: "change" },
+    };
+
+    get.mockResolvedValue(workItem({ status: "cancelled" }));
+    await expect(service.submit(principal, submission)).rejects.toMatchObject({
+      code: "conflict",
+      message: "That request key is already terminal.",
+    });
+
+    get.mockResolvedValue(workItem({ status: "failed" }));
+    await expect(service.submit(principal, submission)).rejects.toMatchObject({ code: "conflict" });
+
+    expect(cancel).not.toHaveBeenCalled();
+    expect(get).toHaveBeenCalledWith({ workId: "work-1", principalSubject: "alice" });
+  });
+
+  it("keeps idempotent replay success for a non-terminal landed row", async () => {
+    const { get, service, submit } = createFakes();
+    submit.mockResolvedValue({ id: "work-1", created: false });
+    const result = await service.submit(principal, {
+      sessionUri: session.sessionUri,
+      requestKey: "request-1",
+      kind: "code.patch",
+      input: { instruction: "change" },
+    });
+    expect(result).toEqual({ id: "work-1" });
+    expect(get).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a missing, expired, or mismatched presence binding", async () => {

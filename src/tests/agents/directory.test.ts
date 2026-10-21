@@ -38,6 +38,15 @@ describe("createAgentDirectory registration", () => {
     });
   });
 
+  it("refuses registration text the storage cannot encode", async () => {
+    const { registrations, directory } = setup();
+    await expect(directory.register(alice, "bad\u0000key"))
+      .rejects.toMatchObject({ code: "invalid" });
+    await expect(directory.register(alice, "coding-worker", "NUL\u0000name"))
+      .rejects.toMatchObject({ code: "invalid" });
+    expect(registrations.registerCalls).toHaveLength(0);
+  });
+
   it("does not let another principal claim the same agent key or registration id", async () => {
     const { directory } = setup();
     const aliceAgent = await directory.register(alice, "coding-worker");

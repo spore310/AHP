@@ -55,11 +55,19 @@ for work authorization.
 - `clientId`, session payloads, tool metadata, and request JSON cannot supply a
   principal, agent ID, connection ID, or generation.
 - A registration is durable, but it does not imply that the agent is online.
-- The renewal path consults an in-process registration cache refreshed by
-  `register`/`getRegistration`. There is no disable path in this slice; if an
-  operator flips `enabled` directly in the database, presence may keep renewing
-  from the cached record until a refresh or restart. Every work mutation re-reads
-  the registration, so claims and completions still fail closed.
+- The presence-bind path consults an in-process registration cache refreshed by
+  `register`/`getRegistration`; renewals never consult any registration source —
+  neither the cache nor the repository. There is no disable path in this slice,
+  so directly flipping `enabled` in the database cannot evict live presence: a
+  re-newal keeps a disabled registration alive until the connection closes or
+  the TTL lapses. Every work mutation re-reads the registration, so claims and
+  completions still fail closed. Invalidation belongs with a real
+  disable/decommission path.
+- Registration rows grow only with unique `(principal, agent_key)` pairs: the
+  register handler refuses a connection-level bind conflict before the durable
+  write, and same-key registrations are upserts. Two same-principal connections
+  registering distinct keys concurrently can each land a row before one fails to
+  bind, which stays inside that bound.
 - A connection without a valid credential may still use baseline AHP methods;
   authenticated agent/work methods fail closed.
 - The static token map is a POC adapter. It is not a production identity

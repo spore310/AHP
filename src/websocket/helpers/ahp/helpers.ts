@@ -377,9 +377,16 @@ export const createAHPBinding = (
       // live record its true owner can neither bind nor dispose.
       if (options?.sessionOwners !== undefined && parsed.success) {
         const owner = options.sessionOwners.owner(parsed.data.channel);
-        if (owner !== undefined
-          && (principal === undefined || owner !== principal.subject)) {
-          throw new RpcError(JsonRpcErrorCodes.InvalidParams, "Session not found");
+        if (owner !== undefined) {
+          // An owner binding without a live record marks a disposal still
+          // settling, and the window stays closed to every principal — the
+          // unconditional release at settlement would otherwise strip the
+          // binding a recreate just acquired and strand an ownerless record.
+          if (principal === undefined
+            || owner !== principal.subject
+            || factory.getSessionSnapshot(parsed.data.channel) === undefined) {
+            throw new RpcError(JsonRpcErrorCodes.InvalidParams, "Session not found");
+          }
         }
       }
       await factory.createSession(params);

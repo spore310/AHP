@@ -270,7 +270,7 @@ describe("agent work extension request surface", () => {
     expect(work.calls).toHaveLength(0);
   });
 
-  it("rejects blank display names, JSONB-unsafe payloads, and non-object results", async () => {
+  it("rejects blank display names, unstorable scalar text, unsafe payloads, and non-object results", async () => {
     const { registrations, work, extension } = setup();
     const alice = contextFor("connection-1", "alice");
 
@@ -278,6 +278,14 @@ describe("agent work extension request surface", () => {
       extension,
       AGENT_REGISTER_METHOD,
       { version: 1, agentKey: "coding-worker", displayName: "   " },
+      alice,
+    )).rejects.toBeInstanceOf(ZodError);
+    expect(registrations.registerCalls).toHaveLength(0);
+
+    await expect(invoke(
+      extension,
+      AGENT_REGISTER_METHOD,
+      { version: 1, agentKey: "bad\u0000key" },
       alice,
     )).rejects.toBeInstanceOf(ZodError);
     expect(registrations.registerCalls).toHaveLength(0);
@@ -292,6 +300,20 @@ describe("agent work extension request surface", () => {
         requestKey: "request-1",
         kind: WORK_KIND,
         input: { note: "a\u0000b" },
+      },
+      alice,
+    )).rejects.toBeInstanceOf(ZodError);
+    expect(work.calls).toHaveLength(0);
+
+    await expect(invoke(
+      extension,
+      WORK_SUBMIT_METHOD,
+      {
+        version: 1,
+        sessionUri: `${SESSION_URI}\u0000`,
+        requestKey: "request-1",
+        kind: WORK_KIND,
+        input: { instruction: "change" },
       },
       alice,
     )).rejects.toBeInstanceOf(ZodError);

@@ -19,8 +19,9 @@ database without a reviewed rollout and backup plan. There is deliberately no
 destructive automated rollback for persisted work; roll back by restoring the
 prior schema from a verified backup.
 
-The canonical seven tables are `host_state`, `sessions`, `session_types`,
-`tools`, `session_type_tools`, `agent_registrations`, and `work_items`:
+The canonical durable tables are `host_state`, `sessions`, `session_types`,
+`tools`, `session_type_tools`, `agent_registrations`, `work_items`, plus the
+`schema_migrations` bookkeeping table:
 
 - The first five are the session/tool baseline.
 - `agent_registrations` stores stable identity only; it never represents a
@@ -29,6 +30,10 @@ The canonical seven tables are `host_state`, `sessions`, `session_types`,
   presence remains in memory.
 - `sessions.owner_principal_subject` is assigned from authenticated server
   context, never from client input.
+- `schema_migrations` records the applied version at the end of each script.
+  The table DDL is `IF NOT EXISTS`, but the version INSERT is not: each script
+  is single-shot, and re-applying fails on the duplicate version key rather
+  than silently re-running statements.
 
 The executable DDL is split into `0001_session_tool_baseline.sql` (existing
 session/tool model) and `0002_agent_work.sql` (the two new tables and their

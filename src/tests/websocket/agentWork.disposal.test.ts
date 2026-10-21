@@ -290,6 +290,44 @@ describe("agent work disposal races", () => {
     expect(sessionOwners.owner(SESSION_URI)).toBe("bob");
   });
 
+  it("denies the owner's own recreate inside the settling window", async () => {
+    const { gated, factory, sessionOwners, binding } = setup();
+    const alice = connect(binding, "connection-1", "alice");
+    await invoke(binding, "createSession", { channel: SESSION_URI }, alice);
+    expect(sessionOwners.owner(SESSION_URI)).toBe("alice");
+
+    const disposing = invoke(
+      binding,
+      "disposeSession",
+      { channel: SESSION_URI },
+      alice,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(factory.getSessionSnapshot(SESSION_URI)).toBeUndefined();
+    expect(sessionOwners.owner(SESSION_URI)).toBe("alice");
+
+    // Even the bound owner is refused: a mid-window recreate would be stripped
+    // by the settlement's unconditional release, stranding an ownerless record.
+    await expect(invoke(
+      binding,
+      "createSession",
+      { channel: SESSION_URI },
+      alice,
+    )).rejects.toMatchObject({
+      code: JsonRpcErrorCodes.InvalidParams,
+      message: "Session not found",
+    });
+
+    gated.settle();
+    await expect(disposing).resolves.toBeNull();
+    expect(sessionOwners.owner(SESSION_URI)).toBeUndefined();
+
+    // The post-settle recreate binds its true creator, and the settlement can
+    // no longer strip that binding because there is none to release.
+    await invoke(binding, "createSession", { channel: SESSION_URI }, alice);
+    expect(sessionOwners.owner(SESSION_URI)).toBe("alice");
+  });
+
   it("keeps the owner binding when dependent work blocks disposal", async () => {
     const { dependentWork, sessionOwners, factory, binding } = setup();
     const alice = connect(binding, "connection-1", "alice");

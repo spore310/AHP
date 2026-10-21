@@ -2,6 +2,7 @@ import type {
   AgentRegistrationRecord,
   AgentRegistrationRepository,
 } from "@persistence/types";
+import { isJsonbSafeText } from "@persistence/helpers/text";
 
 import { DEFAULT_PRESENCE_TTL_MS } from "../constants";
 import type {
@@ -83,6 +84,12 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
       agentKey: string,
       displayName?: string,
     ): Promise<AgentRegistrationRecord> {
+      // Registration text feeds parameterized TEXT columns, so refuse text the
+      // storage cannot encode before any repository work happens.
+      if (!isJsonbSafeText(agentKey)
+        || (displayName !== undefined && !isJsonbSafeText(displayName))) {
+        throw new AgentDirectoryError("invalid", "Registration text cannot be stored.");
+      }
       const record = await registrations.register({
         principalSubject: principal.subject,
         agentKey,

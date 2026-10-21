@@ -4,12 +4,15 @@ Status: **Superseded.** The shipped schema is
 `database/migrations/0001_session_tool_baseline.sql` with the durable
 session shape documented in
 [`database/M2_AGENT_WORK_DATABASE_SCHEMA.md`](M2_AGENT_WORK_DATABASE_SCHEMA.md):
-`ownedPrincipalSubject` ownership, `last_server_seq`, and a JSONB
+`owner_principal_subject` ownership, `last_server_seq`, and a JSONB
 `durable_state` projection. The `title/status/lifecycle/state` shape proposed
-here — along with `action_sequence` and `session_active_clients` — was
-reconciled into those migrations and was never implemented. Read this file only
-as the original proposal record; the executable SQL and
-`src/persistence/helpers/sessions.ts` are authoritative.
+here — along with `action_sequence` and `session_active_clients` — was superseded
+by those shipped migrations and was never implemented as specified. Read this
+file only as the original proposal record; the executable SQL and
+`src/persistence/helpers/sessions.ts` are authoritative. Behavioral statements
+inside the body — including "disposed sessions are deleted" — describe the
+original proposal: shipped behavior keeps durable rows, with retention
+explicitly deferred (see the M2 document).
 
 This document is the table design for storing a session as the server holds it today. When scripts are added, the raw SQL in `database/` is authoritative. `src/persistance/` may use Drizzle, Prisma, or another client, but it must follow these tables. It must not invent a second schema.
 

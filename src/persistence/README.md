@@ -14,6 +14,7 @@ from the reducer or WebSocket callbacks. SQL source of truth lives under
 | `helpers/agentRegistrations.ts` | `createPostgresAgentRegistrationRepository`: idempotent `(principal, agentKey)` registration and lookup. |
 | `helpers/sessions.ts` | `ensureSession` plus `createPostgresDurableSessionRepository`: lazy session projection, owner enforcement, and FK-aware deletion. |
 | `helpers/workItems.ts` | `createPostgresWorkRepository`: idempotent submit, atomic claim/reclaim, fenced renew/complete/fail/cancel/get, expiry reconciliation, and dependent-work checks. |
+| `helpers/text.ts` | Pure storage-shape predicates: JSONB-safe text (NUL and unpaired-surrogate rejection) and recursive JSONB safety including object keys. |
 | `index.ts` | Public surface for all ports and adapters. |
 
 ## API

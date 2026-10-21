@@ -159,7 +159,8 @@ const server = createWebSocketServer({
   `host.sessions.createSession` bypasses a WebSocket principal, so the resulting
   session cannot own or accept work. Create work-enabled sessions through an
   authenticated AHP `createSession`. Direct host disposal checks dependent work
-  and unbinds the owner on success, but it does not add authorization.
+  and releases the owner binding when the record removal settles — success or
+  failure — but it does not add authorization.
 
 ## Testing
 

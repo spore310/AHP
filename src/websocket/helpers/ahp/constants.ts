@@ -78,8 +78,5 @@ export const TOOL_COMPLETE_METHOD = "x-ahp/tools/complete";
 export const TOOL_INVOCATION_METHOD = "x-ahp/tools/invoke";
 export const MAX_TOOL_PAYLOAD_BYTES = 1_048_576;
 
-/** Cap on one agent/work extension JSON payload (submission input or result). */
-export const MAX_AGENT_WORK_PAYLOAD_BYTES = 1_048_576;
-
 export const ROOT_SCHEME = "ahp-root://";
 export const SESSION_SCHEME = "ahp-session:";

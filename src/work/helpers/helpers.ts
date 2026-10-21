@@ -1,4 +1,5 @@
 import { RepositoryError as PersistenceError } from "@persistence/types";
+import { isJsonbSafe, isJsonbSafeText } from "@persistence/helpers/text";
 import type {
   AuthorizedAgentContext,
   SessionOwnerRegistry,
@@ -26,44 +27,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === "object" && value !== null && !Array.isArray(value)
 );
 
-/**
- * Rejects strings that PostgreSQL JSONB cannot store: a NUL code unit and an
- * unpaired surrogate. This keeps service validation in step with the storage
- * layer instead of letting such payload surfaces as unclassified failures.
- */
-const isJsonbSafeText = (text: string): boolean => {
-  for (let index = 0; index < text.length; index += 1) {
-    const unit = text.charCodeAt(index);
-    if (unit === 0) {
-      return false;
-    }
-    if (unit >= 0xd800 && unit <= 0xdbff) {
-      const next = text.charCodeAt(index + 1);
-      if (!(next >= 0xdc00 && next <= 0xdfff)) {
-        return false;
-      }
-      index += 1;
-      continue;
-    }
-    if (unit >= 0xdc00 && unit <= 0xdfff) {
-      return false;
-    }
-  }
-  return true;
-};
-
-export const isJsonbSafe = (value: unknown): boolean => {
-  if (typeof value === "string") {
-    return isJsonbSafeText(value);
-  }
-  if (Array.isArray(value)) {
-    return value.every(isJsonbSafe);
-  }
-  if (!isRecord(value)) {
-    return true;
-  }
-  return [...Object.values(value)].every(isJsonbSafe);
-};
+/** JSONB-safety predicates live with the persistence contracts. */
+export { isJsonbSafe };
 
 const boundedJsonBytes = (value: unknown, label: string, limit: number): void => {
   let serialized: string;
@@ -109,13 +74,15 @@ const assertSubmission = (
 ): void => {
   if (typeof submission.sessionUri !== "string"
     || submission.sessionUri.length === 0
-    || submission.sessionUri.length > MAX_SESSION_URI_LENGTH) {
+    || submission.sessionUri.length > MAX_SESSION_URI_LENGTH
+    || !isJsonbSafeText(submission.sessionUri)) {
     throw new WorkError("invalid", "A session URI is required.");
   }
   if (typeof submission.requestKey !== "string"
     || submission.requestKey.length === 0
     || submission.requestKey.trim().length === 0
-    || submission.requestKey.length > MAX_REQUEST_KEY_LENGTH) {
+    || submission.requestKey.length > MAX_REQUEST_KEY_LENGTH
+    || !isJsonbSafeText(submission.requestKey)) {
     throw new WorkError("invalid", "A bounded request key is required.");
   }
   if (typeof submission.kind !== "string"
@@ -222,6 +189,11 @@ export const createWorkService = (options: WorkServiceOptions): WorkService => {
       if (live.ownerPrincipalSubject !== principal.subject || boundOwner !== principal.subject) {
         throw new WorkError("unauthorized", "The session belongs to another principal.");
       }
+      // The durable projection inside the write carries client-reachable state,
+      // so it passes the same JSONB-safety gate as the submission payload.
+      if (!isJsonbSafe(live.durableState)) {
+        throw new WorkError("invalid", "The session projection cannot be stored as JSON.");
+      }
       if (submission.targetAgentId !== undefined) {
         const target = await options.registrations.getById(submission.targetAgentId);
         if (target === undefined || !target.enabled) {
@@ -258,6 +230,19 @@ export const createWorkService = (options: WorkServiceOptions): WorkService => {
           }
           throw new WorkError("conflict", "The live session changed while the submission was recorded.");
         }
+        // A replay resolves to the landed row's id without regard to its
+        // status; refuse terminal rows so a retried request key cannot look
+        // successful while the work can never be claimed again.
+        if (!result.created) {
+          const landed = await options.repository.get({
+            workId: result.id,
+            principalSubject: principal.subject,
+          });
+          if (landed !== null
+            && (landed.status === "cancelled" || landed.status === "failed")) {
+            throw new WorkError("conflict", "That request key is already terminal.");
+          }
+        }
         return { id: result.id };
       } catch (error) {
         return mapRepositoryFailure(error);
@@ -269,7 +254,8 @@ export const createWorkService = (options: WorkServiceOptions): WorkService => {
       await enabledAgent(options, agent);
       if (typeof sessionUri !== "string"
         || sessionUri.length === 0
-        || sessionUri.length > MAX_SESSION_URI_LENGTH) {
+        || sessionUri.length > MAX_SESSION_URI_LENGTH
+        || !isJsonbSafeText(sessionUri)) {
         throw new WorkError("invalid", "A session URI is required.");
       }
       try {

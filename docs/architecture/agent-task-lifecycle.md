@@ -24,7 +24,7 @@ sequenceDiagram
     B->>H: Authenticate, register/reclaim agent identity
     H->>H: Bind live presence lease to actual connection
     H-->>B: agentId + presence expiry
-    Note over H,B: v1 has no work-available push#59; the worker claims explicitly
+    Note over H,B: v1 has no work-available push; the worker claims explicitly
 
     B->>H: Claim eligible work in authorized session
     H->>H: Verify principal, session, kind and live presence
@@ -124,7 +124,9 @@ Only `agent_registrations` and `work_items` are new for this slice. Presence,
 sockets, subscriptions, active client tools, and replay state intentionally have
 no SQL tables. Session disposal is rejected while any work row references the
 session; a submission that settles after its live session was disposed in a
-concurrent request is cancelled and reported as a conflict rather than kept.
+concurrent request triggers a best-effort cancel of the just-recorded row and a
+conflict reply. A failed cancel leaves the row behind, which keeps blocking
+disposal of the URI until it is resolved operationally.
 
 ## Failure cases
 

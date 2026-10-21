@@ -4,6 +4,7 @@ import { z } from "zod";
 import { AgentDirectoryError, type AgentDirectory, type AuthenticatedPrincipal, type PresenceBinding } from "@agents";
 import { RpcError } from "@jsonrpc";
 import { RepositoryError } from "@persistence";
+import { isJsonbSafeText } from "@persistence/helpers/text";
 import { sessionUriSchema } from "@sessions/types";
 import { WorkError, isJsonbSafe, WORK_MAX_INPUT_BYTES, WORK_MAX_RESULT_BYTES, type AuthorizedAgentContext, type SessionOwnerRegistry, type WorkService } from "@work";
 
@@ -36,18 +37,25 @@ export interface AgentWorkExtension {
 }
 
 const version = z.literal(1);
+const requiresStorableText = (value: string): boolean => isJsonbSafeText(value);
 const agentKey = z.string().min(1).max(128).refine(
   (value) => value.trim().length > 0,
   { message: "Agent key must not be blank" },
-);
+).refine(requiresStorableText, {
+  message: "Agent key contains text JSONB cannot store",
+});
 const displayName = z.string().min(1).max(128).refine(
   (value) => value.trim().length > 0,
   { message: "Display name must not be blank" },
-);
+).refine(requiresStorableText, {
+  message: "Display name contains text JSONB cannot store",
+});
 const requestKey = z.string().min(1).max(128).refine(
   (value) => value.trim().length > 0,
   { message: "Request key must not be blank" },
-);
+).refine(requiresStorableText, {
+  message: "Request key contains text JSONB cannot store",
+});
 const workKind = z.string().min(1).max(128).refine(
   (value) => value.trim().length > 0,
   { message: "Work kind must not be blank" },
@@ -104,7 +112,10 @@ const registerSchema = z.object({
 
 const renewSchema = z.object({ version }).strict();
 
-const boundedSessionUri = sessionUriSchema.max(2_048);
+const boundedSessionUri = sessionUriSchema.max(2_048).refine(
+  (value) => isJsonbSafeText(value),
+  { message: "Session URI contains text JSONB cannot store" },
+);
 
 const submitSchema = z.object({
   version,

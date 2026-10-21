@@ -13,6 +13,7 @@ import type { AHPServerHandle, AHPServerOptions } from "./types";
 
 const HOST_STOPPED = "AHP host cannot be started after shutdown has begun.";
 const HOST_SESSIONS_STOPPED = "AHP host sessions cannot be used after shutdown has begun.";
+const HOST_SESSIONS_SETTLING = "A session disposal is still settling; create the session once it completes.";
 
 const collectFailure = (failures: unknown[], error: unknown): void => {
   failures.push(error);
@@ -145,6 +146,15 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     createSession: (params: unknown): Promise<void> => {
       if (stopped) {
         return Promise.reject(new Error(HOST_SESSIONS_STOPPED));
+      }
+      const channel = channelFromParams(params);
+      // Mirror the AHP handler: an owner binding without a live record marks a
+      // disposal still settling, and a create landing in the window would leave
+      // an ownerless record behind once the settlement releases the binding.
+      if (channel !== undefined
+        && sessionOwners.owner(channel) !== undefined
+        && sessions.getSessionSnapshot(channel) === undefined) {
+        return Promise.reject(new Error(HOST_SESSIONS_SETTLING));
       }
       return sessions.createSession(params);
     },

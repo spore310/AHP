@@ -58,16 +58,30 @@ registration fails closed.
 
 ## Bounded input
 
-- Session URI and request key are non-empty; request key is at most 256 chars.
-- Kind must be in the configured allowed set and at most 128 chars.
+- Session URI and request key are non-empty and JSONB-storable; the session URI
+  is capped at 2,048 chars and the request key at 256.
+- Kind must be in the configured allowed set, at most 128 chars, and
+  JSONB-storable (the allow-list is the primary char-set gate for kind).
 - Input/result must be JSON objects; default limits are 64 KiB input and 256 KiB
-  result. Values the PostgreSQL JSONB format cannot store (NUL code units,
-  unpaired surrogates) are rejected before SQL is attempted.
+  result. Text the PostgreSQL storage cannot encode — NUL code units or unpaired
+  surrogates in payload *values or object keys*, in the scalar session URI and
+  request key, and inside the durable session projection — is rejected before
+  SQL is attempted. The agents directory applies the same text gate to
+  `agentKey` and `displayName` before registration reaches SQL.
 - Failure messages are 1–2,000 chars; the wire adapter further caps them. The
   message is validated and then dropped: the frozen v1 reply contract is
   `{ status }` and no failure-message column exists, so the reason lives only in
   the worker's own logs.
 - Work IDs and lease tokens must be UUID-shaped before SQL is attempted.
+
+## Testing
+
+| Test | Pins |
+| ---- | ---- |
+| [`src/tests/work/workService.test.ts`](../tests/work/workService.test.ts) | Owned-session submission, cross-principal and target-agent denial, bounded validation (including unstorable text and terminal-key replays), missing/expired/mismatched presence, disabled registration, fenced renew/complete, stale completion, view redaction, and dependent-work disposal rejection. |
+| [`src/tests/websocket/agentWork.test.ts`](../tests/websocket/agentWork.test.ts) | Versioned wire mapping and sanitized protocol errors for the service. |
+| [`src/tests/websocket/agentWork.integration.test.ts`](../tests/websocket/agentWork.integration.test.ts) | Composed authenticated A/B flow: A submits, B registers/claims/renews/completes, A gets the result; owner and secret checks. |
+| [`src/tests/websocket/agentWork.disposal.test.ts`](../tests/websocket/agentWork.disposal.test.ts) | Backed-disposal races over the real binding: fail-closed recreates inside the settling window (owner and cross-principal), binding release exactly at settlement, and post-settle rebind to the true creator. |
 
 ## Caveats
 
@@ -88,25 +102,16 @@ registration fails closed.
   service code never produces it: budget-exhausted leases terminalize to
   `failed` status instead of throwing a fresh observable error. Keep the mapping
   as reserved behavior until a producer exists.
-
-## Testing
-
-| Test | Pins |
-| ---- | ---- |
-| [`src/tests/work/workService.test.ts`](../tests/work/workService.test.ts) | Owned-session submission, cross-principal and target-agent denial, bounded validation, missing/expired/mismatched presence, disabled registration, fenced renew/complete, stale completion, view redaction, and dependent-work disposal rejection. |
-| [`src/tests/websocket/agentWork.test.ts`](../tests/websocket/agentWork.test.ts) | Versioned wire mapping and sanitized protocol errors for the service. |
-| [`src/tests/websocket/agentWork.integration.test.ts`](../tests/websocket/agentWork.integration.test.ts) | Composed authenticated A/B flow: A submits, B registers/claims/renews/completes, A gets the result; owner and secret checks. |
-
-## Caveats
-
-- **No server-side execution.** A work row is coordination state; the server
-  never runs a model, process, or filesystem executor.
-- **At-least-once.** A worker may retry after a lease expires; completion is
-  fenced but side effects are not transactional with the database.
-- **No cross-principal grants.** Targeting another principal's agent is denied.
-- **No push guarantee.** v1 implements no work-available push; clients discover
-  work by claiming. Any future hint would be a best-effort signal, never proof of
-  assignment.
+- **One owner authority in the host wiring.** The live projection's owner is
+  sourced from the same session-owner registry the service checks, so the
+  submit pre-check corroborates one fact rather than two independent ones; a
+  production projection would read the durable `sessions` owner instead.
+- **Same-owner recreate residual.** The projection carries no stable
+  session-generation field (`createdAt` is the fetch time), so a same-owner
+  dispose→recreate landing inside a submission's write window is not detected by
+  the reconciliation; cross-principal and owner-removal cases are caught.
+  Detecting it requires a session-identity field on the snapshot, a contract
+  change deferred out of v1.
 
 ## Related Documentation
 
