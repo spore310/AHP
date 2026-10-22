@@ -150,7 +150,7 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
   }
 
   return {
-    createSession: (params: unknown): Promise<void> => {
+    createSession: (params: unknown, onRecordCreated?: (sessionUri: string) => void): Promise<void> => {
       // Disposal clears the registry and listeners and releases attached
       // backends; accepting a session now would register it after that
       // boundary. Reuse is allowed again once disposal settles.
@@ -158,7 +158,7 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
         return Promise.reject(new SessionsDisposingError());
       }
       const previousCount = sessions.size;
-      return executeCreateSession(dependencies, params).then(() => {
+      return executeCreateSession(dependencies, params, onRecordCreated).then(() => {
         if (sessions.size !== previousCount) {
           emitActiveSessionsChanged();
         }

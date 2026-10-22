@@ -31,9 +31,11 @@ The canonical durable tables are `host_state`, `sessions`, `session_types`,
 - `sessions.owner_principal_subject` is assigned from authenticated server
   context, never from client input.
 - `schema_migrations` records the applied version at the end of each script.
-  The table DDL is `IF NOT EXISTS`, but the version INSERT is not: each script
-  is single-shot, and re-applying fails on the duplicate version key rather
-  than silently re-running statements.
+  The table DDL is `IF NOT EXISTS`, but the object and version statements are
+  not: each script
+  is single-shot, and re-applying fails (on the first duplicate object, e.g.
+  `CREATE TABLE`, or on the duplicate version key) rather than silently
+  re-running statements.
 
 The executable DDL is split into `0001_session_tool_baseline.sql` (existing
 session/tool model) and `0002_agent_work.sql` (the two new tables and their

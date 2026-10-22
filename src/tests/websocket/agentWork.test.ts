@@ -4,7 +4,7 @@ import { ZodError } from "zod";
 
 import { createAgentDirectory } from "@agents";
 import { RpcError, type JsonRpcParams } from "@jsonrpc";
-import { WorkError } from "@work";
+import { WORK_MAX_REQUEST_KEY_LENGTH, WorkError } from "@work";
 import { createAgentWorkExtension, type AgentWorkExtension } from "@websocket/helpers/ahp/agentWork";
 import {
   AGENT_REGISTER_METHOD,
@@ -572,5 +572,59 @@ describe("agent work extension work replies", () => {
         alice,
       )).rejects.toEqual(new RpcError(JsonRpcErrorCodes.InvalidRequest, "Request rejected"));
     }
+  });
+
+  it("accepts a service-length request key and rejects longer ones at the wire", async () => {
+    const { sessionOwners, work, extension } = setup();
+    const alice = contextFor("connection-1", "alice");
+    await registerAgent(extension, alice);
+    sessionOwners.bind(SESSION_URI, "alice");
+
+    // The wire cap now mirrors the service cap exactly.
+    const maxKey = "k".repeat(WORK_MAX_REQUEST_KEY_LENGTH);
+    await invoke(extension, WORK_SUBMIT_METHOD, {
+      version: 1,
+      sessionUri: SESSION_URI,
+      requestKey: maxKey,
+      kind: WORK_KIND,
+      input: {},
+    }, alice);
+    expect(work.submitted[0]?.input.requestKey).toBe(maxKey);
+
+    await expect(invoke(extension, WORK_SUBMIT_METHOD, {
+      version: 1,
+      sessionUri: SESSION_URI,
+      requestKey: `${maxKey}!`,
+      kind: WORK_KIND,
+      input: {},
+    }, alice)).rejects.toBeInstanceOf(ZodError);
+    expect(work.submitted).toHaveLength(1);
+  });
+
+  it("rejects payloads nested beyond the JSONB depth budget before the service runs", async () => {
+    const { work, extension } = setup();
+    const alice = contextFor("connection-1", "alice");
+    await registerAgent(extension, alice);
+    let deep: Record<string, unknown> = { leaf: true };
+    for (let index = 0; index < 600; index += 1) {
+      deep = { a: deep };
+    }
+
+    await expect(invoke(extension, WORK_SUBMIT_METHOD, {
+      version: 1,
+      sessionUri: SESSION_URI,
+      requestKey: "deep-input",
+      kind: WORK_KIND,
+      input: deep,
+    }, alice)).rejects.toBeInstanceOf(ZodError);
+    expect(work.calls).toHaveLength(0);
+
+    await expect(invoke(extension, WORK_COMPLETE_METHOD, {
+      version: 1,
+      workId: WORK_ID,
+      leaseToken: LEASE_TOKEN,
+      result: deep,
+    }, alice)).rejects.toBeInstanceOf(ZodError);
+    expect(work.calls).toHaveLength(0);
   });
 });

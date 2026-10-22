@@ -443,3 +443,31 @@ describe("createSession: working directories", () => {
     expect(factory.getSessionSnapshot(uri)?.state.workingDirectories).toBeUndefined();
   });
 });
+
+describe("createSession: attach hook", () => {
+  it("invokes the creation hook once with the attached record live", async () => {
+    const factory = createSessionsFactory({ providers: [createMockProvider()], now: TEST_NOW });
+    const uri = sessionUri("hook");
+    const attached: string[] = [];
+    let liveAtAttach = false;
+
+    await factory.createSession({ channel: uri, provider: "mock" }, (recordUri) => {
+      attached.push(recordUri);
+      liveAtAttach = factory.getSessionSnapshot(recordUri) !== undefined;
+    });
+
+    expect(attached).toEqual([uri]);
+    expect(liveAtAttach).toBe(true);
+  });
+
+  it("fails the create when the hook throws and leaves no record", async () => {
+    const factory = createSessionsFactory({ providers: [createMockProvider()], now: TEST_NOW });
+    const uri = sessionUri("hook-throws");
+
+    await expect(factory.createSession({ channel: uri, provider: "mock" }, () => {
+      throw new Error("hook failed");
+    })).rejects.toThrow("hook failed");
+
+    expect(factory.getSessionSnapshot(uri)).toBeUndefined();
+  });
+});

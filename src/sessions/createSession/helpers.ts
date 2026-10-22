@@ -32,6 +32,7 @@ import { createSessionParamsSchema } from "./types";
 export async function executeCreateSession(
   dependencies: SessionsDependencies,
   rawParams: unknown,
+  onRecordCreated?: (sessionUri: string) => void,
 ): Promise<void> {
   const parsed = createSessionParamsSchema.safeParse(rawParams);
   if (!parsed.success) {
@@ -93,6 +94,18 @@ export async function executeCreateSession(
   };
 
   dependencies.sessions.add(record);
+  // The installer hook runs at the record-attach moment, before the catalogue
+  // broadcast and the backend start, so an identity-scoped installer (for
+  // example an owner binding) exists exactly while this call still owns its
+  // record and can never claim a URI a later creator is attaching. A throwing
+  // hook fails the create with no record left behind, so the URI stays
+  // re-creatable instead of being glued to a half-attached session.
+  try {
+    onRecordCreated?.(record.sessionUri);
+  } catch (error) {
+    dependencies.sessions.delete(record.sessionUri);
+    throw error;
+  }
   dependencies.emitCatalogueNotification({
     method: "root/sessionAdded",
     params: { channel: ROOT_CHANNEL_URI, summary: buildSessionSummary(record) },

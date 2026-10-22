@@ -240,11 +240,20 @@ export interface SessionsFactory {
    * create-session contract, registers the session, emits `root/sessionAdded`,
    * then settles its lifecycle with `session/ready` or `session/creationFailed`.
    *
+   * `onRecordCreated` is invoked synchronously at the moment this call attaches
+   * its session record — before the backend is started and before the record
+   * can be removed again — so identity-scoped installers (for example owner
+   * bindings) can never outlive their own record: a create whose record is
+   * disposed while its backend is still starting resolves without re-binding.
+   *
    * Rejects with a {@link SessionsError} carrying the AHP/JSON-RPC error code.
    * While {@link dispose} is in flight, creation is rejected with
    * `SessionsDisposingError` rather than registered after the disposal boundary.
    */
-  createSession(params: unknown): Promise<void>;
+  createSession(
+    params: unknown,
+    onRecordCreated?: (sessionUri: string) => void,
+  ): Promise<void>;
   /** Current snapshot for a session, or `undefined` when no such session exists. */
   getSessionSnapshot(sessionUri: string): SessionSnapshot | undefined;
   /**

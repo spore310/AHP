@@ -1,10 +1,13 @@
-import type { ActionEnvelope } from "@microsoft/agent-host-protocol";
+import type {
+  ActionEnvelope,
+  SessionState,
+} from "@microsoft/agent-host-protocol";
 import { AhpErrorCodes, JsonRpcErrorCodes } from "@microsoft/agent-host-protocol";
 import { describe, expect, it } from "vitest";
 
 import { createAgentDirectory } from "@agents";
 import type { JsonRpcParams } from "@jsonrpc";
-import type { SessionsFactory } from "@sessions/types";
+import type { SessionSnapshot, SessionsFactory } from "@sessions/types";
 import { WorkError } from "@work";
 import { createAHPBinding } from "@websocket/helpers/ahp";
 import {
@@ -92,19 +95,44 @@ const setup = () => {
   const work = createWorkFixture();
   const created: unknown[] = [];
   const disposed: unknown[] = [];
+  const liveRecords = new Set<string>();
+  const snapshotFor = (uri: string): SessionSnapshot => ({
+    resource: uri,
+    fromSeq: 0,
+    state: {} as SessionState,
+  });
+  const readChannel = (params: unknown): string | undefined => {
+    if (typeof params !== "object" || params === null || !("channel" in params)) {
+      return undefined;
+    }
+    const { channel } = params;
+    return typeof channel === "string" ? channel : undefined;
+  };
 
   const factory: SessionsFactory = {
-    createSession: (params) => {
+    createSession: (params, onRecordCreated) => {
       created.push(params);
+      // A real factory invokes the attach hook when the record lands; without
+      // calling it the owner binding would never exist for this stub and the
+      // handler's resolution-time verification would read the create as lost.
+      const channel = readChannel(params);
+      if (channel !== undefined) {
+        liveRecords.add(channel);
+        onRecordCreated?.(channel);
+      }
       return Promise.resolve();
     },
-    getSessionSnapshot: () => undefined,
+    getSessionSnapshot: (uri) => (liveRecords.has(uri) ? snapshotFor(uri) : undefined),
     getSessionToolManifest: () => undefined,
     listSessionSnapshots: () => [],
     listSessions: () => ({ items: [] }),
     disposeSession: (params) => {
       work.calls.push("disposeSession");
       disposed.push(params);
+      const channel = readChannel(params);
+      if (channel !== undefined) {
+        liveRecords.delete(channel);
+      }
       return Promise.resolve();
     },
     getCurrentServerSeq: () => 0,

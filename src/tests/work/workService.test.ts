@@ -440,4 +440,41 @@ describe("work service", () => {
     await expect(service.assertSessionDisposable(session.sessionUri))
       .rejects.toBeInstanceOf(WorkError);
   });
+
+  it("refuses a dispose channel carrying text the work index cannot compare", async () => {
+    const { hasDependentWork, service } = createFakes();
+
+    await expect(service.assertSessionDisposable("ahp-session:/x\u0000"))
+      .rejects.toMatchObject({ code: "invalid", message: "A session URI is required." });
+    await expect(service.assertSessionDisposable("ahp-session:/\ud800"))
+      .rejects.toMatchObject({ code: "invalid" });
+    expect(hasDependentWork).not.toHaveBeenCalled();
+
+    // Comparable text still reaches the dependent-work lookup.
+    await expect(service.assertSessionDisposable(session.sessionUri)).resolves.toBeUndefined();
+    expect(hasDependentWork).toHaveBeenCalledWith(session.sessionUri);
+  });
+
+  it("refuses a durable projection nested beyond the JSONB-safety depth budget", async () => {
+    let deep: Record<string, unknown> = { leaf: true };
+    for (let index = 0; index < 600; index += 1) {
+      deep = { a: deep };
+    }
+    const { service, submit } = createFakes({
+      describeSession: (sessionUri) => (sessionUri === session.sessionUri
+        ? { ...session, durableState: deep }
+        : undefined),
+    });
+
+    await expect(service.submit(principal, {
+      sessionUri: session.sessionUri,
+      requestKey: "deep-projection",
+      kind: "code.patch",
+      input: {},
+    })).rejects.toMatchObject({
+      code: "invalid",
+      message: "The session projection cannot be stored as JSON.",
+    });
+    expect(submit).not.toHaveBeenCalled();
+  });
 });

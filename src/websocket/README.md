@@ -17,7 +17,7 @@ the binding does not import sockets into that module.
 | `helpers/server.ts` | `createWebSocketServer`: HTTP/WebSocket lifecycle, upgrade checks, handshake authentication, heartbeat, and shutdown. |
 | `helpers/connection.ts` | `attachConnection`: per-socket framing, serialized dispatch, reply settlement, principal attachment, and error mapping. |
 | `helpers/ahp/index.ts` | Public AHP binding exports. |
-| `helpers/ahp/helpers.ts` | `createAHPBinding`: initialize, subscriptions, publication, connection lifetime, session-owner binding, and extension wiring. |
+| `helpers/ahp/helpers.ts` | `createAHPBinding`: initialize, subscriptions, publication, connection lifetime, session-owner binding acquired at the record-attach moment, and extension wiring. |
 | `helpers/ahp/agentWork.ts` | Authenticated agent registration/presence and work request handlers, schemas, and error mapping. |
 | `helpers/ahp/toolInvocation.ts` | Namespaced client-executed tool calls, accepted executor ownership, contract validation, and settlement. |
 | `helpers/ahp/types.ts` | AHP peer, adapter, parameter schemas, and `AHPBindingOptions`. |
@@ -25,6 +25,7 @@ the binding does not import sockets into that module.
 | `helpers/host/index.ts` | Public composed-host exports. |
 | `helpers/host/helpers.ts` | `createAHPServer`: owns sequence injection, sessions, binding, transport, and shutdown. |
 | `helpers/host/types.ts` | `AHPServerOptions` and `AHPServerHandle`. |
+| `helpers/settling.ts` | Shared settle-window probe: an owner binding without a live record means a disposal is still settling, so creates stay denied for every principal until the settlement releases the binding. |
 | `constants.ts` | Default path, heartbeat interval, payload limit, close codes, shutdown deadline, and the `426` status. |
 | `index.ts` | Public surface: `createAHPConnectionModule`, `createAHPServer`, `createWebSocketServer`, option/handle types, and constants. |
 
@@ -161,6 +162,17 @@ const server = createWebSocketServer({
   authenticated AHP `createSession`. Direct host disposal checks dependent work
   and releases the owner binding when the record removal settles — success or
   failure — but it does not add authorization.
+- **Session ownership binds at the record-attach moment.** The AHP
+  `createSession` acquires the owner binding when the record is attached —
+  before the catalogue broadcast and the backend start — and verifies at
+  resolution that the live record is still the caller's; a create whose record
+  is removed mid-start (its own disposal, or a same-principal successor attach)
+  answers typed Conflict ("The created session is no longer available.") and
+  never re-binds the URI. While a disposal is settling (binding held, record
+  gone), every create stays denied — on the AHP wire and on
+  `host.sessions.createSession` alike — until the settlement releases the
+  binding, and a custom owner registry whose `unbind` throws fails the disposal
+  loudly instead of silently keeping a binding no settlement will release.
 
 ## Testing
 
@@ -175,10 +187,11 @@ const server = createWebSocketServer({
 | [`src/tests/websocket/deferred.test.ts`](../tests/websocket/deferred.test.ts) | A broken completion predicate cannot escape the ordered socket queue. |
 | [`src/tests/agents/authenticator.test.ts`](../tests/agents/authenticator.test.ts) | Bearer parsing, exact token lookup, missing/unknown credentials, repeated headers, and value-free errors. |
 | [`src/tests/agents/directory.test.ts`](../tests/agents/directory.test.ts) | Stable registration, cross-principal denial, disabled agents, one live binding, generation fencing, expiry, and stale release. |
-| [`src/tests/websocket/agentWork.test.ts`](../tests/websocket/agentWork.test.ts) | Extension request/notification kinds, strict v1 schemas, authenticated identity derivation, exact replies, and sanitized errors. |
+| [`src/tests/websocket/agentWork.test.ts`](../tests/websocket/agentWork.test.ts) | Extension request/notification kinds, strict v1 schemas, authenticated identity derivation, exact replies, sanitized errors, a service-length request key accepted at the wire with longer ones rejected before the service, and depth-budget rejection before the service runs. |
 | [`src/tests/websocket/agentWork.binding.test.ts`](../tests/websocket/agentWork.binding.test.ts) | Session-owner binding, disposal ownership/conflict, and presence release on close/dispose. |
+| [`src/tests/websocket/agentWork.disposal.test.ts`](../tests/websocket/agentWork.disposal.test.ts) | Disposal races: the binding held through a parked settle, settlement-last on backend disposal failure, the settle window denying every principal, stale starts neither binding foreign successors nor ghosts, in-flight foreign disposal denial, a failing settlement unbind failing loudly and healing on re-dispose, and the shared settle-window probe. |
 | [`src/tests/websocket/agentWork.transport.test.ts`](../tests/websocket/agentWork.transport.test.ts) | Handshake auth vs. `clientId`, delayed auth frame buffering, thrown-authenticator containment, and real-socket extension calls. |
-| [`src/tests/websocket/agentWork.integration.test.ts`](../tests/websocket/agentWork.integration.test.ts) | Composed host: authenticated A/B submit → register → claim → renew → complete → get through the real work service, with owner and secret checks. |
+| [`src/tests/websocket/agentWork.integration.test.ts`](../tests/websocket/agentWork.integration.test.ts) | Composed host: authenticated A/B submit → register → claim → renew → complete → get through the real work service, with owner and secret checks, and the fail-closed host facade during a settling disposal. |
 
 ## Namespaced client tool invocation
 

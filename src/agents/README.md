@@ -65,9 +65,12 @@ for work authorization.
   disable/decommission path.
 - Registration rows grow only with unique `(principal, agent_key)` pairs: the
   register handler refuses a connection-level bind conflict before the durable
-  write, and same-key registrations are upserts. Two same-principal connections
-  registering distinct keys concurrently can each land a row before one fails to
-  bind, which stays inside that bound.
+  write, and same-key registrations are upserts. The reachable "row landed but
+  bind failed" shapes stay inside that bound: one connection racing two
+  concurrent registrations of distinct keys (both pass the synchronous,
+  map-reading conflict pre-check, then compete for the one live binding it may
+  hold), or one agent key raced across two connections (one row via upsert, one
+  failed bind).
 - A connection without a valid credential may still use baseline AHP methods;
   authenticated agent/work methods fail closed.
 - The static token map is a POC adapter. It is not a production identity

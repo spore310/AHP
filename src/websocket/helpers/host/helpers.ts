@@ -8,6 +8,7 @@ import { createSessionOwnerRegistry, createWorkService } from "@work";
 
 import { createAHPBinding } from "../ahp";
 import { TOOL_CALL_METHOD, TOOL_COMPLETE_METHOD } from "../ahp/constants";
+import { isSettlingSession } from "../settling";
 import { createWebSocketServer } from "../server";
 import type { AHPServerHandle, AHPServerOptions } from "./types";
 
@@ -151,9 +152,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
       // Mirror the AHP handler: an owner binding without a live record marks a
       // disposal still settling, and a create landing in the window would leave
       // an ownerless record behind once the settlement releases the binding.
-      if (channel !== undefined
-        && sessionOwners.owner(channel) !== undefined
-        && sessions.getSessionSnapshot(channel) === undefined) {
+      if (channel !== undefined && isSettlingSession(sessionOwners, sessions, channel)) {
         return Promise.reject(new Error(HOST_SESSIONS_SETTLING));
       }
       return sessions.createSession(params);

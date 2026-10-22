@@ -33,21 +33,35 @@ export const isJsonbSafeText = (text: string): boolean => {
 };
 
 /**
+ * Maximum nesting level the JSONB-safety recursion inspects before rejecting.
+ *
+ * A frame-sized payload can carry hundreds of thousands of nesting levels and
+ * `JSON.parse` survives them, while this recursion would overflow the stack a
+ * few thousand levels deep and escape as an unclassified error. The budget is
+ * a stack-safety bound, not a PostgreSQL mirror: it sits far inside the depth
+ * real JSONB storage round-trips, so no legitimate payload is rejected.
+ */
+const JSONB_SAFE_DEPTH = 512;
+
+/**
  * Recursively checks a JSON-shaped value, including object keys: JSON source
  * can escape a NUL or a lone surrogate into a key exactly as into a value, and
  * JSONB stores keys as TEXT.
  */
-export const isJsonbSafe = (value: unknown): boolean => {
+export const isJsonbSafe = (value: unknown, depth = 0): boolean => {
+  if (depth > JSONB_SAFE_DEPTH) {
+    return false;
+  }
   if (typeof value === "string") {
     return isJsonbSafeText(value);
   }
   if (Array.isArray(value)) {
-    return value.every(isJsonbSafe);
+    return value.every((item) => isJsonbSafe(item, depth + 1));
   }
   if (!isRecord(value)) {
     return true;
   }
   return Object.entries(value).every(
-    ([key, item]) => isJsonbSafeText(key) && isJsonbSafe(item),
+    ([key, item]) => isJsonbSafeText(key) && isJsonbSafe(item, depth + 1),
   );
 };

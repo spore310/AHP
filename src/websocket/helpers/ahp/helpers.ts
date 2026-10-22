@@ -38,6 +38,7 @@ import {
 } from "./constants";
 import { createAgentWorkExtension, mapWorkError } from "./agentWork";
 import { createToolInvocationBroker } from "./toolInvocation";
+import { isSettlingSession } from "../settling";
 import {
   channelParamsSchema,
   dispatchActionParamsSchema,
@@ -375,26 +376,49 @@ export const createAHPBinding = (
       // Fail closed before touching live state when another principal already
       // holds the owner binding. Creating first would leave the caller with a
       // live record its true owner can neither bind nor dispose.
-      if (options?.sessionOwners !== undefined && parsed.success) {
-        const owner = options.sessionOwners.owner(parsed.data.channel);
-        if (owner !== undefined) {
-          // An owner binding without a live record marks a disposal still
-          // settling, and the window stays closed to every principal — the
-          // unconditional release at settlement would otherwise strip the
-          // binding a recreate just acquired and strand an ownerless record.
-          if (principal === undefined
+      const sessionOwners = options?.sessionOwners;
+      if (sessionOwners !== undefined && parsed.success) {
+        const owner = sessionOwners.owner(parsed.data.channel);
+        if (owner !== undefined
+          && (principal === undefined
             || owner !== principal.subject
-            || factory.getSessionSnapshot(parsed.data.channel) === undefined) {
-            throw new RpcError(JsonRpcErrorCodes.InvalidParams, "Session not found");
-          }
+            || isSettlingSession(sessionOwners, factory, parsed.data.channel))) {
+          throw new RpcError(JsonRpcErrorCodes.InvalidParams, "Session not found");
         }
       }
-      await factory.createSession(params);
-      if (parsed.success && principal !== undefined) {
-        try {
-          options?.sessionOwners?.bind(parsed.data.channel, principal.subject);
-        } catch (error) {
-          mapWorkError(error);
+      // The owner binding is acquired at the record-attach moment — while this
+      // call still owns its record — instead of after the factory resolves: a
+      // create whose record is removed while its backend is still starting
+      // (its own dispose, or another connection of the same principal) must
+      // never bind a late resolution onto the URI, or it would claim a foreign
+      // successor or strand a binding no settle can release.
+      const onRecordCreated = parsed.success && principal !== undefined && sessionOwners !== undefined
+        ? (sessionUri: string): void => {
+            try {
+              sessionOwners.bind(sessionUri, principal.subject);
+            } catch (error) {
+              // Unreachable through the shipped probe: a cross-subject
+              // incumbent at attach time contradicts the pre-check above.
+              // Fail the create as a typed conflict instead of leaving an
+              // unowned record behind.
+              mapWorkError(error);
+            }
+          }
+        : undefined;
+      await factory.createSession(params, onRecordCreated);
+      if (parsed.success && sessionOwners !== undefined) {
+        // The creation is still the caller's to own only if the live record
+        // survived and its binding is still theirs; a late-detached
+        // resolution (record gone while the backend was starting) or a URI now
+        // owned by a successor answers conflict rather than a success the
+        // caller could then rely on.
+        const owner = sessionOwners.owner(parsed.data.channel);
+        const ownedByCaller = principal === undefined
+          ? owner === undefined
+          : owner === principal.subject;
+        if (!ownedByCaller
+          || factory.getSessionSnapshot(parsed.data.channel) === undefined) {
+          throw new RpcError(AhpErrorCodes.Conflict, "The created session is no longer available.");
         }
       }
       return null;

@@ -22,6 +22,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 /** Service-side caps exposed so the wire schemas and the service agree. */
 export const WORK_MAX_INPUT_BYTES = DEFAULT_MAX_INPUT_BYTES;
 export const WORK_MAX_RESULT_BYTES = DEFAULT_MAX_RESULT_BYTES;
+export const WORK_MAX_REQUEST_KEY_LENGTH = MAX_REQUEST_KEY_LENGTH;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -384,6 +385,12 @@ export const createWorkService = (options: WorkServiceOptions): WorkService => {
     },
 
     async assertSessionDisposable(sessionUri) {
+      // The dispose channel reaches the dependent-work lookup as a TEXT
+      // parameter; bytes PostgreSQL cannot store as text must fail typed here,
+      // as the submit/claim gates already do at this boundary.
+      if (typeof sessionUri !== "string" || !isJsonbSafeText(sessionUri)) {
+        throw new WorkError("invalid", "A session URI is required.");
+      }
       try {
         if (await options.repository.hasDependentWork(sessionUri)) {
           throw new WorkError("conflict", "The session still has dependent work.");

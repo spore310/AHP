@@ -6,7 +6,16 @@ import { RpcError } from "@jsonrpc";
 import { RepositoryError } from "@persistence";
 import { isJsonbSafeText } from "@persistence/helpers/text";
 import { sessionUriSchema } from "@sessions/types";
-import { WorkError, isJsonbSafe, WORK_MAX_INPUT_BYTES, WORK_MAX_RESULT_BYTES, type AuthorizedAgentContext, type SessionOwnerRegistry, type WorkService } from "@work";
+import {
+  WorkError,
+  isJsonbSafe,
+  WORK_MAX_INPUT_BYTES,
+  WORK_MAX_REQUEST_KEY_LENGTH,
+  WORK_MAX_RESULT_BYTES,
+  type AuthorizedAgentContext,
+  type SessionOwnerRegistry,
+  type WorkService,
+} from "@work";
 
 import type { JsonRpcHandler, JsonRpcHandlers, WebSocketConnectionContext } from "../../types";
 import {
@@ -50,7 +59,7 @@ const displayName = z.string().min(1).max(128).refine(
 ).refine(requiresStorableText, {
   message: "Display name contains text JSONB cannot store",
 });
-const requestKey = z.string().min(1).max(128).refine(
+const requestKey = z.string().min(1).max(WORK_MAX_REQUEST_KEY_LENGTH).refine(
   (value) => value.trim().length > 0,
   { message: "Request key must not be blank" },
 ).refine(requiresStorableText, {

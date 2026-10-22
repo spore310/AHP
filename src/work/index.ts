@@ -4,6 +4,7 @@ export {
   createWorkService,
   isJsonbSafe,
   WORK_MAX_INPUT_BYTES,
+  WORK_MAX_REQUEST_KEY_LENGTH,
   WORK_MAX_RESULT_BYTES,
 } from "./helpers/helpers";
 export type {

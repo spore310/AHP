@@ -12,7 +12,9 @@ file only as the original proposal record; the executable SQL and
 `src/persistence/helpers/sessions.ts` are authoritative. Behavioral statements
 inside the body — including "disposed sessions are deleted" — describe the
 original proposal: shipped behavior keeps durable rows, with retention
-explicitly deferred (see the M2 document).
+explicitly deferred — the retain/cancel-and-archive policy is recorded as
+"not implemented" in
+[`docs/architecture/agent-task-lifecycle.md`](../docs/architecture/agent-task-lifecycle.md).
 
 This document is the table design for storing a session as the server holds it today. When scripts are added, the raw SQL in `database/` is authoritative. `src/persistance/` may use Drizzle, Prisma, or another client, but it must follow these tables. It must not invent a second schema.
 

@@ -1,9 +1,11 @@
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { AgentInfo } from "@microsoft/agent-host-protocol";
 import { createStaticTokenAuthenticator } from "@agents";
 import { createBaselineSessionApplication } from "@application";
 import type { WorkRepository } from "@persistence/types";
+import type { SessionBackend, SessionProvider } from "@sessions/types";
 import { mockProvider } from "@sessions/mock";
 import { createAHPServer, type AHPServerHandle } from "@websocket";
 
@@ -104,6 +106,42 @@ const createWorkRepository = (): { repository: WorkRepository; captures: WorkCap
     hasDependentWork: () => Promise.resolve(false),
   };
   return { repository, captures };
+};
+
+/**
+ * A provider whose backend disposal parks under test control so the host
+ * facade is observed against a genuinely open settle window. It carries the
+ * "mock" identity because applied creations resolve their provider from the
+ * baseline application's type, which pins provider "mock".
+ */
+const createDisposeGatedProvider = () => {
+  let release: (() => void) | undefined;
+  const agentInfo: AgentInfo = {
+    provider: "mock",
+    displayName: "Mock Agent",
+    description: "Disposal gate used by facade settle-window tests.",
+    models: [],
+  };
+  const provider: SessionProvider = {
+    providerId: "mock",
+    agentInfo,
+    startSession: (): Promise<SessionBackend> => Promise.resolve({
+      dispose: () => new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    }),
+  };
+  return {
+    provider,
+    settle: (): void => {
+      const settled = release;
+      if (settled === undefined) {
+        throw new Error("No gated disposal is parked.");
+      }
+      release = undefined;
+      settled();
+    },
+  };
 };
 
 const connect = async (url: string, token: string): Promise<{
@@ -235,5 +273,75 @@ describe("authenticated AHP agent/work composition", () => {
     });
     expect(JSON.stringify(result.result)).not.toContain("token-secret");
     expect(JSON.stringify(result.result)).not.toContain("agent-secret");
+  });
+
+  it("keeps the host facade fail-closed while a connection disposal is settling", async () => {
+    const registrations = createRegistrationFixture();
+    const { repository } = createWorkRepository();
+    const gated = createDisposeGatedProvider();
+    const host = createAHPServer({
+      host: "127.0.0.1",
+      port: 0,
+      sessions: {
+        // The gated "mock" identity is the only registered provider: the
+        // baseline application's catalogue keeps resolving it, while every
+        // backend disposal parks under test control.
+        providers: [gated.provider],
+        application: createBaselineSessionApplication(),
+      },
+      agentWork: {
+        authenticator: createStaticTokenAuthenticator(new Map([
+          ["alice-token", "alice"],
+        ])),
+        registrations: registrations.repository,
+        work: repository,
+        allowedKinds: new Set([WORK_KIND]),
+      },
+    });
+    hosts.push(host);
+    const address = await host.start();
+    const url = `ws://127.0.0.1:${String(address.port)}/`;
+
+    const alice = await connect(url, "alice-token");
+    expect((await initialize(alice.socket, alice.frames)).error).toBeUndefined();
+    expect((await rpc(alice.socket, alice.frames, "createSession", {
+      channel: SESSION_URI,
+    })).error).toBeUndefined();
+
+    // The connection disposal parks on the backend: the record is gone while
+    // the settlement still holds the owner binding.
+    const disposing = rpc(alice.socket, alice.frames, "disposeSession", {
+      channel: SESSION_URI,
+    });
+    let settling = false;
+    for (let attempt = 0; attempt < 20 && !settling; attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+      settling = host.sessions.getSessionSnapshot(SESSION_URI) === undefined;
+    }
+    expect(settling).toBe(true);
+
+    // The facade mirrors the AHP create denial while the window is open.
+    await expect(host.sessions.createSession({ channel: SESSION_URI }))
+      .rejects.toThrow("A session disposal is still settling");
+
+    // ...and reopens once the settlement releases the binding.
+    gated.settle();
+    expect((await disposing).error).toBeUndefined();
+    await host.sessions.createSession({ channel: SESSION_URI });
+    expect(host.sessions.getSessionSnapshot(SESSION_URI)).toBeDefined();
+
+    // Leave nothing parked for teardown: dispose the reopened session and
+    // release its gated backend once the disposal actually parks.
+    const teardown = host.sessions.disposeSession({ channel: SESSION_URI });
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+      try {
+        gated.settle();
+        break;
+      } catch {
+        // The disposal has not parked yet; wait another turn.
+      }
+    }
+    await teardown;
   });
 });

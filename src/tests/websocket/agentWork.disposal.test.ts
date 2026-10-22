@@ -4,9 +4,10 @@ import { describe, expect, it } from "vitest";
 import type { JsonRpcParams } from "@jsonrpc";
 import { createSessionsFactory } from "@sessions";
 import type { SessionBackend, SessionProvider } from "@sessions/types";
-import { createSessionOwnerRegistry, createWorkService } from "@work";
+import { createSessionOwnerRegistry, createWorkService, type SessionOwnerRegistry } from "@work";
 import type { DurableSessionInput, WorkRepository } from "@persistence/types";
 import { createAHPBinding } from "@websocket/helpers/ahp";
+import { isSettlingSession } from "@websocket/helpers/settling";
 import type { JsonRpcInvocation, WebSocketConnectionContext } from "@websocket";
 
 import { createRegistrationFixture } from "../agents/fixtures";
@@ -113,6 +114,39 @@ const createGatedProvider = () => {
   };
 };
 
+/**
+ * A provider whose backend start is parked under test control so the
+ * create-vs-dispose races land deterministically; any backend it finally
+ * produces disposes immediately.
+ */
+const createLateStartProvider = () => {
+  const parked: Array<(backend: SessionBackend) => void> = [];
+  const agentInfo: AgentInfo = {
+    provider: "late",
+    displayName: "Late Agent",
+    description: "Backend-start gate used by the binding lifecycle tests.",
+    models: [],
+  };
+  const provider: SessionProvider = {
+    providerId: "late",
+    agentInfo,
+    startSession: (): Promise<SessionBackend> => new Promise<SessionBackend>((resolve) => {
+      parked.push(resolve);
+    }),
+  };
+  return {
+    provider,
+    /** Resolves the oldest parked backend start (FIFO). */
+    release: (): void => {
+      const resolve = parked.shift();
+      if (resolve === undefined) {
+        throw new Error("No parked backend start to release.");
+      }
+      resolve({ dispose: () => Promise.resolve() });
+    },
+  };
+};
+
 const createRepository = () => {
   const submitted: string[] = [];
   const cancelled: string[] = [];
@@ -137,10 +171,11 @@ const createRepository = () => {
   return { repository, submitted, cancelled, dependentWork };
 };
 
-const setup = () => {
-  const gated = createGatedProvider();
-  const factory = createSessionsFactory({ providers: [gated.provider] });
-  const sessionOwners = createSessionOwnerRegistry();
+const setupWithProvider = (
+  provider: SessionProvider,
+  sessionOwners: SessionOwnerRegistry = createSessionOwnerRegistry(),
+) => {
+  const factory = createSessionsFactory({ providers: [provider] });
   const { repository, submitted, cancelled, dependentWork } = createRepository();
   const registrations = createRegistrationFixture().repository;
 
@@ -178,7 +213,17 @@ const setup = () => {
     sessionOwners,
   });
 
-  return { gated, factory, sessionOwners, work, submitted, cancelled, dependentWork, binding };
+  return { factory, sessionOwners, work, submitted, cancelled, dependentWork, binding };
+};
+
+const setup = () => {
+  const gated = createGatedProvider();
+  return { gated, ...setupWithProvider(gated.provider) };
+};
+
+const setupLate = () => {
+  const late = createLateStartProvider();
+  return { late, ...setupWithProvider(late.provider) };
 };
 
 const connect = (
@@ -344,5 +389,194 @@ describe("agent work disposal races", () => {
     // The live record and its owner binding survive a work-blocked disposal.
     expect(factory.getSessionSnapshot(SESSION_URI)).toBeDefined();
     expect(sessionOwners.owner(SESSION_URI)).toBe("alice");
+  });
+
+  it("denies a stale detached create from binding a foreign successor's record", async () => {
+    const { late, factory, sessionOwners, work, binding } = setupLate();
+    const alice = connect(binding, "connection-1", "alice");
+    const creating = invoke(binding, "createSession", { channel: SESSION_URI }, alice);
+    // The record attaches and the owner binding lands while the backend start
+    // is parked; the create cannot complete until its start is released.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(factory.getSessionSnapshot(SESSION_URI)).toBeDefined();
+    expect(sessionOwners.owner(SESSION_URI)).toBe("alice");
+
+    // The creator's own disposal releases the binding at settlement: a
+    // back-endless record returns immediately.
+    await invoke(binding, "disposeSession", { channel: SESSION_URI }, alice);
+    expect(sessionOwners.owner(SESSION_URI)).toBeUndefined();
+
+    // A successor attaches its record and its binding at the same instant.
+    const bob = connect(binding, "connection-2", "bob");
+    const bobCreating = invoke(binding, "createSession", { channel: SESSION_URI }, bob);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(factory.getSessionSnapshot(SESSION_URI)).toBeDefined();
+    expect(sessionOwners.owner(SESSION_URI)).toBe("bob");
+
+    // The stale create resolves without re-binding, and its resolution answers
+    // a typed conflict instead of a success the caller could rely on.
+    late.release();
+    await expect(creating).rejects.toMatchObject({
+      code: AhpErrorCodes.Conflict,
+      message: "The created session is no longer available.",
+    });
+    expect(sessionOwners.owner(SESSION_URI)).toBe("bob");
+    expect(factory.getSessionSnapshot(SESSION_URI)).toBeDefined();
+
+    // The durable work channel stays with the true creator.
+    await expect(work.submit({ subject: "alice" }, {
+      sessionUri: SESSION_URI,
+      requestKey: "late-takeover",
+      kind: WORK_KIND,
+      input: { path: "experiment.txt" },
+    })).rejects.toMatchObject({ code: "unauthorized" });
+    await expect(work.submit({ subject: "bob" }, {
+      sessionUri: SESSION_URI,
+      requestKey: "true-creator",
+      kind: WORK_KIND,
+      input: { path: "experiment.txt" },
+    })).resolves.toMatchObject({ id: WORK_ID });
+
+    late.release();
+    await expect(bobCreating).resolves.toBeNull();
+    expect(sessionOwners.owner(SESSION_URI)).toBe("bob");
+  });
+
+  it("answers conflict for a create whose record was disposed mid-start and never binds a ghost", async () => {
+    const { late, factory, sessionOwners, binding } = setupLate();
+    const alice = connect(binding, "connection-1", "alice");
+    const creating = invoke(binding, "createSession", { channel: SESSION_URI }, alice);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(factory.getSessionSnapshot(SESSION_URI)).toBeDefined();
+    expect(sessionOwners.owner(SESSION_URI)).toBe("alice");
+
+    // The creator disposes its own record mid-start; the back-endless record
+    // is gone immediately and the binding was released at settlement.
+    await invoke(binding, "disposeSession", { channel: SESSION_URI }, alice);
+    expect(factory.getSessionSnapshot(SESSION_URI)).toBeUndefined();
+    expect(sessionOwners.owner(SESSION_URI)).toBeUndefined();
+
+    // The parked start resolves into a detached record. The stale create must
+    // neither re-bind (which would strand an ownerless settle window no
+    // settlement can release) nor answer plain success.
+    late.release();
+    await expect(creating).rejects.toMatchObject({ code: AhpErrorCodes.Conflict });
+    expect(sessionOwners.owner(SESSION_URI)).toBeUndefined();
+    expect(factory.getSessionSnapshot(SESSION_URI)).toBeUndefined();
+
+    // The URI is immediately re-creatable, and the recreate binds its true
+    // creator at attach time.
+    const recreating = invoke(binding, "createSession", { channel: SESSION_URI }, alice);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(sessionOwners.owner(SESSION_URI)).toBe("alice");
+    expect(factory.getSessionSnapshot(SESSION_URI)).toBeDefined();
+    late.release();
+    await expect(recreating).resolves.toBeNull();
+  });
+
+  it("protects a live in-flight create against foreign disposal", async () => {
+    const { late, factory, sessionOwners, binding } = setupLate();
+    const alice = connect(binding, "connection-1", "alice");
+    const creating = invoke(binding, "createSession", { channel: SESSION_URI }, alice);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(factory.getSessionSnapshot(SESSION_URI)).toBeDefined();
+    expect(sessionOwners.owner(SESSION_URI)).toBe("alice");
+
+    // While the backend start is parked, the record already carries its owner
+    // binding: a foreign connection cannot dispose it.
+    const bob = connect(binding, "connection-2", "bob");
+    await expect(invoke(
+      binding,
+      "disposeSession",
+      { channel: SESSION_URI },
+      bob,
+    )).rejects.toMatchObject({
+      code: JsonRpcErrorCodes.InvalidParams,
+      message: "Session not found",
+    });
+    expect(factory.getSessionSnapshot(SESSION_URI)).toBeDefined();
+
+    late.release();
+    await expect(creating).resolves.toBeNull();
+    expect(sessionOwners.owner(SESSION_URI)).toBe("alice");
+  });
+
+  it("surfaces a failing settlement unbind and heals the settle window on a re-dispose", async () => {
+    // A custom registry whose unbind fails exactly once: the shipped
+    // registries cannot throw, so this pins the documented failure shape for
+    // embedders instead of swallowing it into a permanent settle lockout.
+    const inner = createSessionOwnerRegistry();
+    let unbindFails = true;
+    const sessionOwners: SessionOwnerRegistry = {
+      bind: (uri, subject) => {
+        inner.bind(uri, subject);
+      },
+      owner: (uri) => inner.owner(uri),
+      unbind: (uri) => {
+        if (unbindFails) {
+          unbindFails = false;
+          throw new Error("unbind failed");
+        }
+        inner.unbind(uri);
+      },
+      clear: () => {
+        inner.clear();
+      },
+    };
+    const gated = createGatedProvider();
+    const { factory, binding } = setupWithProvider(gated.provider, sessionOwners);
+    const alice = connect(binding, "connection-1", "alice");
+    await invoke(binding, "createSession", { channel: SESSION_URI }, alice);
+    expect(inner.owner(SESSION_URI)).toBe("alice");
+
+    const disposing = invoke(binding, "disposeSession", { channel: SESSION_URI }, alice);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(factory.getSessionSnapshot(SESSION_URI)).toBeUndefined();
+    expect(inner.owner(SESSION_URI)).toBe("alice");
+
+    // The backend disposal fails and the settlement's unbind throw replaces
+    // the outcome: the failure stays loud instead of silently keeping a
+    // binding the settlement was supposed to release.
+    gated.settle({ fail: true });
+    await expect(disposing).rejects.toThrow("unbind failed");
+    expect(inner.owner(SESSION_URI)).toBe("alice");
+
+    // The re-dispose answers SessionNotFound (the record is already gone) but
+    // still releases the binding in finally, healing the settle window.
+    await expect(invoke(
+      binding,
+      "disposeSession",
+      { channel: SESSION_URI },
+      alice,
+    )).rejects.toMatchObject({ code: AhpErrorCodes.SessionNotFound });
+    expect(inner.owner(SESSION_URI)).toBeUndefined();
+
+    const recreating = invoke(binding, "createSession", { channel: SESSION_URI }, alice);
+    await expect(recreating).resolves.toBeNull();
+    expect(inner.owner(SESSION_URI)).toBe("alice");
+    expect(factory.getSessionSnapshot(SESSION_URI)).toBeDefined();
+  });
+});
+
+describe("shared settle-window probe", () => {
+  it("marks exactly an owner binding without a live record", async () => {
+    const { gated, factory, sessionOwners, binding } = setup();
+    const alice = connect(binding, "connection-1", "alice");
+    await invoke(binding, "createSession", { channel: SESSION_URI }, alice);
+
+    // Live and owned is not settling; an unknown channel is not settling.
+    expect(isSettlingSession(sessionOwners, factory, SESSION_URI)).toBe(false);
+    expect(isSettlingSession(sessionOwners, factory, "ahp-session:/unknown")).toBe(false);
+
+    // Mid-disposal (record gone, binding still held by the parked settle) the
+    // probe fires, which is what keeps the create window closed for every
+    // principal.
+    const disposing = invoke(binding, "disposeSession", { channel: SESSION_URI }, alice);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(isSettlingSession(sessionOwners, factory, SESSION_URI)).toBe(true);
+
+    gated.settle();
+    await expect(disposing).resolves.toBeNull();
+    expect(isSettlingSession(sessionOwners, factory, SESSION_URI)).toBe(false);
   });
 });
