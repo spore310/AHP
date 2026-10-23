@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { loadEnv, parseAllowedKinds, parseAuthTokens } from "@env";
 import { createAgentWorkOptions } from "../../index";
 
+// The stub provider is intentionally synchronous while honoring Promise ports.
+/* eslint-disable @typescript-eslint/require-await */
 const { selectProvider, providerDispose, provider } = vi.hoisted(() => {
   const providerDispose = vi.fn(async () => undefined);
   const provider = {

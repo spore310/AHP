@@ -16,8 +16,8 @@ task-local proof only.
 | P08 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ `a5765ea` | [handoffs/P08.md](handoffs/P08.md) · facade/lifecycle/adapter tests | Codex GPT-6 | Root barrel has compatibility exports until P10 |
 | P09 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ `04338d5` | [handoffs/P09.md](handoffs/P09.md) · domain/wire tests | Codex GPT-6 | None |
 | P10 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ `ba104b1` | [handoffs/P10.md](handoffs/P10.md) · composition/boundary tests | Codex GPT-6 | None |
-| P11 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ pending P11 commit | [handoffs/P11.md](handoffs/P11.md) · conformance/persistence suites | Codex GPT-6 | Real database cases T04–T06 remain blocked by authorization boundary |
-| P12 | NOT STARTED | — | — | — | — |
+| P11 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ `246d0fb` | [handoffs/P11.md](handoffs/P11.md) · conformance/persistence suites | Codex GPT-6 | Real database cases T04-T06 remain blocked by authorization boundary |
+| P12 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ P11 plus validated P12 worktree | [handoffs/P12.md](handoffs/P12.md) · [../gates/persistence-portability-validation.md](../../gates/persistence-portability-validation.md) | Codex GPT-6 | Real database cases T04-T06 remain blocked by authorization boundary |
 | P13 | NOT STARTED | — | — | — | — |
 
 ## Contract amendments

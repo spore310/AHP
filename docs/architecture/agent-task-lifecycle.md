@@ -128,6 +128,12 @@ concurrent request triggers a best-effort cancel of the just-recorded row and a
 conflict reply. A failed cancel leaves the row behind, which keeps blocking
 disposal of the URI until it is resolved operationally.
 
+Application services consume the database-neutral `PersistenceProvider`
+contract. The adapter registry currently defaults to PostgreSQL and owns the
+adapter selection and cleanup. The provider contract and in-memory conformance
+tests demonstrate substitution; they do not prove real database lock, rollback,
+or database-clock behavior.
+
 ## Failure cases
 
 - **No authenticator / no principal:** agent and work methods fail closed; no
@@ -170,7 +176,8 @@ disposal of the URI until it is resolved operationally.
 
 **Implemented in code:** authentication boundary, registration/presence,
 versioned `x-ahp/agents/*` and `x-ahp/work/*` methods, bounded work service,
-PostgreSQL adapters, migrations, and unit/protocol tests.
+database-neutral persistence contracts/facades, the PostgreSQL adapter,
+migrations, and unit/protocol tests.
 
 **Verification status:** `pnpm validate` is the repository gate. The PostgreSQL
 schema and race/fencing behavior are **not runtime-verified** in this workspace

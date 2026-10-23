@@ -4,15 +4,17 @@ import { createPersistence } from "@persistence/helpers/provider";
 import type {
   AgentRegistrationRecord,
   PersistenceProvider,
-  WorkSubmitInput,
 } from "@persistence/types";
 
+// These deterministic fixtures implement Promise ports without simulated I/O.
+/* eslint-disable @typescript-eslint/require-await */
 vi.mock("pg", () => {
   throw new Error("The neutral persistence facade evaluated pg.");
 });
 
 const makeProvider = () => {
   const calls: Array<readonly [string, ...unknown[]]> = [];
+  const dispose = vi.fn(() => Promise.resolve());
   const provider: PersistenceProvider = {
     registrations: {
       register(input) {
@@ -83,14 +85,16 @@ const makeProvider = () => {
         return Promise.resolve(false);
       },
     },
-    dispose: vi.fn(async () => undefined),
+    dispose,
   };
-  return { provider, calls };
+  return { provider, calls, dispose };
 };
 
-const deferred = <TResult,>() => {
+const deferred = <TResult>() => {
   let resolve!: (value: TResult) => void;
-  const promise = new Promise<TResult>((resolvePromise) => { resolve = resolvePromise; });
+  const promise = new Promise<TResult>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
   return { promise, resolve };
 };
 
@@ -101,7 +105,7 @@ describe("neutral persistence facade", () => {
   });
 
   it("delegates to a non-SQL provider and shares one disposal boundary", async () => {
-    const { provider, calls } = makeProvider();
+    const { provider, calls, dispose } = makeProvider();
     const persistence = createPersistence(provider);
     const input = { principalSubject: "principal", agentKey: "agent" };
     await expect(persistence.registrations.register(input)).resolves.toMatchObject({ id: "registration-id" });
@@ -121,7 +125,7 @@ describe("neutral persistence facade", () => {
     })).resolves.toEqual({ id: "work-id", created: true });
     await expect(persistence.sessions.delete("session://one")).resolves.toBe(false);
     await persistence.dispose();
-    expect(provider.dispose).toHaveBeenCalledOnce();
+    expect(dispose).toHaveBeenCalledOnce();
     expect(calls.map((call) => call[0])).toEqual(["register", "submit", "deleteSession"]);
     await expect(persistence.work.reconcileExpired()).rejects.toMatchObject({ code: "database" });
     expect(calls).toHaveLength(3);
@@ -153,13 +157,13 @@ describe("neutral persistence facade", () => {
   });
 
   it("drains pending calls from multiple namespaces through the shared scope", async () => {
-    const { provider } = makeProvider();
+    const { provider, dispose } = makeProvider();
     const registration = deferred<AgentRegistrationRecord>();
     const submission = deferred<{ readonly id: string; readonly created: boolean }>();
     const pendingProvider: PersistenceProvider = {
       ...provider,
       registrations: { ...provider.registrations, register: () => registration.promise },
-      work: { ...provider.work, submit: (_input: WorkSubmitInput) => submission.promise },
+      work: { ...provider.work, submit: () => submission.promise },
     };
     const persistence = createPersistence(pendingProvider);
     const registrationResult = persistence.registrations.register({ principalSubject: "p", agentKey: "a" });
@@ -178,7 +182,7 @@ describe("neutral persistence facade", () => {
       input: {},
     });
     const disposal = persistence.dispose();
-    expect(provider.dispose).not.toHaveBeenCalled();
+    expect(dispose).not.toHaveBeenCalled();
     registration.resolve({
       id: "registration-id",
       principalSubject: "p",
@@ -190,6 +194,6 @@ describe("neutral persistence facade", () => {
     await expect(registrationResult).resolves.toMatchObject({ id: "registration-id" });
     await expect(workResult).resolves.toEqual({ id: "work-id", created: true });
     await disposal;
-    expect(provider.dispose).toHaveBeenCalledOnce();
+    expect(dispose).toHaveBeenCalledOnce();
   });
 });

@@ -13,8 +13,10 @@ import {
 
 import type { PersistenceConformanceFixture } from "./types";
 
-export type PersistenceConformanceProviderFactory =
-  () => PersistenceProvider | Promise<PersistenceProvider>;
+// The in-memory conformance provider models async ports with deterministic state.
+/* eslint-disable @typescript-eslint/require-await */
+export type PersistenceConformanceProviderFactory
+  = () => PersistenceProvider | Promise<PersistenceProvider>;
 
 /** Runs data-contract scenarios against any provider fixture, without SQL hooks. */
 export const assertPersistenceConformance = async (
@@ -23,7 +25,7 @@ export const assertPersistenceConformance = async (
   const provider = await createProvider();
   const persistence = createPersistence(provider);
   const principalSubject = "persistence-conformance-principal";
-  const sessionUri = `ahp-session:/persistence-conformance-${Date.now()}`;
+  const sessionUri = `ahp-session:/persistence-conformance-${String(Date.now())}`;
   const timestamp = new Date().toISOString();
   const session: DurableSessionInput = {
     sessionUri,

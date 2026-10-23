@@ -73,6 +73,9 @@ for work authorization.
   failed bind).
 - A connection without a valid credential may still use baseline AHP methods;
   authenticated agent/work methods fail closed.
+- `agentKey` and `displayName` use the shared portable-text interoperability
+  profile before repository calls; this validation is independent of the
+  selected database adapter.
 - The static token map is a POC adapter. It is not a production identity
   provider, and tokens must be supplied through environment configuration rather
   than source or logs.

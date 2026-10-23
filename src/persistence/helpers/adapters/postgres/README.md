@@ -1,44 +1,51 @@
-# PostgreSQL adapter — persistence
+# PostgreSQL persistence adapter
 
-The concrete PostgreSQL provider for the persistence ports. This adapter owns
-every driver (`pg`), `Pool`, transaction, SQL, row-mapping, SQLSTATE and
-pool-ownership mechanic for the persistence domain; neutral helpers and
-consumers must not detect it (CORE_CONTRACT C03/C05).
-
-Status: **connection + all repository modules** (P03–P05). The legacy neutral
-repository files remain untouched until P08; `postgres/index.ts` and the
-provider factory arrive with P06/P10. Canonical DDL lives in
-[`database/migrations/`](../../../../../database/migrations/).
+The PostgreSQL implementation of the shared persistence ports. This module
+owns `pg`, pools, transactions, SQL, row mappings, database clocks, SQLSTATE
+classification, and pool cleanup. Application/domain modules use the shared
+contract and do not inspect this adapter.
 
 ## Files
 
 | File | Responsibility |
 | ---- | -------------- |
-| `index.ts` | Explicit PostgreSQL adapter boundary and provider factory export. |
-| `helpers.ts` | `createPostgresPersistenceProvider`: builds the three repositories over one owned pool and disposes it once. |
-| `types.ts` | Adapter-private `PostgresOptions` (pool options; default `max` 10, preserved from the legacy module), the narrow shared query capability `QueryableClient` (P04: lets repository helpers accept a real pool or a transaction client without unsafe casts), the raw `AgentRegistrationRow`/`SessionRow` row shapes, and the work additions from P05: raw `WorkRow` plus `PostgresWorkRepositoryOptions` (lease TTL option; default 60). |
-| `helpers/connection/types.ts` | Adapter-private, pg-derived driver subsets: `Queryable`, `PoolClientLike`, `PoolLike`. Never re-exported through the neutral persistence root. |
-| `helpers/connection/helpers.ts` | `createPostgresPool`, `withTransaction` (one acquired client; `BEGIN`/`COMMIT`, best-effort `ROLLBACK` that never masks the primary failure, unconditional release), `toIso`, and `databaseFailure` (SQLSTATE → owned `RepositoryError` mapping; state numbers adapter-private). |
-| `helpers/connection/index.ts` | Public boundary of the connection module for sibling adapter helpers and adapter-focused tests. |
-| `helpers/agentRegistrations/helpers.ts` | `createPostgresAgentRegistrationRepository`: the `agent_registrations` upsert `register` and `getById`, SQL/parameters/row mapping moved unchanged from the legacy neutral helpers (P04). |
-| `helpers/agentRegistrations/index.ts` | Public boundary of the registration repository module. |
-| `helpers/sessions/helpers.ts` | `createPostgresDurableSessionRepository` (`ensure` via `withTransaction`, `get`, `delete` incl. the SQLSTATE 23503 → conflict dependent-work special case) plus the exported transaction-local `ensureSession` primitive for the P05 work adapter; SQL/parameters/row mapping moved unchanged (P04). |
-| `helpers/sessions/index.ts` | Public boundary of the session repository module; `ensureSession` is internal and imported from `./helpers` by P05. |
-| `helpers/workItems/helpers.ts` | `createPostgresWorkRepository(pool, options)`: all nine `work_items` operations — `submit` (one transaction: internal `ensureSession` + idempotent insert + exact JSONB conflict lookup on the SAME client), atomic `claim` (SKIP LOCKED, token rotation, attempt increment), fenced `renew`/`complete`, locked `fail`/`cancel`, `get`, `reconcileExpired`, `hasDependentWork`; SQL/parameters/guards/row mapping moved unchanged from the legacy neutral helpers (P05). Options: `leaseTtlSeconds` (default 60). |
-| `helpers/workItems/index.ts` | Public boundary of the work repository module. |
+| `index.ts` | Explicit adapter exports, including the provider factory. |
+| `helpers.ts` | Asynchronous provider construction over one pool; waits for pool cleanup if construction fails. |
+| `types.ts` | Adapter options, driver query capabilities, and PostgreSQL row shapes. |
+| `helpers/connection/types.ts` | Private `PoolLike`, `PoolClientLike`, and `Queryable` shapes for driver code and query doubles. |
+| `helpers/connection/helpers.ts` | Pool creation, same-client transactions, timestamp conversion, and private SQLSTATE mapping. |
+| `helpers/connection/index.ts` | Connection helper boundary for sibling adapter modules. |
+| `helpers/agentRegistrations/helpers.ts` | Registration upsert/get SQL and row mapping. |
+| `helpers/agentRegistrations/index.ts` | Registration repository boundary. |
+| `helpers/sessions/helpers.ts` | Session projection ensure/get/delete, owner checks, and dependent-work classification. |
+| `helpers/sessions/index.ts` | Session repository boundary; transaction-local `ensureSession` remains internal. |
+| `helpers/workItems/helpers.ts` | Idempotent submission, atomic claims, fenced lease operations, reconciliation, and dependency checks. |
+| `helpers/workItems/index.ts` | Work repository boundary. |
 
-Known limitation (recorded as F-P00-2): `sessionTypeKey`/`sessionTypeVersion`
-are NOT persisted — the `sessions` table stores `session_type_id` only — and
-`sessionTypeId` does not round-trip through the port contract. No columns, DDL
-or claims.
+## Provider usage
 
+`createPostgresPersistenceProvider({ connectionString, maxConnections?, leaseTtlSeconds? })`
+returns a `Promise<PersistenceProvider>`. The configured adapter registry calls
+it after validating its neutral selection options. The returned provider owns
+one pool shared by registration, session, and work repositories; its
+`dispose()` is idempotent and closes that pool once.
 
-## Prohibitions while shared
+Pool and transaction types never cross the shared provider contract. SQLSTATE
+codes and PostgreSQL row types remain private here. Canonical schema DDL stays
+under [`database/migrations/`](../../../../../database/migrations/).
 
-- Internal imports use the shared leaf contracts `@persistence/types`, never
-  the neutral root barrel.
-- No forwarding shim from the legacy `helpers/pool.ts` into this adapter; the
-  legacy module keeps its `pg` import until its callers move (temporary
-  duplication of `PostgresOptions`/connection helpers is recorded in the P03
-  handoff).
-- SQLSTATE numbers must not leak into generic helpers or the public surface.
+## Preserved behavior and limits
+
+- `work.submit` runs session projection and idempotent work insertion in one
+  transaction using the same acquired client.
+- Claim and lease updates keep their SQL predicates, database clock
+  (`statement_timestamp()`), token rotation, ownership guards, retry budget,
+  and `FOR UPDATE ... SKIP LOCKED` behavior.
+- A pool-construction failure after allocation awaits one cleanup attempt and
+  rethrows the original construction error.
+- The schema stores `session_type_id`; current mapping limitations for the
+  optional session type fields are recorded in the shared
+  [persistence README](../../../README.md#postgresql-behavior).
+- Query doubles cover SQL behavior offline. No test here proves real database
+  contention or transaction behavior; those cases require separate
+  authorization and a dedicated database.

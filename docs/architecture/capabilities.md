@@ -13,7 +13,7 @@ How Agent Hosting Protocol composes. Module READMEs contain the public contracts
 | Application | `src/application/` | [README](../../src/application/README.md) | Fresh baseline `code-review`/`coding` policy. Descriptors only; no filesystem executor. |
 | Tool client | `src/toolClient/` | [README](../../src/toolClient/README.md) | Public SDK adapter for local tool implementations and application-extension calls. |
 | Agents | `src/agents/` | [README](../../src/agents/README.md) | Static bearer authentication, durable registration, and in-memory generation-fenced presence. |
-| Persistence | `src/persistence/` | [README](../../src/persistence/README.md) | Async durable ports and parameterized PostgreSQL adapters. No SQL in the session engine. |
+| Persistence | `src/persistence/` | [README](../../src/persistence/README.md) | Neutral durable ports/facades, lazy allowlisted provider selection, and the PostgreSQL adapter. No SQL in the session engine. |
 | Work | `src/work/` | [README](../../src/work/README.md) | Session-owner authorization, bounded validation, and work-lease coordination. |
 | Environment | `env/` | [README](../../env/README.md) | Validated process configuration. |
 | Process composition | `src/index.ts` | [README](../../src/README.md) | Application/host wiring, optional agent/work composition, entrypoint guard and signal handlers. |
@@ -29,7 +29,8 @@ application -> public sessions + tools
 websocket host -> sessions + AHP binding + raw transport
 AHP binding -> sessions + tools + JSON-RPC + optional agents/work
 work -> agents + persistence ports
-persistence -> pg only (adapters); live sessions stay in memory
+persistence contract/facades -> plain repository ports; selected PostgreSQL adapter -> pg
+live sessions stay in memory; persisted session data is a work-linked projection
 sessions -> tools + JSON decoding; never sockets
 client adapter -> public AHP SDK + tools
 ```
@@ -40,16 +41,18 @@ The raw WebSocket server remains session-agnostic. The contained AHP binding own
 
 ```text
 loadEnv -> createBaselineSessionApplication
-        -> createAgentWorkOptions(config)        # undefined, or auth + Postgres
+        -> createAgentWorkOptions(config)        # undefined, or auth + managed provider
         -> createAHPServer({ sessions, agentWork? })
-        -> start -> installShutdownHandlers -> optional dispose/pool.end
+        -> start -> installShutdownHandlers -> host-owned provider disposal
 ```
 
 Importing the entrypoint or application module is inert: it does not bind ports. Each host owns its session factory, sequence, catalogues, transport and cleanup. Shutdown is terminal and best-effort; signal-handler failures set `process.exitCode = 1`.
 
 The agent/work option is all-or-nothing. Without both a database URL and token
-map, the extension methods are not registered and the pool is not created. With
-both, the transport authenticates the upgrade, an authenticated AHP
+map, the extension methods are not registered and no provider is selected. A
+provider selector alone is a configuration error. With both, the adapter
+registry resolves the configured provider (PostgreSQL by default), the
+transport authenticates the upgrade, and an authenticated AHP
 `createSession` binds the owner, and connection close releases live presence
 without deleting durable work.
 

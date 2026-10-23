@@ -28,12 +28,14 @@ Implemented today:
 - [`src/agents/`](src/agents/README.md) — optional static bearer authentication,
   durable agent registration, and in-memory generation-fenced presence.
 - [`src/persistence/`](src/persistence/README.md) and
-  [`src/work/`](src/work/README.md) — optional PostgreSQL work leases and their
-  authorization/validation service.
+  [`src/work/`](src/work/README.md) — shared persistence contracts with an
+  allowlisted PostgreSQL adapter, plus work authorization and validation.
 - [`env/`](env/README.md) — validated process configuration.
 
 The authenticated agent/work extension is opt-in. Without both a database URL
-and an auth-token map it is not registered; the baseline host is unchanged.
+and an auth-token map it is not registered and no provider is selected; the
+baseline host is unchanged. A configured provider name is resolved by the
+adapter registry, which currently defaults to PostgreSQL.
 
 Not implemented yet: production identity/OIDC, real chat/turn execution,
 reconnect/replay, workflow scheduling, cross-principal grants, and server-side

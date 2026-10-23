@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const loadProvider = vi.fn(async () => ({
+const loadProvider = vi.fn(() => Promise.resolve({
   registrations: {},
   sessions: {},
   work: {},
-  dispose: async () => undefined,
+  dispose: () => Promise.resolve(),
 }));
 
 vi.mock("@persistence/helpers/adapters/postgres", () => ({

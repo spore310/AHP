@@ -19,7 +19,7 @@ Start here, then read the README of the capability you are changing.
 | `application/` | [`application/README.md`](application/README.md) | Fresh baseline policy for `code-review` and `coding` sessions. |
 | `toolClient/` | [`toolClient/README.md`](toolClient/README.md) | Public SDK adapter for local implementations and namespaced tool invocation. |
 | `agents/` | [`agents/README.md`](agents/README.md) | Static bearer authentication, durable agent registration, and in-memory generation-fenced presence. |
-| `persistence/` | [`persistence/README.md`](persistence/README.md) | Async durable ports and parameterized PostgreSQL adapters. No SQL in the live session engine. |
+| `persistence/` | [`persistence/README.md`](persistence/README.md) | Database-neutral durable ports/facades, lazy allowlisted provider selection, and a PostgreSQL adapter. No SQL in the live session engine. |
 | `work/` | [`work/README.md`](work/README.md) | Principal/session authorization, bounded work validation, and the work-lease application service. |
 | `tests/` | see per-module **Testing** sections | All tests. Never colocated with source. |
 
@@ -39,10 +39,10 @@ Cross-cutting behavior that no single capability owns lives in
 Exported from `src/index.ts`:
 
 - `APP_NAME: string` — the product name used in startup logging.
-- `createAgentWorkOptions(config): AHPServerAgentWorkOptions | undefined` — builds
-  the optional static-token authenticator and PostgreSQL-backed registration/work
-  adapters. Both database and token configuration are required together; a
-  partial pair is a startup error.
+- `createAgentWorkOptions(config): Promise<AHPServerAgentWorkOptions | undefined>` —
+  builds the optional static-token authenticator and shared registration/work
+  ports. Both the database URL and token map are required together; a provider
+  selector without that pair is a startup error.
 - `installShutdownHandlers(server: WebSocketServerHandle): () => void` — wires
   `SIGINT`/`SIGTERM` to `server.stop()` and returns a function that removes the
   handlers.
@@ -97,7 +97,9 @@ void main; // only call main() when you actually want the default wiring
   `AGENT_HOSTING_PROTOCOL_DATABASE_URL` and
   `AGENT_HOSTING_PROTOCOL_AUTH_TOKENS`, the server runs the baseline host and the
   namespaced methods are not registered. Supplying only one of the pair throws
-  before startup rather than silently disabling authorization.
+  before provider selection rather than silently disabling authorization. The
+  optional provider name is resolved by the allowlisted adapter registry; the
+  default is PostgreSQL. After host construction, the host owns provider cleanup.
 - **Shutdown failures set `process.exitCode = 1`** instead of throwing from the
   signal handler, so a failed shutdown is observable without crashing the
   process.

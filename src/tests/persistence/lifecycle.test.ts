@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import { RepositoryError } from "@persistence/types";
 import { createPersistenceOperationScope } from "@persistence/helpers/lifecycle";
 
-const deferred = <TResult,>() => {
+// Lifecycle cleanup fakes resolve immediately unless a test injects failure.
+/* eslint-disable @typescript-eslint/require-await */
+const deferred = <TResult>() => {
   let resolve!: (value: TResult) => void;
   let reject!: (reason?: unknown) => void;
   const promise = new Promise<TResult>((resolvePromise, rejectPromise) => {
@@ -16,7 +18,7 @@ const deferred = <TResult,>() => {
 describe("persistence operation scope", () => {
   it("drains admitted operations and shares one disposal promise", async () => {
     const operation = deferred<number>();
-    const cleanup = vi.fn(async () => undefined);
+    const cleanup = vi.fn(() => Promise.resolve());
     const scope = createPersistenceOperationScope(cleanup);
     const result = scope.run(() => operation.promise);
     const disposal = scope.dispose();
@@ -30,18 +32,20 @@ describe("persistence operation scope", () => {
   });
 
   it("normalizes failures while still cleaning up", async () => {
-    const cleanup = vi.fn(async () => undefined);
+    const cleanup = vi.fn(() => Promise.resolve());
     const scope = createPersistenceOperationScope(cleanup);
-    const result = scope.run(async () => { throw new Error("secret driver detail"); });
+    const result = scope.run(() => Promise.reject(new Error("secret driver detail")));
     await expect(result).rejects.toEqual(new RepositoryError("database", "The persistence operation failed."));
     await scope.dispose();
     expect(cleanup).toHaveBeenCalledOnce();
   });
 
   it("contains synchronous throws and caches cleanup failure", async () => {
-    const cleanup = vi.fn(async () => { throw new Error("cleanup detail"); });
+    const cleanup = vi.fn(() => Promise.reject(new Error("cleanup detail")));
     const scope = createPersistenceOperationScope(cleanup);
-    await expect(scope.run(() => { throw new Error("sync driver detail"); }))
+    await expect(scope.run(() => {
+      throw new Error("sync driver detail");
+    }))
       .rejects.toMatchObject({ code: "database", message: "The persistence operation failed." });
     const first = scope.dispose();
     await expect(first).rejects.toThrow("cleanup detail");
@@ -51,7 +55,7 @@ describe("persistence operation scope", () => {
 
   it("registers an operation before a synchronous reentrant dispose", async () => {
     const operation = deferred<number>();
-    const cleanup = vi.fn(async () => undefined);
+    const cleanup = vi.fn(() => Promise.resolve());
     const scope = createPersistenceOperationScope(cleanup);
     let disposal!: Promise<void>;
     const result = scope.run(() => {
@@ -65,11 +69,10 @@ describe("persistence operation scope", () => {
     expect(cleanup).toHaveBeenCalledOnce();
   });
 
-  it("preserves owned errors and receiver-independent scope behavior", async () => {
+  it("preserves owned errors and closes the operation scope", async () => {
     const expected = new RepositoryError("unauthorized", "Access denied.");
-    const scope = createPersistenceOperationScope(async () => undefined);
-    await expect(scope.run(async () => { throw expected; })).rejects.toBe(expected);
-    const dispose = scope.dispose;
-    await dispose();
+    const scope = createPersistenceOperationScope(() => Promise.resolve());
+    await expect(scope.run(() => Promise.reject(expected))).rejects.toBe(expected);
+    await scope.dispose();
   });
 });

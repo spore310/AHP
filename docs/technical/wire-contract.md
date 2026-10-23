@@ -119,6 +119,13 @@ the authenticated connection and live directory. The work extension is separate
 from `x-ahp/tools/*`: tools are short-lived private invocation, while work is a
 durable record that survives a disconnect.
 
+Registration text and work payload trees also pass the application's
+portable-text profile before reaching a repository. It rejects NUL and unpaired
+UTF-16 surrogates so accepted values are consistent across storage adapters;
+this is application policy, not a claim that JSON itself cannot represent those
+values. The profile does not replace request schemas, authorization, or payload
+size checks. See the [persistence contract](../../src/persistence/README.md#portable-text-profile-v1).
+
 When configured, the upgrade may carry `Authorization: Bearer <token>`; the
 resolved subject is attached to the connection before AHP dispatch. Missing or
 unknown credentials leave the connection unauthenticated, so agent/work methods

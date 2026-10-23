@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 describe("PostgreSQL provider partial construction", () => {
   it("awaits one pool cleanup when a repository factory fails", async () => {
     vi.resetModules();
-    const end = vi.fn(async () => undefined);
+    const end = vi.fn(() => Promise.resolve());
     vi.doMock("@persistence/helpers/adapters/postgres/helpers/connection", () => ({
       createPostgresPool: () => ({ end }),
     }));

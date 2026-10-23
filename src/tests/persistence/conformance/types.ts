@@ -17,5 +17,5 @@ export interface PersistenceConformanceFixture {
   isDisposed(): boolean;
 }
 
-export type PersistenceConformanceFixtureFactory =
-  () => PersistenceConformanceFixture | Promise<PersistenceConformanceFixture>;
+export type PersistenceConformanceFixtureFactory
+  = () => PersistenceConformanceFixture | Promise<PersistenceConformanceFixture>;

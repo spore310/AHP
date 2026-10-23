@@ -52,9 +52,9 @@ the binding does not import sockets into that module.
   an RPC method. The optional third argument enables the agent/work extension
   with `agents`, `work`, and `sessionOwners`.
 - `createAHPServer({ host, port, path, sessions, agentWork? })` — composed host.
-  `agentWork` optionally adds the static-token authenticator, PostgreSQL-backed
-  registration/work ports, allowed kinds, presence TTL, and pool cleanup. `stop()`
-  releases transport, binding, sessions, and the optional pool. It is terminal,
+  `agentWork` optionally adds the static-token authenticator, shared
+  registration/work ports, allowed kinds, presence TTL, and provider cleanup.
+  `stop()` releases transport, binding, sessions, and the optional provider. It is terminal,
   including after a failed `start()`. `host.sessions.createSession` and
   `host.sessions.dispatchAction` then reject; a second `start()` rejects.
 

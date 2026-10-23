@@ -8,15 +8,15 @@ const loadPostgres: PersistenceProviderLoader = async (options) => {
     || (options.maxConnections !== undefined
       && (typeof options.maxConnections !== "number"
         || !Number.isInteger(options.maxConnections) || options.maxConnections < 1))
-    || (options.workLeaseSeconds !== undefined
-      && (typeof options.workLeaseSeconds !== "number"
-        || !Number.isInteger(options.workLeaseSeconds) || options.workLeaseSeconds < 1))) {
+      || (options.workLeaseSeconds !== undefined
+        && (typeof options.workLeaseSeconds !== "number"
+          || !Number.isInteger(options.workLeaseSeconds) || options.workLeaseSeconds < 1))) {
     throw new Error("Invalid PostgreSQL persistence configuration.");
   }
   return createPostgresPersistenceProvider({
     connectionString: options.url,
-    maxConnections: options.maxConnections as number | undefined,
-    leaseTtlSeconds: options.workLeaseSeconds as number | undefined,
+    maxConnections: options.maxConnections,
+    leaseTtlSeconds: options.workLeaseSeconds,
   });
 };
 
