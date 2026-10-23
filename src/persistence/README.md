@@ -10,6 +10,9 @@ from the reducer or WebSocket callbacks. SQL source of truth lives under
 | File | Responsibility |
 | ---- | -------------- |
 | `types.ts` | `AgentRegistrationRepository`, `DurableSessionRepository`, `WorkRepository`, record/DTO types, and the sanitized `RepositoryError`. |
+| `helpers/adapters/` | Allowlisted, lazy configured-provider selection; the common persistence root does not import a concrete adapter. |
+| `helpers/adapters/postgres/` | PostgreSQL provider construction and adapter-owned pool lifecycle. |
+| `helpers/lifecycle/` | Shared admission, operation tracking, error normalization, and terminal disposal support. |
 | `helpers/pool.ts` | `createPostgresPool`, `withTransaction`, timestamp normalization, and PostgreSQL error classification. |
 | `helpers/agentRegistrations.ts` | `createPostgresAgentRegistrationRepository`: idempotent `(principal, agentKey)` registration and lookup. |
 | `helpers/sessions.ts` | `ensureSession` plus `createPostgresDurableSessionRepository`: lazy session projection, owner enforcement, and FK-aware deletion. |

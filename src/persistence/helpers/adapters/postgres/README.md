@@ -14,6 +14,8 @@ provider factory arrive with P06/P10. Canonical DDL lives in
 
 | File | Responsibility |
 | ---- | -------------- |
+| `index.ts` | Explicit PostgreSQL adapter boundary and provider factory export. |
+| `helpers.ts` | `createPostgresPersistenceProvider`: builds the three repositories over one owned pool and disposes it once. |
 | `types.ts` | Adapter-private `PostgresOptions` (pool options; default `max` 10, preserved from the legacy module), the narrow shared query capability `QueryableClient` (P04: lets repository helpers accept a real pool or a transaction client without unsafe casts), the raw `AgentRegistrationRow`/`SessionRow` row shapes, and the work additions from P05: raw `WorkRow` plus `PostgresWorkRepositoryOptions` (lease TTL option; default 60). |
 | `helpers/connection/types.ts` | Adapter-private, pg-derived driver subsets: `Queryable`, `PoolClientLike`, `PoolLike`. Never re-exported through the neutral persistence root. |
 | `helpers/connection/helpers.ts` | `createPostgresPool`, `withTransaction` (one acquired client; `BEGIN`/`COMMIT`, best-effort `ROLLBACK` that never masks the primary failure, unconditional release), `toIso`, and `databaseFailure` (SQLSTATE → owned `RepositoryError` mapping; state numbers adapter-private). |

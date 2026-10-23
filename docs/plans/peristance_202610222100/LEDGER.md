@@ -11,7 +11,7 @@ task-local proof only.
 | P03 | DONE / VERIFIED FOR PACKET | working tree @ `6bd3c5e` (adapter connection module; uncommitted) | [handoffs/P03.md](handoffs/P03.md) · [../src/tests/persistence/adapters/postgres/connection.test.ts](../../../src/tests/persistence/adapters/postgres/connection.test.ts) | GLM 5.3 Flash writer | None (legacy pool.ts duplication → P08) |
 | P04 | DONE / VERIFIED FOR PACKET | working tree @ `6bd3c5e` (adapter registration/session repository modules; uncommitted) | [handoffs/P04.md](handoffs/P04.md) · [../src/tests/persistence/adapters/postgres/repositories.test.ts](../../../src/tests/persistence/adapters/postgres/repositories.test.ts) | GLM 5.3 Flash writer | None (ensureSession consumed by → P05 on the transaction client) |
 | P05 | DONE / VERIFIED FOR PACKET | working tree @ `6bd3c5e` (adapter work repository module; uncommitted) | [handoffs/P05.md](handoffs/P05.md) · [../src/tests/persistence/adapters/postgres/workItems.test.ts](../../../src/tests/persistence/adapters/postgres/workItems.test.ts) | GLM 5.3 Flash writer | None (work adapters consume `ensureSession`/`QueryableClient`; verify per packet) |
-| P06 | NOT STARTED | — | — | — | — |
+| P06 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ P06 commit | [handoffs/P06.md](handoffs/P06.md) · selection/provider tests | Codex GPT-6 | None |
 | P07 | NOT STARTED | — | — | — | — |
 | P08 | NOT STARTED | — | — | — | — |
 | P09 | NOT STARTED | — | — | — | — |
