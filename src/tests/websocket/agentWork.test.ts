@@ -631,16 +631,17 @@ describe("agent work extension work replies", () => {
   it("pins the wire depth boundary at 512 levels accepted and 513 refused", async () => {
     // The literal boundary pins the shared text helper's budget at the wire:
     // these numbers and the READMEs' "512-level" wording must move together.
+    // The scalar seed makes the leaf land exactly at recursion depth `levels`.
     const { sessionOwners, work, extension } = setup();
     const alice = contextFor("connection-1", "alice");
     await registerAgent(extension, alice);
     sessionOwners.bind(SESSION_URI, "alice");
     const ladder = (levels: number): Record<string, unknown> => {
-      let value: Record<string, unknown> = { leaf: true };
+      let value: unknown = "leaf";
       for (let index = 0; index < levels; index += 1) {
         value = { a: value };
       }
-      return value;
+      return value as Record<string, unknown>;
     };
 
     await invoke(extension, WORK_SUBMIT_METHOD, {
