@@ -17,8 +17,8 @@ task-local proof only.
 | P09 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ `04338d5` | [handoffs/P09.md](handoffs/P09.md) · domain/wire tests | Codex GPT-6 | None |
 | P10 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ `ba104b1` | [handoffs/P10.md](handoffs/P10.md) · composition/boundary tests | Codex GPT-6 | None |
 | P11 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ `246d0fb` | [handoffs/P11.md](handoffs/P11.md) · conformance/persistence suites | Codex GPT-6 | Real database cases T04-T06 remain blocked by authorization boundary |
-| P12 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ P11 plus validated P12 worktree | [handoffs/P12.md](handoffs/P12.md) · [../gates/persistence-portability-validation.md](../../gates/persistence-portability-validation.md) | Codex GPT-6 | Real database cases T04-T06 remain blocked by authorization boundary |
-| P13 | NOT STARTED | — | — | — | — |
+| P12 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ `d68f7d2` | [handoffs/P12.md](handoffs/P12.md) · [../gates/persistence-portability-validation.md](../../gates/persistence-portability-validation.md) | Codex GPT-6 | Real database cases T04-T06 remain blocked by authorization boundary |
+| P13 | DONE / VERIFIED FOR PACKET | `d68f7d2` + RP01 patch `EAF8B42A7D69A8AB5DFD6041468AF96B9A7211C24A8039A3B3FEAEACEFEAD9B4` | [handoffs/P13.md](handoffs/P13.md) · [reviews/FINAL_REVIEW_1_ARCHITECTURE.md](reviews/FINAL_REVIEW_1_ARCHITECTURE.md) · [reviews/FINAL_REVIEW_2_CORRECTNESS.md](reviews/FINAL_REVIEW_2_CORRECTNESS.md) | Codex GPT-6 | Real database cases T04-T06 remain blocked by authorization boundary |
 
 ## Contract amendments
 

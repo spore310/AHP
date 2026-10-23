@@ -41,3 +41,12 @@ the P00 baseline: `0001_session_tool_baseline.sql` is
 database connection, live query, provisioning, or migration was performed.
 Real-database acceptance remains blocked pending separate authorization and a
 dedicated test database.
+
+## Final integrated candidate
+
+P13 reviewed `d68f7d2` plus the bounded RP01 repair patch with SHA-256
+`EAF8B42A7D69A8AB5DFD6041468AF96B9A7211C24A8039A3B3FEAEACEFEAD9B4`.
+After RP01, `pnpm validate` passed again: lint, typecheck, 52 test files / 407
+tests, docs:check (116 source files), and production build. Focused selection,
+conformance, and host-composition tests also passed (3 files / 9 tests). Review
+passes are recorded separately in the P13 handoff and final review reports.

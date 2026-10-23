@@ -28,8 +28,10 @@ describe("configured persistence provider selection", () => {
 
   it("rejects unsupported selectors without loading PostgreSQL", async () => {
     const { createConfiguredPersistenceProvider } = await import("@persistence/helpers/adapters");
-    await expect(createConfiguredPersistenceProvider({ provider: "unknown", options: {} }))
-      .rejects.toThrow("not supported");
+    for (const provider of ["unknown", "constructor", "toString", "__proto__"]) {
+      await expect(createConfiguredPersistenceProvider({ provider, options: {} }))
+        .rejects.toThrow("not supported");
+    }
     expect(loadProvider).not.toHaveBeenCalled();
   });
 

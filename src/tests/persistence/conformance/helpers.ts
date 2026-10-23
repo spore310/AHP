@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { isDeepStrictEqual } from "node:util";
 
 import { createPersistence } from "@persistence";
 import {
@@ -85,15 +86,20 @@ export const assertPersistenceConformance = async (
       session,
       requestKey: "conformance-request",
       kind: "conformance.task",
-      input: { value: 1 },
+      input: { payload: { first: 1, second: 2 }, items: [1, 2] },
     };
     const submitted = await persistence.work.submit(workInput);
     assert.equal(submitted.created, true);
     const replay = await persistence.work.submit(workInput);
     assert.equal(replay.id, submitted.id);
     assert.equal(replay.created, false);
+    const reorderedReplay = await persistence.work.submit({
+      ...workInput,
+      input: { items: [1, 2], payload: { second: 2, first: 1 } },
+    });
+    assert.deepEqual(reorderedReplay, { id: submitted.id, created: false });
     await assert.rejects(
-      persistence.work.submit({ ...workInput, input: { value: 2 } }),
+      persistence.work.submit({ ...workInput, input: { items: [2, 1], payload: { first: 1, second: 2 } } }),
       (error: unknown) => error instanceof RepositoryError && error.code === "conflict",
     );
     assert.equal(await persistence.work.hasDependentWork(sessionUri), true);
@@ -214,7 +220,7 @@ export const createMemoryPersistenceFixture = (): PersistenceConformanceFixture 
         );
         if (existing !== undefined) {
           const same = existing.kind === input.kind
-            && JSON.stringify(existing.input) === JSON.stringify(input.input)
+            && isDeepStrictEqual(existing.input, input.input)
             && existing.targetAgentId === input.targetAgentId;
           if (!same) {
             throw new RepositoryError("conflict", "The request key was already used with different work.");

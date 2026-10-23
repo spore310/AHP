@@ -1,9 +1,11 @@
 import { createServer } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { createStaticTokenAuthenticator } from "@agents";
 import { SESSION_URI_PREFIX } from "@sessions";
 import { createMockProvider } from "@sessions/mock";
 import { createAHPServer, type AHPServerHandle } from "@websocket";
+import { createMemoryPersistenceFixture } from "../persistence/conformance/helpers";
 
 const hosts: AHPServerHandle[] = [];
 const occupiers: ReturnType<typeof createServer>[] = [];
@@ -86,13 +88,23 @@ describe("AHP host composition", () => {
       });
     });
 
+    const persistenceFixture = createMemoryPersistenceFixture();
+    const disposePersistence = vi.fn(() => persistenceFixture.provider.dispose());
     const host = createAHPServer({
       host: "127.0.0.1",
       port,
       sessions: { providers: [createMockProvider()] },
+      agentWork: {
+        authenticator: createStaticTokenAuthenticator(new Map([["test-token", "test-principal"]])),
+        registrations: persistenceFixture.provider.registrations,
+        work: persistenceFixture.provider.work,
+        allowedKinds: new Set(["test.kind"]),
+        dispose: disposePersistence,
+      },
     });
     hosts.push(host);
     await expect(host.start()).rejects.toThrow();
+    expect(disposePersistence).toHaveBeenCalledOnce();
     await new Promise<void>((resolve, reject) => {
       occupier.close((error) => {
         if (error) {

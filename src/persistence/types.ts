@@ -99,8 +99,9 @@ export interface WorkItemRecord {
 export interface WorkRepository {
   /**
    * Inserts the session projection if needed, then inserts one idempotent work
-   * row. A repeated key with the same immutable payload returns the existing ID;
-   * a changed payload raises a conflict.
+   * row. A repeated key with the same JSON value returns the existing ID; a
+   * changed value raises a conflict. Object key order does not affect equality;
+   * array order does.
    */
   submit(input: WorkSubmitInput): Promise<{ readonly id: string; readonly created: boolean }>;
   claim(input: WorkClaimInput): Promise<WorkLeaseRecord | null>;

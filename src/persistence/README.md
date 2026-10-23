@@ -45,6 +45,8 @@ cached and does not reopen the facade. Hung operations have no forced timeout.
 Work submission owns its atomic unit. `work.submit(input)` inserts/ensures the
 session projection and the work row within the adapter's one coherent operation.
 Callers must not replace that operation with separate session and work writes.
+An idempotent replay compares the immutable JSON value: object key order is
+irrelevant, while array order remains significant.
 
 ## Selecting an adapter
 

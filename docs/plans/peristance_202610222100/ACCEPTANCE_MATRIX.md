@@ -66,10 +66,10 @@ separate explicit authorization and a dedicated test database are available.
 | T06 | Tests | Real expiry/reclaim rejects old token and preserves retry limit. | Authorized DB-clock test; otherwise BLOCKED. | P11 | BLOCKED — separate DB authorization |
 | T07 | Tests | Final neutral dependency graph is vendor free. | Import graph test plus manual search; adapter tests/selection exception explicit. | P11 | PASS — fresh root/domain import sentinel and source scan |
 | T08 | Tests | Never equate fake/test existence/skipped real cases with DB proof. | Evidence report names each test category and actual status. | P11 | PASS — handoff separates fake, query-double, and blocked real DB evidence |
-| T09 | Validation | Pinned toolchain full gate passes for final candidate or blockers are explicit. | pnpm validate, diff check and sanitized logs. | P12 | PASS — pnpm validate and diff check |
-| R01 | Review | Architecture pass examines exact final candidate and consumers. | Findings, source references, independence label and verdict. | P13 | NOT RUN |
-| R02 | Review | Correctness pass attacks transaction/lifecycle/lease boundaries. | Counterexamples and evidence, not a repeated summary. | P13 | NOT RUN |
-| R03 | Review | Repairs invalidate affected evidence; final report separates DB gate. | Targeted reruns and final candidate identity. | P13 | NOT RUN |
+| T09 | Validation | Pinned toolchain full gate passes for final candidate or blockers are explicit. | pnpm validate, diff check and sanitized logs. | P12 | PASS — final repaired candidate: 52 files / 407 tests; docs:check and build passed |
+| R01 | Review | Architecture pass examines exact final candidate and consumers. | Findings, source references, independence label and verdict. | P13 | PASS — sequential self-review; allowlist finding fixed and verified |
+| R02 | Review | Correctness pass attacks transaction/lifecycle/lease boundaries. | Counterexamples and evidence, not a repeated summary. | P13 | PASS — sequential self-review; conformance and cleanup gaps fixed |
+| R03 | Review | Repairs invalidate affected evidence; final report separates DB gate. | Targeted reruns and final candidate identity. | P13 | PASS — focused rerun and final pnpm validate; real DB stays blocked |
 
 ## Hardest counterexamples
 

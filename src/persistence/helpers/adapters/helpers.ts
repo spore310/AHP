@@ -26,6 +26,9 @@ export const createConfiguredPersistenceProvider = async (
   selection: PersistenceSelection,
 ): Promise<PersistenceProvider> => {
   const name = selection.provider ?? "postgres";
+  if (!Object.prototype.hasOwnProperty.call(loaders, name)) {
+    throw new Error("The configured persistence provider is not supported.");
+  }
   const loader = loaders[name];
   if (loader === undefined) {
     throw new Error("The configured persistence provider is not supported.");
