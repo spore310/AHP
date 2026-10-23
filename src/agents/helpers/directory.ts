@@ -2,7 +2,7 @@ import type {
   AgentRegistrationRecord,
   AgentRegistrationRepository,
 } from "@persistence/types";
-import { isPortableText } from "@persistence/helpers/text";
+import { isPortableText } from "@persistence";
 
 import { DEFAULT_PRESENCE_TTL_MS } from "../constants";
 import type {

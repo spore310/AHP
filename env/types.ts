@@ -18,11 +18,10 @@ export const envSchema = z.object({
     .min(1, "must be at least 1")
     .max(65535, "must be at most 65535")
     .default(12345),
-  /**
-   * Optional PostgreSQL connection string. Agent registration and durable work
-   * are disabled unless this and at least one auth token are configured.
-   */
+  /** Connection string consumed by the selected persistence adapter. */
   AGENT_HOSTING_PROTOCOL_DATABASE_URL: z.string().min(1).optional(),
+  /** Optional provider selector; the adapter registry owns supported names. */
+  AGENT_HOSTING_PROTOCOL_PERSISTENCE_PROVIDER: z.string().min(1).optional(),
   /**
    * JSON object mapping bearer tokens to trusted principal subjects. Never log
    * this value. Example: {"token-a":"alice","token-b":"bob"}.

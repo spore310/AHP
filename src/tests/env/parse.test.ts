@@ -1,7 +1,26 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { loadEnv, parseAllowedKinds, parseAuthTokens } from "@env";
 import { createAgentWorkOptions } from "../../index";
+
+const { selectProvider, providerDispose, provider } = vi.hoisted(() => {
+  const providerDispose = vi.fn(async () => undefined);
+  const provider = {
+    registrations: { register: async () => { throw new Error("unused"); }, getById: async () => undefined },
+    sessions: { ensure: async () => { throw new Error("unused"); }, get: async () => undefined, delete: async () => false },
+    work: {
+      submit: async () => { throw new Error("unused"); }, claim: async () => null, renew: async () => null,
+      complete: async () => false, fail: async () => null, cancel: async () => null, get: async () => null,
+      reconcileExpired: async () => 0, hasDependentWork: async () => false,
+    },
+    dispose: providerDispose,
+  };
+  return { selectProvider: vi.fn(async () => provider), providerDispose, provider };
+});
+
+vi.mock("@persistence/helpers/adapters", () => ({
+  createConfiguredPersistenceProvider: selectProvider,
+}));
 
 describe("compound environment values", () => {
   it("parses a token map and trims subjects", () => {
@@ -44,22 +63,33 @@ describe("compound environment values", () => {
 });
 
 describe("agent/work composition", () => {
-  it("is disabled when neither database nor tokens are configured", () => {
-    expect(createAgentWorkOptions(loadEnv({}))).toBeUndefined();
+  it("is disabled when neither database nor tokens are configured", async () => {
+    await expect(createAgentWorkOptions(loadEnv({}))).resolves.toBeUndefined();
+    expect(selectProvider).not.toHaveBeenCalled();
   });
 
-  it("fails closed on a partial configuration", () => {
-    expect(() => createAgentWorkOptions(loadEnv({
+  it("rejects a selector without durable feature configuration", async () => {
+    await expect(createAgentWorkOptions(loadEnv({
+      AGENT_HOSTING_PROTOCOL_PERSISTENCE_PROVIDER: "postgres",
+    }))).rejects.toThrow(/PERSISTENCE_PROVIDER/);
+    expect(selectProvider).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on a partial configuration", async () => {
+    await expect(createAgentWorkOptions(loadEnv({
       AGENT_HOSTING_PROTOCOL_DATABASE_URL: "postgresql://example.invalid/ahp",
-    }))).toThrow(/AGENT_HOSTING_PROTOCOL_DATABASE_URL/);
+    }))).rejects.toThrow(/AGENT_HOSTING_PROTOCOL_DATABASE_URL/);
 
-    expect(() => createAgentWorkOptions(loadEnv({
+    await expect(createAgentWorkOptions(loadEnv({
       AGENT_HOSTING_PROTOCOL_AUTH_TOKENS: "{\"token\":\"alice\"}",
-    }))).toThrow(/AGENT_HOSTING_PROTOCOL_AUTH_TOKENS/);
+    }))).rejects.toThrow(/AGENT_HOSTING_PROTOCOL_AUTH_TOKENS/);
+    expect(selectProvider).not.toHaveBeenCalled();
   });
 
-  it("wires the optional extension and releases its pool", async () => {
-    const options = createAgentWorkOptions(loadEnv({
+  it("wires the optional extension through the selected provider and disposes it", async () => {
+    selectProvider.mockClear();
+    providerDispose.mockClear();
+    const options = await createAgentWorkOptions(loadEnv({
       AGENT_HOSTING_PROTOCOL_DATABASE_URL: "postgresql://ahp:ahp@127.0.0.1:1/ahp",
       AGENT_HOSTING_PROTOCOL_AUTH_TOKENS: "{\"token\":\"alice\"}",
       AGENT_HOSTING_PROTOCOL_PRESENCE_TTL_SECONDS: "30",
@@ -69,6 +99,40 @@ describe("agent/work composition", () => {
     expect(options).toBeDefined();
     expect(options?.presenceTtlMs).toBe(30_000);
     expect([...(options?.allowedKinds ?? [])]).toEqual(["code.patch"]);
+    expect(selectProvider).toHaveBeenCalledWith({
+      provider: undefined,
+      options: {
+        url: "postgresql://ahp:ahp@127.0.0.1:1/ahp",
+        workLeaseSeconds: 60,
+      },
+    });
     await options?.dispose?.();
+    expect(providerDispose).toHaveBeenCalledOnce();
+  });
+
+  it("passes an explicit provider selector to the allowlisted loader", async () => {
+    selectProvider.mockClear();
+    const options = await createAgentWorkOptions(loadEnv({
+      AGENT_HOSTING_PROTOCOL_DATABASE_URL: "postgresql://example/ahp",
+      AGENT_HOSTING_PROTOCOL_AUTH_TOKENS: "{\"token\":\"alice\"}",
+      AGENT_HOSTING_PROTOCOL_PERSISTENCE_PROVIDER: "postgres",
+    }));
+    expect(selectProvider).toHaveBeenCalledWith(expect.objectContaining({ provider: "postgres" }));
+    await options?.dispose?.();
+  });
+
+  it("disposes an acquired provider when facade composition fails", async () => {
+    providerDispose.mockClear();
+    selectProvider.mockResolvedValueOnce({
+      ...provider,
+      get registrations(): typeof provider.registrations {
+        throw new Error("composition failed");
+      },
+    });
+    await expect(createAgentWorkOptions(loadEnv({
+      AGENT_HOSTING_PROTOCOL_DATABASE_URL: "postgresql://example/ahp",
+      AGENT_HOSTING_PROTOCOL_AUTH_TOKENS: "{\"token\":\"alice\"}",
+    }))).rejects.toThrow("composition failed");
+    expect(providerDispose).toHaveBeenCalledOnce();
   });
 });

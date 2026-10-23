@@ -14,8 +14,8 @@ task-local proof only.
 | P06 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ `f04be7a` | [handoffs/P06.md](handoffs/P06.md) · selection/provider tests | Codex GPT-6 | None |
 | P07 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ `6d6dfc2` | [handoffs/P07.md](handoffs/P07.md) · lifecycle tests | Codex GPT-6 | None |
 | P08 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ `a5765ea` | [handoffs/P08.md](handoffs/P08.md) · facade/lifecycle/adapter tests | Codex GPT-6 | Root barrel has compatibility exports until P10 |
-| P09 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ pending P09 commit | [handoffs/P09.md](handoffs/P09.md) · domain/wire tests | Codex GPT-6 | None |
-| P10 | NOT STARTED | — | — | — | — |
+| P09 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ `04338d5` | [handoffs/P09.md](handoffs/P09.md) · domain/wire tests | Codex GPT-6 | None |
+| P10 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ pending P10 commit | [handoffs/P10.md](handoffs/P10.md) · composition/boundary tests | Codex GPT-6 | None |
 | P11 | NOT STARTED | — | — | — | — |
 | P12 | NOT STARTED | — | — | — | — |
 | P13 | NOT STARTED | — | — | — | — |

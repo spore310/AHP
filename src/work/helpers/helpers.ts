@@ -1,5 +1,5 @@
 import { RepositoryError as PersistenceError } from "@persistence/types";
-import { hasPortableTextTree, isPortableText } from "@persistence/helpers/text";
+import { hasPortableTextTree, isPortableText } from "@persistence";
 import type {
   AuthorizedAgentContext,
   SessionOwnerRegistry,

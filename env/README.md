@@ -17,6 +17,11 @@ building the server. See [`src/README.md`](../src/README.md).
 | `parse.ts` | `parseAuthTokens` and `parseAllowedKinds`: validate compound values without echoing secrets. |
 | `index.ts` | Public surface: `loadEnv`, `envSchema`, `EnvConfig`, and the compound parsers. |
 
+The provider selector is an optional string. This neutral environment module
+does not define database-specific provider names; the persistence adapter
+registry owns that allowlist and resolves the omitted value to its compatibility
+default only when durable agent/work features are enabled.
+
 ## API
 
 - `envSchema` — Zod object for the environment.
@@ -36,7 +41,8 @@ Declared keys:
 | --- | ---- | ------- | ----- |
 | `AGENT_HOSTING_PROTOCOL_WEBSOCKET_HOST` | non-empty string | `127.0.0.1` | Bind interface. |
 | `AGENT_HOSTING_PROTOCOL_WEBSOCKET_PORT` | integer `1`–`65535` | `12345` | Coerced from the string form. |
-| `AGENT_HOSTING_PROTOCOL_DATABASE_URL` | non-empty string | unset | PostgreSQL connection string. Required with auth tokens to enable durable agent/work features. |
+| `AGENT_HOSTING_PROTOCOL_DATABASE_URL` | non-empty string | unset | Connection string consumed by the selected adapter. Required with auth tokens to enable durable agent/work features. |
+| `AGENT_HOSTING_PROTOCOL_PERSISTENCE_PROVIDER` | non-empty string | unset | Optional adapter selector. Supported names are owned by the allowlisted adapter registry; omitted selects the compatibility default when durable features are enabled. |
 | `AGENT_HOSTING_PROTOCOL_AUTH_TOKENS` | JSON object string | unset | Bearer token → trusted principal subject. Never log this value. |
 | `AGENT_HOSTING_PROTOCOL_PRESENCE_TTL_SECONDS` | integer `5`–`600` | `90` | In-memory presence lifetime. |
 | `AGENT_HOSTING_PROTOCOL_WORK_LEASE_SECONDS` | integer `5`–`3600` | `60` | Work lease lifetime, evaluated by the database clock. |
@@ -85,7 +91,8 @@ const config = loadEnv({
   non-loopback interface is a deliberate configuration choice.
 - **Agent/work configuration is all-or-nothing.** Supplying only the database
   URL or only auth tokens is a startup error. Supplying neither leaves the
-  baseline host unchanged and does not register the extension methods.
+  baseline host unchanged and does not register the extension methods. A
+  provider selector without both values is also a startup error.
 - **Token maps are secrets.** `parseAuthTokens` reports shape errors only; it
   never includes a token or subject in the message.
 

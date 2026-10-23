@@ -3,8 +3,7 @@ import { z } from "zod";
 
 import { AgentDirectoryError, type AgentDirectory, type AuthenticatedPrincipal, type PresenceBinding } from "@agents";
 import { RpcError } from "@jsonrpc";
-import { RepositoryError } from "@persistence/types";
-import { hasPortableTextTree, isPortableText } from "@persistence/helpers/text";
+import { hasPortableTextTree, isPortableText, RepositoryError } from "@persistence";
 import { sessionUriSchema } from "@sessions/types";
 import {
   WorkError,
