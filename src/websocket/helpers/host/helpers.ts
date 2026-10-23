@@ -1,7 +1,7 @@
 import type { AddressInfo } from "node:net";
 
 import { createAgentDirectory } from "@agents";
-import type { DurableSessionInput } from "@persistence";
+import type { DurableSessionInput } from "@persistence/types";
 import { createActionSequence, createSessionsFactory } from "@sessions";
 import type { SessionsFactory } from "@sessions/types";
 import { createSessionOwnerRegistry, createWorkService } from "@work";

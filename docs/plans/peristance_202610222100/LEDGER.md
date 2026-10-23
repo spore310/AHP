@@ -13,8 +13,8 @@ task-local proof only.
 | P05 | DONE / VERIFIED FOR PACKET | working tree @ `6bd3c5e` (adapter work repository module; uncommitted) | [handoffs/P05.md](handoffs/P05.md) · [../src/tests/persistence/adapters/postgres/workItems.test.ts](../../../src/tests/persistence/adapters/postgres/workItems.test.ts) | GLM 5.3 Flash writer | None (work adapters consume `ensureSession`/`QueryableClient`; verify per packet) |
 | P06 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ `f04be7a` | [handoffs/P06.md](handoffs/P06.md) · selection/provider tests | Codex GPT-6 | None |
 | P07 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ `6d6dfc2` | [handoffs/P07.md](handoffs/P07.md) · lifecycle tests | Codex GPT-6 | None |
-| P08 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ pending P08 commit | [handoffs/P08.md](handoffs/P08.md) · facade/lifecycle/adapter tests | Codex GPT-6 | Root barrel has compatibility exports until P10 |
-| P09 | NOT STARTED | — | — | — | — |
+| P08 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ `a5765ea` | [handoffs/P08.md](handoffs/P08.md) · facade/lifecycle/adapter tests | Codex GPT-6 | Root barrel has compatibility exports until P10 |
+| P09 | DONE / VERIFIED FOR PACKET | `agentIdentity` @ pending P09 commit | [handoffs/P09.md](handoffs/P09.md) · domain/wire tests | Codex GPT-6 | None |
 | P10 | NOT STARTED | — | — | — | — |
 | P11 | NOT STARTED | — | — | — | — |
 | P12 | NOT STARTED | — | — | — | — |

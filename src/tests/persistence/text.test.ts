@@ -3,8 +3,6 @@ import { describe, expect, it } from "vitest";
 import { parseUnknownJson } from "@jsonrpc";
 import {
   hasPortableTextTree,
-  isJsonbSafe,
-  isJsonbSafeText,
   isPortableText,
 } from "@persistence/helpers/text";
 
@@ -36,7 +34,6 @@ describe("portable-text profile v1 — isPortableText", () => {
     expect(isPortableText("a\ud800Z")).toBe(false); // high rejected even when followed by non-low
   });
 });
-
 describe("portable-text profile v1 — hasPortableTextTree", () => {
   it("accepts ASCII and valid surrogate pairs nested in arrays and objects", () => {
     expect(hasPortableTextTree({ outer: [{ inner: "plain" }] })).toBe(true);
@@ -100,26 +97,5 @@ describe("portable-text profile v1 — hasPortableTextTree", () => {
     expect(hasPortableTextTree("ok", 511)).toBe(true);
     expect(hasPortableTextTree("ok", 512)).toBe(true);
     expect(hasPortableTextTree("ok", 513)).toBe(false);
-  });
-});
-
-describe("portable-text profile v1 — temporary legacy aliases", () => {
-  it("keeps isJsonbSafeText behavior identical to isPortableText", () => {
-    for (const sample of ["plain", "a\u0000b", "\ud800", "\udc00", "\ud834\udd1e"]) {
-      expect(isJsonbSafeText(sample)).toBe(isPortableText(sample));
-    }
-  });
-
-  it("keeps isJsonbSafe depth semantics identical to hasPortableTextTree", () => {
-    for (const [sample, expected] of [
-      [{ key: "\ud83c\udf89" }, true],
-      [{ key: "\u0000" }, false],
-      [wrap("leaf", 512), true],
-      [wrap("leaf", 513), false],
-      [parseUnknownJson(String.raw`{"a\u0000b": 1}`), false],
-    ] as [unknown, boolean][]) {
-      expect(isJsonbSafe(sample)).toBe(expected);
-      expect(isJsonbSafe(sample)).toBe(hasPortableTextTree(sample));
-    }
   });
 });

@@ -1,5 +1,5 @@
 import { RepositoryError as PersistenceError } from "@persistence/types";
-import { isJsonbSafe, isJsonbSafeText } from "@persistence/helpers/text";
+import { hasPortableTextTree, isPortableText } from "@persistence/helpers/text";
 import type {
   AuthorizedAgentContext,
   SessionOwnerRegistry,
@@ -28,8 +28,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === "object" && value !== null && !Array.isArray(value)
 );
 
-/** JSONB-safety predicates live with the persistence contracts. */
-export { isJsonbSafe };
+/** Portable-text predicates are shared application validation policy. */
+export { hasPortableTextTree };
 
 const boundedJsonBytes = (value: unknown, label: string, limit: number): void => {
   let serialized: string;
@@ -41,8 +41,8 @@ const boundedJsonBytes = (value: unknown, label: string, limit: number): void =>
   if (Buffer.byteLength(serialized, "utf8") > limit) {
     throw new WorkError("invalid", `${label} exceeds the size limit.`);
   }
-  if (!isJsonbSafe(value)) {
-    throw new WorkError("invalid", `${label} contains text JSONB cannot store.`);
+  if (!hasPortableTextTree(value)) {
+    throw new WorkError("invalid", `${label} contains unsupported text.`);
   }
 };
 
@@ -76,14 +76,14 @@ const assertSubmission = (
   if (typeof submission.sessionUri !== "string"
     || submission.sessionUri.length === 0
     || submission.sessionUri.length > MAX_SESSION_URI_LENGTH
-    || !isJsonbSafeText(submission.sessionUri)) {
+    || !isPortableText(submission.sessionUri)) {
     throw new WorkError("invalid", "A session URI is required.");
   }
   if (typeof submission.requestKey !== "string"
     || submission.requestKey.length === 0
     || submission.requestKey.trim().length === 0
     || submission.requestKey.length > MAX_REQUEST_KEY_LENGTH
-    || !isJsonbSafeText(submission.requestKey)) {
+    || !isPortableText(submission.requestKey)) {
     throw new WorkError("invalid", "A bounded request key is required.");
   }
   if (typeof submission.kind !== "string"
@@ -191,8 +191,8 @@ export const createWorkService = (options: WorkServiceOptions): WorkService => {
         throw new WorkError("unauthorized", "The session belongs to another principal.");
       }
       // The durable projection inside the write carries client-reachable state,
-      // so it passes the same JSONB-safety gate as the submission payload.
-      if (!isJsonbSafe(live.durableState)) {
+      // so it passes the same portable-text gate as the submission payload.
+      if (!hasPortableTextTree(live.durableState)) {
         throw new WorkError("invalid", "The session projection cannot be stored as JSON.");
       }
       if (submission.targetAgentId !== undefined) {
@@ -256,7 +256,7 @@ export const createWorkService = (options: WorkServiceOptions): WorkService => {
       if (typeof sessionUri !== "string"
         || sessionUri.length === 0
         || sessionUri.length > MAX_SESSION_URI_LENGTH
-        || !isJsonbSafeText(sessionUri)) {
+        || !isPortableText(sessionUri)) {
         throw new WorkError("invalid", "A session URI is required.");
       }
       try {
@@ -388,7 +388,7 @@ export const createWorkService = (options: WorkServiceOptions): WorkService => {
       // The dispose channel reaches the dependent-work lookup as a TEXT
       // parameter; bytes PostgreSQL cannot store as text must fail typed here,
       // as the submit/claim gates already do at this boundary.
-      if (typeof sessionUri !== "string" || !isJsonbSafeText(sessionUri)) {
+      if (typeof sessionUri !== "string" || !isPortableText(sessionUri)) {
         throw new WorkError("invalid", "A session URI is required.");
       }
       try {

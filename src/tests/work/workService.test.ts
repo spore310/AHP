@@ -220,7 +220,7 @@ describe("work service", () => {
     })).rejects.toMatchObject({ code: "invalid" });
   });
 
-  it("rejects input carrying PostgreSQL-JSONB-unsafe text", async () => {
+  it("rejects input carrying text outside the portable-text profile", async () => {
     const { service } = createFakes();
     await expect(service.submit(principal, {
       sessionUri: session.sessionUri,
@@ -320,7 +320,7 @@ describe("work service", () => {
       .rejects.toMatchObject({ code: "invalid" });
   });
 
-  it("refuses a durable projection JSONB cannot store", async () => {
+  it("refuses a durable projection outside the portable-text profile", async () => {
     const { service } = createFakes({
       describeSession: (sessionUri) => (sessionUri === session.sessionUri
         ? { ...session, durableState: { workingDirectories: ["a\u0000b"] } }
@@ -455,7 +455,7 @@ describe("work service", () => {
     expect(hasDependentWork).toHaveBeenCalledWith(session.sessionUri);
   });
 
-  it("refuses a durable projection nested beyond the JSONB-safety depth budget", async () => {
+  it("refuses a durable projection nested beyond the portable-text depth budget", async () => {
     let deep: Record<string, unknown> = { leaf: true };
     for (let index = 0; index < 600; index += 1) {
       deep = { a: deep };

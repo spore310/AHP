@@ -3,12 +3,11 @@ import { z } from "zod";
 
 import { AgentDirectoryError, type AgentDirectory, type AuthenticatedPrincipal, type PresenceBinding } from "@agents";
 import { RpcError } from "@jsonrpc";
-import { RepositoryError } from "@persistence";
-import { isJsonbSafeText } from "@persistence/helpers/text";
+import { RepositoryError } from "@persistence/types";
+import { hasPortableTextTree, isPortableText } from "@persistence/helpers/text";
 import { sessionUriSchema } from "@sessions/types";
 import {
   WorkError,
-  isJsonbSafe,
   WORK_MAX_INPUT_BYTES,
   WORK_MAX_REQUEST_KEY_LENGTH,
   WORK_MAX_RESULT_BYTES,
@@ -46,24 +45,24 @@ export interface AgentWorkExtension {
 }
 
 const version = z.literal(1);
-const requiresStorableText = (value: string): boolean => isJsonbSafeText(value);
+const requiresPortableText = (value: string): boolean => isPortableText(value);
 const agentKey = z.string().min(1).max(128).refine(
   (value) => value.trim().length > 0,
   { message: "Agent key must not be blank" },
-).refine(requiresStorableText, {
-  message: "Agent key contains text JSONB cannot store",
+).refine(requiresPortableText, {
+  message: "Agent key contains unsupported characters",
 });
 const displayName = z.string().min(1).max(128).refine(
   (value) => value.trim().length > 0,
   { message: "Display name must not be blank" },
-).refine(requiresStorableText, {
-  message: "Display name contains text JSONB cannot store",
+).refine(requiresPortableText, {
+  message: "Display name contains unsupported characters",
 });
 const requestKey = z.string().min(1).max(WORK_MAX_REQUEST_KEY_LENGTH).refine(
   (value) => value.trim().length > 0,
   { message: "Request key must not be blank" },
-).refine(requiresStorableText, {
-  message: "Request key contains text JSONB cannot store",
+).refine(requiresPortableText, {
+  message: "Request key contains unsupported characters",
 });
 const workKind = z.string().min(1).max(128).refine(
   (value) => value.trim().length > 0,
@@ -80,7 +79,7 @@ const isPayloadInvalid = (value: unknown): boolean => (
   value === undefined
   || typeof value === "function"
   || typeof value === "symbol"
-  || !isJsonbSafe(value)
+  || !hasPortableTextTree(value)
 );
 
 const isBoundedInput = (value: unknown): boolean => {
@@ -122,8 +121,8 @@ const registerSchema = z.object({
 const renewSchema = z.object({ version }).strict();
 
 const boundedSessionUri = sessionUriSchema.max(2_048).refine(
-  (value) => isJsonbSafeText(value),
-  { message: "Session URI contains text JSONB cannot store" },
+  (value) => isPortableText(value),
+  { message: "Session URI contains unsupported characters" },
 );
 
 const submitSchema = z.object({

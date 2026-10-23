@@ -1,7 +1,7 @@
 import type { AddressInfo } from "node:net";
 
 import type { ConnectionAuthenticator } from "@agents";
-import type { AgentRegistrationRepository, WorkRepository } from "@persistence";
+import type { AgentRegistrationRepository, WorkRepository } from "@persistence/types";
 import type { SessionsFactory, SessionsFactoryOptions } from "@sessions/types";
 
 /**

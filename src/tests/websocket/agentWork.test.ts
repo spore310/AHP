@@ -601,7 +601,7 @@ describe("agent work extension work replies", () => {
     expect(work.submitted).toHaveLength(1);
   });
 
-  it("rejects payloads nested beyond the JSONB depth budget before the service runs", async () => {
+  it("rejects payloads nested beyond the portable-text depth budget before the service runs", async () => {
     const { work, extension } = setup();
     const alice = contextFor("connection-1", "alice");
     await registerAgent(extension, alice);

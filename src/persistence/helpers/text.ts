@@ -2,11 +2,9 @@
  * Portable-text profile v1 — pure predicates for text every owned store can
  * encode.
  *
- * A NUL code unit fails TEXT and JSONB storage, and an unpaired surrogate
- * cannot be encoded as UTF-8. Service and wire validation run these
- * predicates before any persistence call so such inputs surface as typed
- * domain failures instead of unclassified storage errors. NUL rejection is an
- * owned application interoperability policy, not a universal JSON rule.
+ * NUL code units and unpaired surrogates are excluded by this application's
+ * cross-store interoperability policy. Service and wire validation run these
+ * predicates before persistence calls; this is not a universal JSON rule.
  */
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -34,7 +32,6 @@ export const isPortableText = (text: string): boolean => {
   }
   return true;
 };
-
 /**
  * Maximum nesting level the portability recursion inspects before rejecting.
  *
@@ -72,16 +69,3 @@ export const hasPortableTextTree = (value: unknown, depth = 0): boolean => {
     ([key, item]) => isPortableText(key) && hasPortableTextTree(item, depth + 1),
   );
 };
-
-/**
- * TEMPORARY — JSONB-named legacy aliases kept only for build continuity while
- * P09 migrates their four production consumers
- * (`agents/helpers/directory.ts`, `work/helpers/helpers.ts`,
- * `websocket/helpers/ahp/agentWork.ts`, and the `@work` public re-export).
- * Behavior is identical to the neutral names above. **Must be deleted in
- * P09**; they must not appear in the final public API. (Not tagged
- * `@deprecated` on purpose: that marker would fail lint on consumers this
- * packet does not own.)
- */
-export const isJsonbSafeText = isPortableText;
-export const isJsonbSafe = hasPortableTextTree;
