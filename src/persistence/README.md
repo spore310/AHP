@@ -13,10 +13,11 @@ from the reducer or WebSocket callbacks. SQL source of truth lives under
 | `helpers/adapters/` | Allowlisted, lazy configured-provider selection; the common persistence root does not import a concrete adapter. |
 | `helpers/adapters/postgres/` | PostgreSQL provider construction and adapter-owned pool lifecycle. |
 | `helpers/lifecycle/` | Shared admission, operation tracking, error normalization, and terminal disposal support. |
-| `helpers/pool.ts` | `createPostgresPool`, `withTransaction`, timestamp normalization, and PostgreSQL error classification. |
-| `helpers/agentRegistrations.ts` | `createPostgresAgentRegistrationRepository`: idempotent `(principal, agentKey)` registration and lookup. |
-| `helpers/sessions.ts` | `ensureSession` plus `createPostgresDurableSessionRepository`: lazy session projection, owner enforcement, and FK-aware deletion. |
-| `helpers/workItems.ts` | `createPostgresWorkRepository`: idempotent submit, atomic claim/reclaim, fenced renew/complete/fail/cancel/get, expiry reconciliation, and dependent-work checks. |
+| `helpers/pool.ts` | Temporary legacy PostgreSQL compatibility implementation; scheduled for removal after process composition migrates in P10. |
+| `helpers/agentRegistrations.ts` | Neutral registration repository facade; operation admission is shared with every namespace. |
+| `helpers/sessions.ts` | Neutral durable-session repository facade. |
+| `helpers/workItems.ts` | Neutral work repository facade; atomicity remains inside each adapter operation. |
+| `helpers/provider/` | `createPersistence`: joins repository facades behind one operation lifecycle and disposer. |
 | `helpers/text.ts` | Pure storage-shape predicates: JSONB-safe text (NUL and unpaired-surrogate rejection) and recursive JSONB safety including object keys, bounded by an explicit 512-level depth budget so a deeply nested payload fails with a typed value error instead of relying on the engine's stack safety. |
 | `index.ts` | Public surface for all ports and adapters. |
 
