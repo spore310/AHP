@@ -627,4 +627,38 @@ describe("agent work extension work replies", () => {
     }, alice)).rejects.toBeInstanceOf(ZodError);
     expect(work.calls).toHaveLength(0);
   });
+
+  it("pins the wire depth boundary at 512 levels accepted and 513 refused", async () => {
+    // The literal boundary pins the shared text helper's budget at the wire:
+    // these numbers and the READMEs' "512-level" wording must move together.
+    const { sessionOwners, work, extension } = setup();
+    const alice = contextFor("connection-1", "alice");
+    await registerAgent(extension, alice);
+    sessionOwners.bind(SESSION_URI, "alice");
+    const ladder = (levels: number): Record<string, unknown> => {
+      let value: Record<string, unknown> = { leaf: true };
+      for (let index = 0; index < levels; index += 1) {
+        value = { a: value };
+      }
+      return value;
+    };
+
+    await invoke(extension, WORK_SUBMIT_METHOD, {
+      version: 1,
+      sessionUri: SESSION_URI,
+      requestKey: "boundary-512",
+      kind: WORK_KIND,
+      input: ladder(512),
+    }, alice);
+    expect(work.calls).toEqual(["submit"]);
+
+    await expect(invoke(extension, WORK_SUBMIT_METHOD, {
+      version: 1,
+      sessionUri: SESSION_URI,
+      requestKey: "boundary-513",
+      kind: WORK_KIND,
+      input: ladder(513),
+    }, alice)).rejects.toBeInstanceOf(ZodError);
+    expect(work.calls).toEqual(["submit"]);
+  });
 });

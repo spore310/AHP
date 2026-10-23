@@ -408,10 +408,12 @@ export const createAHPBinding = (
       await factory.createSession(params, onRecordCreated);
       if (parsed.success && sessionOwners !== undefined) {
         // The creation is still the caller's to own only if the live record
-        // survived and its binding is still theirs; a late-detached
+        // survived and its binding is not another principal's; a late-detached
         // resolution (record gone while the backend was starting) or a URI now
-        // owned by a successor answers conflict rather than a success the
-        // caller could then rely on.
+        // owned by a foreign successor answers conflict rather than a success
+        // the caller could then rely on. A same-principal successor attach
+        // resolves success under one identity — the deferred same-owner
+        // residual documented in `src/work/README.md`.
         const owner = sessionOwners.owner(parsed.data.channel);
         const ownedByCaller = principal === undefined
           ? owner === undefined

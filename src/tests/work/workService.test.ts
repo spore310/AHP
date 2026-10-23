@@ -477,4 +477,46 @@ describe("work service", () => {
     });
     expect(submit).not.toHaveBeenCalled();
   });
+
+  it("pins the durable-projection depth boundary at 512 accepted and 513 refused", async () => {
+    // The literal boundary pins the text helper's budget: these assertions and
+    // the module READMEs' "512-level" wording must move together, so an
+    // off-by-one comparator or a changed budget cannot ship silently.
+    const pinned = (levels: number): Record<string, unknown> => {
+      let value: Record<string, unknown> = { leaf: true };
+      for (let index = 0; index < levels; index += 1) {
+        value = { a: value };
+      }
+      return value;
+    };
+
+    const atBoundary = createFakes({
+      describeSession: (sessionUri) => (sessionUri === session.sessionUri
+        ? { ...session, durableState: pinned(512) }
+        : undefined),
+    });
+    await expect(atBoundary.service.submit(principal, {
+      sessionUri: session.sessionUri,
+      requestKey: "boundary-512",
+      kind: "code.patch",
+      input: {},
+    })).resolves.toMatchObject({ id: "work-1" });
+    expect(atBoundary.submit).toHaveBeenCalledTimes(1);
+
+    const oneBelow = createFakes({
+      describeSession: (sessionUri) => (sessionUri === session.sessionUri
+        ? { ...session, durableState: pinned(513) }
+        : undefined),
+    });
+    await expect(oneBelow.service.submit(principal, {
+      sessionUri: session.sessionUri,
+      requestKey: "boundary-513",
+      kind: "code.patch",
+      input: {},
+    })).rejects.toMatchObject({
+      code: "invalid",
+      message: "The session projection cannot be stored as JSON.",
+    });
+    expect(oneBelow.submit).not.toHaveBeenCalled();
+  });
 });

@@ -59,9 +59,11 @@ client-connection adapter; see
 
 `createSessionsFactory(options)` returns a `SessionsFactory`:
 
-- `createSession(params: unknown): Promise<void>` — validate, register, emit
-  `root/sessionAdded`, then settle with `session/ready` or
-  `session/creationFailed`.
+- `createSession(params, onRecordCreated?): Promise<void>` — validate, register,
+  invoke the attach hook, emit `root/sessionAdded`, then settle with
+  `session/ready` or `session/creationFailed`. The optional hook fires
+  synchronously at the record-attach moment; the contract lives in
+  [`./createSession/README.md`](./createSession/README.md).
 - `getSessionSnapshot(sessionUri): SessionSnapshot | undefined`
 - `getSessionToolManifest(sessionUri): SessionToolManifest | undefined` — the
   visible tool contracts for a typed session. Missing and untyped sessions

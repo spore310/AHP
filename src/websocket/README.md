@@ -165,14 +165,18 @@ const server = createWebSocketServer({
 - **Session ownership binds at the record-attach moment.** The AHP
   `createSession` acquires the owner binding when the record is attached —
   before the catalogue broadcast and the backend start — and verifies at
-  resolution that the live record is still the caller's; a create whose record
-  is removed mid-start (its own disposal, or a same-principal successor attach)
-  answers typed Conflict ("The created session is no longer available.") and
-  never re-binds the URI. While a disposal is settling (binding held, record
-  gone), every create stays denied — on the AHP wire and on
+  resolution that the live record survived and is not owned by a different
+  principal. A create whose record was removed mid-start (its own disposal, or
+  the URI re-attached by a successor) answers typed Conflict ("The created
+  session is no longer available.") and never re-binds the URI; a
+  same-principal successor attach resolves success for both creates under one
+  identity — the deferred residual documented in `src/work/README.md`
+  ("Same-owner recreate residual"). While a disposal is settling (binding
+  held, record gone), every create stays denied — on the AHP wire and on
   `host.sessions.createSession` alike — until the settlement releases the
-  binding, and a custom owner registry whose `unbind` throws fails the disposal
-  loudly instead of silently keeping a binding no settlement will release.
+  binding, and a custom owner registry whose `unbind` throws fails the
+  disposal loudly instead of silently keeping a binding no settlement will
+  release.
 
 ## Testing
 
