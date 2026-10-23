@@ -17,6 +17,46 @@ from the reducer or WebSocket callbacks. SQL source of truth lives under
 | `helpers/text.ts` | Pure storage-shape predicates: JSONB-safe text (NUL and unpaired-surrogate rejection) and recursive JSONB safety including object keys, bounded by an explicit 512-level depth budget so a deeply nested payload fails with a typed value error instead of relying on the engine's stack safety. |
 | `index.ts` | Public surface for all ports and adapters. |
 
+## Provider contract
+
+`types.ts` additionally declares the shared provider shape:
+
+- `PersistenceRepositories` — `registrations`, `sessions`, and `work`
+  namespaces. A provider bundles repositories over the **same logical store
+  and ownership scope**; combining namespaces from different databases is not
+  a supported implementation.
+- `PersistenceProvider extends PersistenceRepositories` — adds exactly one
+  `dispose(): Promise<void>` and nothing else. The provider surface carries no
+  connection, query, transaction, or ORM mechanism; all driver behavior stays
+  behind it.
+
+`provider.work.submit(input)` owns its atomic unit: the session projection and
+the work row resolve inside one transactionally coherent operation (an
+adapter's internal transaction-local session ensure). The public
+`sessions.ensure` facade is never part of that unit.
+
+## Portable-text profile v1
+
+`helpers/text.ts` owns the neutral text policy: `isPortableText(text)` and
+`hasPortableTextTree(value, depth)` (depth budget `MAX_PORTABLE_TEXT_TREE_DEPTH
+= 512`; reject when depth exceeds it).
+
+- Rejecting NUL (and the unpaired-surrogate form that fails UTF-8 encoding) is
+  an **owned application interoperability policy** so accepted payloads stay
+  identical across stores. JSON itself can represent an escaped NUL; the
+  policy is not a universal JSON rule or a claim that every backend requires
+  it.
+- The tree predicate checks string values and object keys only. It is **not**
+  a complete JSON parser, schema validator, authorization check, or
+  arbitrary-object sanitizer; shape, byte-size, UUID, request-key, and
+  allowed-kind checks stay in their existing callers.
+- Store-specific encoding or storage checks (for example PostgreSQL casts) are
+  the concrete adapter's responsibility and may add stricter validation; the
+  generic policy is the shared floor, not a substitute.
+- The legacy names `isJsonbSafe`/`isJsonbSafeText` remain in `text.ts` as
+  temporary build-continuity aliases for the neutral functions; they are
+  listed for deletion in P09.
+
 ## API
 
 - `createPostgresPool({ connectionString, maxConnections? }): Pool` — the caller

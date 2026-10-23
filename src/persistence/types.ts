@@ -138,6 +138,24 @@ export interface WorkRepository {
   hasDependentWork(sessionUri: string): Promise<boolean>;
 }
 
+/**
+ * A complete provider bundles repositories over the **same logical store and
+ * ownership scope**. Combining `registrations` from one database with `work`
+ * from another is not a supported provider implementation. Work submission
+ * owns its atomic unit: `provider.work.submit(input)` resolves the session
+ * projection and the work row inside one transactionally coherent operation.
+ */
+export interface PersistenceRepositories {
+  readonly registrations: AgentRegistrationRepository;
+  readonly sessions: DurableSessionRepository;
+  readonly work: WorkRepository;
+}
+
+/** A complete, owned persistence backend with one disposal boundary. */
+export interface PersistenceProvider extends PersistenceRepositories {
+  dispose(): Promise<void>;
+}
+
 /** Stable, sanitized persistence failures. */
 export type RepositoryErrorCode = "conflict" | "not_found" | "unauthorized" | "database";
 
