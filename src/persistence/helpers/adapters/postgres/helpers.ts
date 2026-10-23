@@ -8,9 +8,9 @@ import type { PostgresOptions, PostgresWorkRepositoryOptions } from "./types";
 
 export interface PostgresPersistenceOptions extends PostgresOptions, PostgresWorkRepositoryOptions {}
 
-export const createPostgresPersistenceProvider = (
+export const createPostgresPersistenceProvider = async (
   options: PostgresPersistenceOptions,
-): PersistenceProvider => {
+): Promise<PersistenceProvider> => {
   if (typeof options.connectionString !== "string" || options.connectionString.length === 0
     || (options.maxConnections !== undefined
       && (!Number.isInteger(options.maxConnections) || options.maxConnections < 1))
@@ -32,7 +32,7 @@ export const createPostgresPersistenceProvider = (
       },
     };
   } catch (error) {
-    void pool.end().catch(() => undefined);
+    await pool.end().catch(() => undefined);
     throw error;
   }
 };

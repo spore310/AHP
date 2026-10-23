@@ -58,14 +58,14 @@ separate explicit authorization and a dedicated test database are available.
 | D02 | Docs | All new/relocated production source files are mapped. | pnpm docs:check. | P12 | NOT RUN |
 | D03 | Docs | Document source API migration and explicit adapter entrypoints. | Old imports absent from current examples; target plans labeled. | P12 | NOT RUN |
 | D04 | Docs | Database-specific DDL remains where it belongs and unchanged. | Migration diff/hash check; no automatic runner added. | P12 | NOT RUN |
-| T01 | Tests | Independent fake provider works without pg dependency. | Fresh isolated import and real service integration. | P11 | NOT RUN |
-| T02 | Tests | Two providers do not share records or disposal scope. | Same IDs in isolated fixtures, one disposed independently. | P11 | NOT RUN |
-| T03 | Tests | Conformance harness targets repository semantics, not SQL syntax. | Harness fixture API inspection; no Pool in common test contract. | P11 | NOT RUN |
+| T01 | Tests | Independent fake provider works without pg dependency. | Fresh isolated import and real service integration. | P11 | PASS — provider substitution and pg sentinel |
+| T02 | Tests | Two providers do not share records or disposal scope. | Same IDs in isolated fixtures, one disposed independently. | P11 | PASS — independent memory fixtures |
+| T03 | Tests | Conformance harness targets repository semantics, not SQL syntax. | Harness fixture API inspection; no Pool in common test contract. | P11 | PASS — `conformance/types.ts` and shared runner |
 | T04 | Tests | Real competing claims have one current claimant. | Authorized real PostgreSQL test with separate connections; otherwise BLOCKED. | P11 | BLOCKED — separate DB authorization |
 | T05 | Tests | Real transaction rollback leaves no partially submitted work/session. | Authorized failure injection against dedicated DB; otherwise BLOCKED. | P11 | BLOCKED — separate DB authorization |
 | T06 | Tests | Real expiry/reclaim rejects old token and preserves retry limit. | Authorized DB-clock test; otherwise BLOCKED. | P11 | BLOCKED — separate DB authorization |
-| T07 | Tests | Final neutral dependency graph is vendor free. | Import graph test plus manual search; adapter tests/selection exception explicit. | P11 | NOT RUN |
-| T08 | Tests | Never equate fake/test existence/skipped real cases with DB proof. | Evidence report names each test category and actual status. | P11 | NOT RUN |
+| T07 | Tests | Final neutral dependency graph is vendor free. | Import graph test plus manual search; adapter tests/selection exception explicit. | P11 | PASS — fresh root/domain import sentinel and source scan |
+| T08 | Tests | Never equate fake/test existence/skipped real cases with DB proof. | Evidence report names each test category and actual status. | P11 | PASS — handoff separates fake, query-double, and blocked real DB evidence |
 | T09 | Validation | Pinned toolchain full gate passes for final candidate or blockers are explicit. | pnpm validate, diff check and sanitized logs. | P12 | NOT RUN |
 | R01 | Review | Architecture pass examines exact final candidate and consumers. | Findings, source references, independence label and verdict. | P13 | NOT RUN |
 | R02 | Review | Correctness pass attacks transaction/lifecycle/lease boundaries. | Counterexamples and evidence, not a repeated summary. | P13 | NOT RUN |

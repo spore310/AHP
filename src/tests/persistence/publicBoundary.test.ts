@@ -10,6 +10,9 @@ describe("@persistence public boundary", () => {
     expect(persistence.RepositoryError).toBeDefined();
     expect(persistence.createPersistence).toBeDefined();
     expect(persistence.isPortableText).toBeDefined();
+    await import("@agents");
+    await import("@work");
+    await import("@websocket");
     vi.doUnmock("pg");
   });
 });

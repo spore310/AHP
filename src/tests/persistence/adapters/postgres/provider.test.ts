@@ -4,7 +4,7 @@ import { createPostgresPersistenceProvider } from "@persistence/helpers/adapters
 
 describe("PostgreSQL persistence provider", () => {
   it("exposes all repository namespaces and disposes its owned pool idempotently", async () => {
-    const provider = createPostgresPersistenceProvider({ connectionString: "postgres://localhost/unused" });
+    const provider = await createPostgresPersistenceProvider({ connectionString: "postgres://localhost/unused" });
     expect(provider.registrations).toBeDefined();
     expect(provider.sessions).toBeDefined();
     expect(provider.work).toBeDefined();
@@ -13,8 +13,8 @@ describe("PostgreSQL persistence provider", () => {
     await first;
   });
 
-  it("validates options before allocating a pool", () => {
-    expect(() => createPostgresPersistenceProvider({ connectionString: "", leaseTtlSeconds: 0 }))
-      .toThrow("Invalid PostgreSQL persistence options");
+  it("validates options before allocating a pool", async () => {
+    await expect(createPostgresPersistenceProvider({ connectionString: "", leaseTtlSeconds: 0 }))
+      .rejects.toThrow("Invalid PostgreSQL persistence options");
   });
 });

@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createPersistence } from "@persistence/helpers/provider";
-import type { PersistenceProvider } from "@persistence/types";
+import type {
+  AgentRegistrationRecord,
+  PersistenceProvider,
+  WorkSubmitInput,
+} from "@persistence/types";
 
 vi.mock("pg", () => {
   throw new Error("The neutral persistence facade evaluated pg.");
@@ -84,6 +88,12 @@ const makeProvider = () => {
   return { provider, calls };
 };
 
+const deferred = <TResult,>() => {
+  let resolve!: (value: TResult) => void;
+  const promise = new Promise<TResult>((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
+};
+
 describe("neutral persistence facade", () => {
   it("loads and uses the neutral facade without evaluating a driver", async () => {
     const { provider } = makeProvider();
@@ -140,5 +150,46 @@ describe("neutral persistence facade", () => {
       .resolves.toMatchObject({ id: "bound" });
     expect(invocations).toBe(1);
     await facade.dispose();
+  });
+
+  it("drains pending calls from multiple namespaces through the shared scope", async () => {
+    const { provider } = makeProvider();
+    const registration = deferred<AgentRegistrationRecord>();
+    const submission = deferred<{ readonly id: string; readonly created: boolean }>();
+    const pendingProvider: PersistenceProvider = {
+      ...provider,
+      registrations: { ...provider.registrations, register: () => registration.promise },
+      work: { ...provider.work, submit: (_input: WorkSubmitInput) => submission.promise },
+    };
+    const persistence = createPersistence(pendingProvider);
+    const registrationResult = persistence.registrations.register({ principalSubject: "p", agentKey: "a" });
+    const workResult = persistence.work.submit({
+      session: {
+        sessionUri: "session://pending",
+        ownerPrincipalSubject: "p",
+        providerId: "test",
+        createdAt: "2026-10-23T00:00:00.000Z",
+        modifiedAt: "2026-10-23T00:00:00.000Z",
+        lastServerSeq: 1,
+        durableState: {},
+      },
+      requestKey: "pending",
+      kind: "task",
+      input: {},
+    });
+    const disposal = persistence.dispose();
+    expect(provider.dispose).not.toHaveBeenCalled();
+    registration.resolve({
+      id: "registration-id",
+      principalSubject: "p",
+      agentKey: "a",
+      enabled: true,
+      createdAt: "2026-10-23T00:00:00.000Z",
+    });
+    submission.resolve({ id: "work-id", created: true });
+    await expect(registrationResult).resolves.toMatchObject({ id: "registration-id" });
+    await expect(workResult).resolves.toEqual({ id: "work-id", created: true });
+    await disposal;
+    expect(provider.dispose).toHaveBeenCalledOnce();
   });
 });

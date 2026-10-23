@@ -291,6 +291,16 @@ describe("postgres durable sessions — transaction-local ensureSession", () => 
 
     expect(double.calls.map((call) => call.text.trimStart().slice(0, 6))).toEqual(["INSERT"]);
     const inserted = callAt(double.calls, 0);
+    expect(inserted.text.replace(/\s+/g, " ").trim()).toBe(
+      "INSERT INTO sessions ( session_uri, session_type_id, provider_id, owner_principal_subject, "
+      + "created_at, modified_at, last_server_seq, durable_state ) "
+      + "VALUES ($1, $2::uuid, $3, $4, $5::timestamptz, $6::timestamptz, $7, $8::jsonb) "
+      + "ON CONFLICT (session_uri) DO NOTHING "
+      + "RETURNING session_uri, session_type_id, provider_id, owner_principal_subject, "
+      + "created_at, modified_at, last_server_seq, durable_state",
+    );
+    expect(double.connectCount()).toBe(0);
+    expect(double.calls.map((call) => call.surface)).toEqual(["client"]);
     expect(inserted.values[0]).toBe(SESSION_URI);
     expect(inserted.values[1]).toBe(null);
     expect(inserted.values[2]).toBe("ahp-mock");
