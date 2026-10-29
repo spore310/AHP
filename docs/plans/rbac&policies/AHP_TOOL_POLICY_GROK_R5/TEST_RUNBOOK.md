@@ -119,3 +119,47 @@ A final HEAD alone is insufficient when relevant files are uncommitted.
 Source checks, typecheck, fake-adapter tests, loopback SDK tests, real external
 integration and production behavior are different evidence categories. Only claim
 what was actually exercised. Existing persistence test reports remain historical.
+
+## 9. Public execution acceptance additions
+
+Required by the execution goal; these are target checks, not implemented evidence.
+P12 owns X05 (a client invokes its own supplied tool) and X06 (client A invokes
+distinct client B's supplied tool). P15 owns E05 (client invokes server-provided
+tool). P19 must execute all three complete matrices on the final integrated
+candidate after every later packet is integrated.
+
+Use real public `createAHPServer`, public tool-client entrypoints and the installed
+pinned SDK transport. Trusted fixture registration must name the exact approved
+contract/schema/version, implementation identity/revision, execution location,
+source path/export and candidate identity. Authenticate actual caller and executor
+and record their connection generations separately. Install separate invoke and
+execute/receive permissions, full resource incarnation and origin/target route.
+Namespace membership remains only an admission ceiling.
+
+Each positive must observe the distinctive intended handler and schema-validated
+result, with zero competing-handler calls. For cross-client execution use distinct
+A and B connections; sharing one fixture object or relabeling a caller is not proof.
+The server route must prove that no client implementation was selected. Self-tool
+execution must still pass independent caller and executor gates.
+
+For each route exercise missing/invalid authentication, missing caller grant,
+missing executor/receive grant, contract/schema/revision substitution,
+implementation/source/revision/location substitution, wrong resource incarnation
+or origin/target route, provider denial or missing mandatory constraint, unsatisfied
+challenge, revocation during an awaited decision, and stale connection generation.
+Assert zero forbidden dispatch/handler effects. Resume challenges only when the
+owning packet has implemented the exact continuation contract; challenge is not
+permission to execute early or silently substitute another handler.
+
+Capture recipient-specific raw frames with distinct canaries for arguments,
+results, descriptors, schemas and private metadata. Include an authorized positive
+recipient and an unauthorized observer. Use explicit reached/release barriers and
+causal RPC/close acknowledgements before asserting absence; no timing sleeps.
+Inspect initialize, snapshot/action, advertisement, error, buffer, private invoke,
+completion/status and revocation paths applicable to the route. Preserve reducer,
+sequencing, cleanup/draining, compatibility and owner/lease assertions.
+
+Source binding proves the trusted registration and the exact fixture handler
+observed in this test. It is not remote code attestation, and a client-reported hash
+cannot establish what an arbitrary remote process ran. Preserve EXECUTION E6/E8
+and F03's existing proof boundary; no attestation mechanism or dependency is added.

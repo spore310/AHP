@@ -926,7 +926,7 @@ export const createReferenceAuthorizer = (options: ReferenceAuthorizerOptions): 
     let actorCount = 0;
     let childCount = 0;
     for (const entry of bindings.values()) {
-      if (sameActor(entry.binding.actor, actor) && sameResource(entry.binding.scope, basis.scope)) actorCount += 1;
+      if (sameActor(entry.binding.actor, actor)) actorCount += 1;
       if (entry.parent === state.parent.installation) childCount += 1;
     }
     return actorCount < limits.maxBindingsPerActor && childCount < limits.maxChildrenPerParent;

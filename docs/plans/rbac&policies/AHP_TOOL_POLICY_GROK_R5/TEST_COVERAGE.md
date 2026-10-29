@@ -1,4 +1,4 @@
-# R5 test coverage — 97 required criteria
+# R5 test coverage — 100 required criteria
 
 **Status:** test specification only. Every row begins **NOT RUN**. No AHP code was executed in preparing this package. Rows are behavioral acceptance criteria, not a fabricated count of implemented tests. Several scenarios may share one parameterized suite, and one criterion may require several tests.
 
@@ -20,10 +20,10 @@ Use the exact packet test targets as the initial suite map. Record actual test n
 | [P09](packets/P09.md) | T01, T02, T03, T04, T05, T06 | `src/tests/toolExecution/clientDispatch.test.ts`, `src/tests/websocket/toolPolicyAdmission.test.ts`, `src/tests/websocket/toolInvocation.test.ts` |
 | [P10](packets/P10.md) | V01, V02, V03, V04, V05, V06, V07 | `src/tests/websocket/policyProjection.test.ts`, `src/tests/websocket/policyEgress.test.ts`, `src/tests/websocket/sdk.test.ts` |
 | [P11](packets/P11.md) | W01, W02, W03, W04, W05, W06 | `src/tests/toolExecution/clientProtocol.test.ts`, `src/tests/websocket/toolProtocolV2.test.ts`, `src/tests/toolClient/connection.test.ts` |
-| [P12](packets/P12.md) | X01, X02, X03, X04 | `src/tests/websocket/policyIntegration.test.ts` |
+| [P12](packets/P12.md) | X01, X02, X03, X04, X05, X06 | `src/tests/websocket/policyIntegration.test.ts` |
 | [P13](packets/P13.md) | C01, C02, C03, C04, C05, C06, C07 | `src/tests/toolExecution/challenge.test.ts`, `src/tests/websocket/challengeContinuation.test.ts`, `src/tests/websocket/deferred.test.ts` |
 | [P14](packets/P14.md) | R01, R02, R03, R04, R05 | `src/tests/authorization/resourceScopes.test.ts`, `src/tests/toolExecution/resultProjection.test.ts` |
-| [P15](packets/P15.md) | E01, E02, E03, E04 | `src/tests/toolExecution/serverExecutor.test.ts`, `src/tests/websocket/serverTools.integration.test.ts` |
+| [P15](packets/P15.md) | E01, E02, E03, E04, E05 | `src/tests/toolExecution/serverExecutor.test.ts`, `src/tests/websocket/serverTools.integration.test.ts` |
 | [P16](packets/P16.md) | Q01, Q02, Q03, Q04 | `src/tests/toolPolicy/proposals.test.ts`, `src/tests/websocket/toolProposals.test.ts` |
 | [P17](packets/P17.md) | F01, F02, F03, F04 | `src/tests/toolExecution/artifacts.test.ts` |
 | [P18](packets/P18.md) | D01, D02, D03 | `src/tests/applicationPolicyExamples.test.ts`, `src/tests/application.test.ts` |
@@ -160,6 +160,8 @@ Use the exact packet test targets as the initial suite map. Record actual test n
 | X02 | PM triage scenario is least-privileged | Read/summary grant does not become terminal input, production write or implementation replacement. | NOT RUN |
 | X03 | Actual SDK and raw wire agree with policy | Multi-client reducer/view and canary frame capture prove no alternate metadata route. | NOT RUN |
 | X04 | Existing regression gate stays meaningful | Full pnpm validate passes on candidate or exact blockers are reported; work/persistence guards unchanged. | NOT RUN |
+| X05 | Client invokes its own supplied implementation through public APIs | Real public server/tool client and pinned SDK transport execute the exact approved client handler and validate its distinctive result; prove the full identity, grant, contract/source/revision, resource/route, provider and raw-wire negative matrix in TEST_RUNBOOK §9. Zero competing-handler calls. | NOT RUN |
+| X06 | Distinct client A invokes client B's supplied implementation | Separate authenticated callers/executors and generations, independent invoke/execute assignments, exact selected B handler/result, zero A/competing handler calls and recipient-specific disclosure/negative matrix through the same public path. | NOT RUN |
 
 ## P13 — Implement nonblocking challenge and verified continuation
 
@@ -191,6 +193,7 @@ Use the exact packet test targets as the initial suite map. Record actual test n
 | E02 | Provenance and executor revision are pinned | Client cannot replace host action or change location/implementation via metadata. | NOT RUN |
 | E03 | Host/client routes share mandatory lifecycle | Equivalent cases both enforce validation, preparation, challenge and sanitized cleanup. | NOT RUN |
 | E04 | Multi-user service account is not caller authority | Same server executor receives separate minimal authorized contexts; senior grants cannot leak to junior. | NOT RUN |
+| E05 | Client invokes server-provided implementation through public APIs | Public server/tool client and pinned SDK transport execute the exact approved server handler and validate its distinctive result; prove TEST_RUNBOOK §9 matrix with zero client/competing-handler calls. | NOT RUN |
 
 ## P16 — Add bounded client proposals and explicit contract approval
 
@@ -222,7 +225,7 @@ Use the exact packet test targets as the initial suite map. Record actual test n
 
 | ID | Requirement | Distinguishing assertion / evidence | Status |
 | --- | --- | --- | --- |
-| Z01 | Coverage is evidenced for the final candidate | Every matrix row maps to actual executed evidence or an explicit failure/blocker, not a historical result. | NOT RUN |
+| Z01 | Coverage is evidenced for the final candidate | Every matrix row maps to actual executed evidence. Re-run X05, X06 and E05 with all negative/disclosure matrices on the exact final integrated candidate; historical packet acceptance is insufficient. Missing evidence remains failure/blocker, never completion. | NOT RUN |
 | Z02 | All enforced boundaries remain connected | No old unchecked broker, shared descriptor leak, role fallback or stale-view admission in final source scan/integration. | NOT RUN |
 | Z03 | Repository final gate and scope constraints hold | pnpm validate and diff checks recorded; no DB/migration/dependency changes without approval; unrun external integrations disclosed. | NOT RUN |
 

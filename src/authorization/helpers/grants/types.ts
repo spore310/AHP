@@ -135,6 +135,7 @@ export interface GrantMutationSlot {
   readonly reject: (error: Error) => void;
   readonly signal: AbortSignal;
   readonly abort: () => void;
+  readonly identityGuard: () => unknown;
   readonly guards: Array<() => unknown>;
   readonly releases: Array<() => unknown>;
   deadline: number;

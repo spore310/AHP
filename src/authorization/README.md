@@ -118,6 +118,10 @@ depth and further control rules. Mandatory provider constraints still apply to u
 Revoke requires its own branch and an exact issued target token.
 
 `prepare` captures bounded intent before awaiting target resolution and approval.
+At each queued target/approval invocation it rechecks trusted caller and canonical
+basis before invoking the adapter. Adapter currentness guards precede the caller
+identity guard, so a target or approval callback cannot invalidate the caller after
+its last check. SDK readiness and the canonical comparison follow those callbacks.
 Approval must return the same immutable SDK request object. `commit` requires its
 own unconsumed prepared receipt and rechecks currentness/capacity synchronously.
 `rollback` is idempotent; it cannot revoke a successful commit. Cancellation, timeout
@@ -127,6 +131,8 @@ retain their work slots until settlement. A new bound handle cannot reset quotas
 `DEFAULT_GRANT_LIMITS`/`MAX_GRANT_LIMITS` expose independent finite rule, input,
 pending-global, pending-actor, binding, fanout, lifetime, preparation and cleanup
 budgets. `sweep` is bounded maintenance; expiry never depends on a timer or sweep.
+The per-actor binding budget counts all canonical bindings for that full actor
+across scopes, while the canonical global binding cap also includes bootstrap roots.
 `onInvalidate`/`drainInvalidations` coalesce one immutable revision hint per cohort.
 Throwing/async listeners are quarantined, with unsettled listener work retaining
 capacity. Hints are best-effort and never proof of current authority.

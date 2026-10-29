@@ -1,6 +1,6 @@
 # Execution ledger
 
-**Execution state:** P00–P05 have historical candidate acceptance; P06 code is partial and unaccepted. Continue from [Codex CLI handoff](../execution/CODEX-CLI-HANDOFF.md), not old pane assignments. User authorized the remaining sequence, bounded subagents, and periodic scoped commits/pushes to origin/agentIdentity. Current full tests:74files/730tests PASS; typecheck/build PASS; validation FAILS76lint errors and docs gate FAILS3mappings. These results do not prove remaining packet criteria or public E2E tool execution. One executor per bounded scope; no intermediate shared-host release claim.
+**Execution state:** P00?P05 retain historical candidate acceptance; P06 is accepted at its final 112-file manifest with independent review and DB-safe full gate (74 files / 854 tests / 167 mappings). Continue to P07, then P08?P19 under their dependencies. Tested normal pushes to origin/agentIdentity are explicitly approved in chat. Later public execution/privacy proofs remain NOT RUN.
 
 | Packet | Status | Candidate | Evidence path | Blocker / next step |
 | --- | --- | --- | --- | --- |
@@ -10,7 +10,7 @@
 | P03 | VERIFIED FOR PACKET | Base + [56-file hash manifest](../execution/P03-accepted.sha256) | [accepted handoff](../execution/P03-handoff.md) | Lead full DB-safe gate: 68 files / 533 tests, 151 mappings; Luna P1 resolved and recheck PASS; exact hashes reverified; P04 eligible |
 | P04 | VERIFIED FOR PACKET | [85-file accepted manifest](../execution/P04-accepted.sha256) | [accepted handoff](../execution/P04-handoff.md) | Independent lead gate70files/591tests/159mappings; sequence leak resolved and Luna final recheck PASS; allhashes reverified. P05 eligible |
 | P05 | ACCEPTED | [106-file manifest](../execution/P05-accepted.sha256) | [acceptance](../execution/P05-handoff.md) | Independent72files/684tests/163mapped gate; Luna narrowrecheck PASS; all106hashes post-review verified. Draining work/atomiccohort gaps fixed |
-| P06 | PARTIAL / NOT ACCEPTED | Dirty working tree; [15-file continuation fingerprint](../execution/P06-codex-handoff.sha256), not a full acceptance manifest | [current handoff](../execution/CODEX-CLI-HANDOFF.md) | Ownership/lineage/grants/hints code and46newtests exist. Full730tests pass; lint/docs fail. Public-host composition/final-clock correction, remaining G/R cases, exports/docs and final review still required |
+| P06 | ACCEPTED | [112-file final manifest](../execution/P06-final-candidate.sha256) | [acceptance](../execution/P06-handoff.md) | Independent review PASS; full DB-safe gate PASS; P07 eligible |
 | P07 | PREFLIGHT COMPLETE | P06 unaccepted | [preflight](../execution/P07-preflight.md) | One runtime/neutral entry/borrowed logical detach/framing choices recorded; own plan after dependency, no implementation |
 | P08 | NOT STARTED | — | — | Await assignment and dependencies |
 | P09 | NOT STARTED | — | — | Await assignment and dependencies |

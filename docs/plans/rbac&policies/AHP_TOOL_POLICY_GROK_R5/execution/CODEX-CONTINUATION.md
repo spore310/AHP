@@ -1,32 +1,25 @@
 # R5 execution continuation
 
-Execute mode. Current packet: P06, incomplete and not accepted. P07–P19 remain
-dependent work. User authorization includes bounded independent review and normal
-checkpoint commits/pushes to origin/agentIdentity; no historical reconstruction.
+Execute mode. P06 accepted; next packet P07. Full goal P06?P19 remains ACTIVE.
 
-2026-10-28 intake: branch agentIdentity, HEAD
-22fa7955b8e43839e041228f647f26e00762ebbe; index empty. All 15 source/test hashes in
-P06-codex-handoff.sha256 match. Existing tracked/untracked R5 work and `nul` are
-preserved. No relevant global memory entry found.
+P06 acceptance: P06-handoff.md, P06-final-candidate.sha256 (112 files,
+30e386716230b9687e83a9dcc58d6b3560c949fe347d620ab25da54c01ab73af),
+P06-candidate-evidence.md. Final DB-safe validate PASS: 74 files / 854 tests /
+167 mappings. Independent p06_review source/evidence/docs review PASS; runtime
+checks were lead-executed. Historical manifests and all failure logs preserved.
 
-Lead owns the authorized P06 21-path scope plus execution evidence. Read-only
-independent agent `p06_review` owns no writes and reviews canonical service,
-lineage, expiry and remaining G01–G06/R1–R3 evidence. No concurrent writers.
+Checkpoint cd659a919f90c977706aadd6846e313ae574bfb2 pushed and verified on
+origin/agentIdentity. User explicitly approved this and subsequent tested R5
+checkpoint pushes in chat after automatic approval initially rejected egress.
+Next action: commit/push P06 acceptance candidate, then P07 bounded implementation.
+Unrelated nul remains untracked and untouched.
 
-Plan gate: PASS for the accepted P06 plan as clarified by P06-authorization.md.
-First slice: retain all guards/assertions while fixing types, schema placement,
-lint and public exports/mappings. Then regression-first canonical expiry and
-real-host/P04 deadline ordering integration. Existing test results are historical;
-new checks use Invoke-DbSafeCheck.ps1 in a child process with the complete blocked
-environment list removed. No live persistence is authorized.
+P07 preflight read, implementation not begun. Read its full contract/preflight and
+actual client/SDK source before editing. One writer; same read-only reviewer may
+be reused. No dependency installs, live persistence, reset/stash, force push or
+model/account changes. Every check uses Invoke-DbSafeCheck.ps1 child environment.
 
-Checkpoint candidate/evidence: P06-codex-checkpoint.md and its 112-file SHA manifest.
-DB-safe full validate PASS: 74 files / 743 tests / 167 source mappings; independent
-read-only checkpoint review PASS, explicitly not P06 acceptance. Expiry and P04
-clock/finite-deadline regressions reproduced and corrected. Native initialization
-and no-event canonical revocation exercised through the real host.
-
-Next: normal checkpoint commit/push, then remaining P06 matrix. Resolve actor cap
-against accepted all-actor contract; reproduce later-guard identity invalidation;
-complete lifecycle/agent/provider/work/tuple/bounds/draining matrices. Required
-X05/X06/E05 acceptance additions and all P07–P19 remain outstanding.
+Target acceptance additions X05/X06/E05 are now in MASTER_PLAN, TEST_COVERAGE,
+TEST_RUNBOOK and P12/P15/P19 packets. They remain NOT RUN: P12 owns the two client
+routes, P15 server execution, P19 all three on the final integrated candidate.
+Do not infer later packet completion from existing functionality or P06 gates.

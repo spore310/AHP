@@ -171,7 +171,9 @@ requires successful same-connection ready initialize and live explicit global-cu
 permission. The wire result is only `null`; no snapshots, counts, tools or raw routes
 are reopened. Work owner lookup derives from current full ref -> canonical registry
 owner -> subject in the configured domain. Ownership is not readiness or invocation
-permission; P06/P09 still own later issuance/dispatch, P10/P12 recipient views/SDK proof.
+permission. The [authorization grant service](../authorization/README.md#bounded-grant-service)
+owns bounded issuance and revocation; public dispatch and recipient-view/SDK proof
+remain later integration work.
 
 The role-based typed visibility/examples below describe **legacy trusted-kernel**
 configuration, not protected authority or public privacy certification.

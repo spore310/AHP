@@ -11,10 +11,11 @@ const route = { origin: scope, targets: [scope] };
 const registration = { resource: scope, owner: actor.principal, route, externalAuthority: "none" as const };
 const grant = (): ScopedPolicyBinding => ({ id: "bootstrap", actor, scope, roles: [], policies: [policy], revision: 1, authority: { kind: "host-policy", policy } });
 const invocation = { actor: caller, operation: "invoke" as const, bindingId: "bootstrap", policyRef: policy, scope, route };
-const fixture = (capacity = 1, now = () => 1000, maxInvalidationListeners = 16) => createReferenceAuthorizer({
+const fixture = (capacity = 1, now = () => 1000, maxInvalidationListeners = 16, maxGrantResourceDepth = 8) => createReferenceAuthorizer({
   policies: createToolPolicyFactory({ policies: [{ ...policy, operations: { invoke: { actor: { mode: "direct-grant", actors: ["user"] } } }, challenge: { required: false } }] }),
   now,
   maxInvalidationListeners,
+  maxGrantResourceDepth,
   caps: { maxResources: capacity, maxBindings: capacity },
 });
 
@@ -125,6 +126,55 @@ describe("P06 bounded invalidation hints", () => {
 });
 
 describe("P06 canonical lineage and scoped reads", () => {
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 33])("rejects invalid resource depth %s", (depth) => {
+    expect(() => fixture(4, () => 1000, 16, depth)).toThrow();
+  });
+
+  it("explicit resource depth is bounded independently and rejects cycles without changing existing authority", async () => {
+    const registry = fixture(5, () => 1000, 16, 2);
+    install(registry);
+    const first = { ...scope, kind: "document", id: "document:/one", instanceId: "one" };
+    const second = { ...first, id: "document:/two", instanceId: "two" };
+    const third = { ...first, id: "document:/three", instanceId: "three" };
+    const resource = (ref: ResourceRef, parent: ResourceRef) => ({ resource: ref, owner: actor.principal,
+      route: { origin: ref, targets: [ref] }, externalAuthority: "none" as const, grantParent: parent });
+    registry.installResource(resource(first, scope));
+    registry.installResource(resource(second, first));
+    const snapshot = registry.readBindings({ actor, scope });
+    expect(() => {
+      registry.installResource(resource(third, second));
+    }).toThrow();
+    expect(() => {
+      registry.installResource({ ...registration, grantParent: second });
+    }).toThrow();
+    expect(() => {
+      registry.installResource(resource(third, { ...scope, domainId: "foreign" }));
+    }).toThrow();
+    expect(registry.isBindingSnapshotCurrent(snapshot)).toBe(true);
+    expect((await registry.evaluate(invocation)).decision.effect).toBe("allow");
+  });
+
+  it("saturated closure spans descendant resources and higher-revision root reuse cannot revive children", async () => {
+    const registry = fixture(6);
+    install(registry);
+    const document = { ...scope, kind: "document", id: "document:/closure", instanceId: "document" };
+    const documentRoute = { origin: document, targets: [document] };
+    registry.installResource({ resource: document, owner: actor.principal, route: documentRoute, grantParent: scope, externalAuthority: "none" });
+    for (let i = 0; i < 5; i += 1) registry.installBinding({ ...grant(), id: `child-${String(i)}`, scope: document,
+      authority: { kind: "delegation", issuer: actor, parentGrantId: i === 0 ? "bootstrap" : `child-${String(i - 1)}` } });
+    expect((await registry.evaluate({ ...invocation, bindingId: "child-4", scope: document, route: documentRoute })).decision.effect).toBe("allow");
+    expect(() => {
+      registry.installBinding({ ...grant(), id: "over-cap" });
+    }).toThrow();
+    registry.removeBinding({ bindingId: "bootstrap", scope, revision: 1 });
+    expect(registry.readBindings({ actor, scope: document }).bindings).toEqual([]);
+    expect(registry.owner(scope)).toEqual(actor.principal);
+    registry.installBinding({ ...grant(), revision: 2 });
+    expect((await registry.evaluate({ ...invocation, bindingId: "child-4", scope: document, route: documentRoute })).decision.effect).toBe("deny");
+    for (let i = 0; i < 5; i += 1) registry.installBinding({ ...grant(), id: `replacement-${String(i)}` });
+    expect(registry.readBindings({ actor, scope }).bindings).toHaveLength(6);
+  });
+
   it("a late decision clock cannot refresh an old evaluation across identical binding reinstallation", async () => {
     let armed = false;
     let samples = 0;

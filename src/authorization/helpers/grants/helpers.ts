@@ -157,7 +157,7 @@ export const buildGrantService = (options: GrantServiceOptions, port: CanonicalG
     const slot: GrantMutationSlot = { actor: bound.context.actor, controller: new AbortController(), signal: bound.signal,
       abort: () => {
         close(slot);
-      }, aborted, reject, guards: [bound.isCurrent.bind(bound)], releases: [], work: 0, closed: false,
+      }, aborted, reject, identityGuard: bound.isCurrent.bind(bound), guards: [], releases: [], work: 0, closed: false,
       deadline: Math.min(bound.validUntil, time + limits.prepareDeadlineMs) };
     slots.add(slot);
     bound.signal.addEventListener("abort", slot.abort, { once: true });
@@ -181,7 +181,7 @@ export const buildGrantService = (options: GrantServiceOptions, port: CanonicalG
   const isClosed = (slot: GrantMutationSlot): boolean => disposed || slot.closed || slot.signal.aborted;
   const current = (slot: GrantMutationSlot, root: CapturedGrantBasis["root"], ready: boolean): number => {
     const time = port.now();
-    if (isClosed(slot) || !slot.guards.every(guard)) unavailable();
+    if (isClosed(slot) || !slot.guards.every(guard) || !guard(slot.identityGuard)) unavailable();
     if (!Number.isFinite(time) || time >= slot.deadline || (ready && !guard(() => isReady(root)))) unavailable();
     if (isClosed(slot)) unavailable();
     return time;
@@ -210,8 +210,11 @@ export const buildGrantService = (options: GrantServiceOptions, port: CanonicalG
       childRules: direct.childRules.filter((ref) => contains(inherited.childRules, ref)),
     });
   };
-  const approve = async (slot: GrantMutationSlot, rule: RegisteredGrantControlRule, request: GrantControlRequest): Promise<void> => {
-    const value = await invoke(slot, () => rule.prepare({ request, signal: slot.controller.signal }));
+  const approve = async (slot: GrantMutationSlot, rule: RegisteredGrantControlRule, request: GrantControlRequest, basis: CapturedGrantBasis, ready: boolean): Promise<void> => {
+    const value = await invoke(slot, () => {
+      if (!port.basisCurrent(basis, current(slot, basis.root, ready))) unavailable();
+      return rule.prepare({ request, signal: slot.controller.signal });
+    });
     const approval = approvalSchema.parse(value);
     if (approval.request !== request) unavailable();
     slot.guards.push(approval.isCurrent.bind(value));
@@ -273,7 +276,10 @@ export const buildGrantService = (options: GrantServiceOptions, port: CanonicalG
           const request: GrantIssueRequest = freeze({ ...intent, expiresAt: new Date(expiry).toISOString() });
           const slot = reserve(bound, started);
           try {
-            const rawTarget = await invoke(slot, () => resolveTarget(request.actor, slot.controller.signal));
+            const rawTarget = await invoke(slot, () => {
+              if (!port.basisCurrent(basis, current(slot, basis.root, true))) unavailable();
+              return resolveTarget(request.actor, slot.controller.signal);
+            });
             const target = targetSchema.parse(rawTarget);
             if (!sameActor(target.actor, request.actor)) unavailable();
             slot.guards.push(target.isCurrent.bind(rawTarget));
@@ -281,7 +287,7 @@ export const buildGrantService = (options: GrantServiceOptions, port: CanonicalG
             arm(slot, port.now());
             if (!port.basisCurrent(basis, current(slot, basis.root, false))) unavailable();
             const approvalRequest = freeze({ rule: rule.ref, context, scope, issuerBinding: basis.parent, request });
-            await approve(slot, rule, approvalRequest);
+            await approve(slot, rule, approvalRequest, basis, true);
             if (!port.basisCurrent(basis, current(slot, basis.root, true))) unavailable();
             const prepared: PreparedGrant = freeze({ id: globalThis.crypto.randomUUID(), instanceId: scope.instanceId, revision: 1, request });
             const binding: ScopedPolicyBinding = freeze({ id: prepared.id, actor: request.actor, scope, roles: request.roles, policies: request.policies,
@@ -332,7 +338,7 @@ export const buildGrantService = (options: GrantServiceOptions, port: CanonicalG
           }
           const slot = reserve(bound, started);
           try {
-            await approve(slot, rule, freeze({ rule: rule.ref, context, scope, issuerBinding: basis.parent, request }));
+            await approve(slot, rule, freeze({ rule: rule.ref, context, scope, issuerBinding: basis.parent, request }), basis, false);
             const time = current(slot, basis.root, false);
             if (!port.revoke(basis, time)) unavailable();
           } finally {

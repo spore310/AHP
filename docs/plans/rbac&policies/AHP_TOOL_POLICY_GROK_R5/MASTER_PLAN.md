@@ -140,6 +140,11 @@ adapters prove policy wiring, not actual filesystem, terminal or MFA behavior.
 Final completion requires implemented scoped gates, every metadata path checked,
 actual pinned SDK client/reducer integration, no unguarded compatibility path,
 source-mapped docs and a passing final repository gate on the exact candidate.
+The required public execution additions are X05 (self-supplied client tool), X06
+(distinct client A invoking B's tool), and E05 (server-provided tool). P12 owns
+X05/X06, P15 owns E05, and P19 reruns all three positive/negative/disclosure matrices
+on the final integrated candidate. See TEST_RUNBOOK §9; successful initialization
+or internal authorization alone cannot satisfy these routes.
 Record current limitations and unrun external integrations explicitly. Test
 existence, a TypeScript shape and a historical 407-test commit report are not a new
 runtime pass. The plan does not request independent review agents or review files.
