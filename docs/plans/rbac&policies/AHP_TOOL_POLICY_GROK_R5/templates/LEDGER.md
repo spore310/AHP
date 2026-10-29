@@ -11,7 +11,7 @@
 | P04 | VERIFIED FOR PACKET | [85-file accepted manifest](../execution/P04-accepted.sha256) | [accepted handoff](../execution/P04-handoff.md) | Independent lead gate70files/591tests/159mappings; sequence leak resolved and Luna final recheck PASS; allhashes reverified. P05 eligible |
 | P05 | ACCEPTED | [106-file manifest](../execution/P05-accepted.sha256) | [acceptance](../execution/P05-handoff.md) | Independent72files/684tests/163mapped gate; Luna narrowrecheck PASS; all106hashes post-review verified. Draining work/atomiccohort gaps fixed |
 | P06 | ACCEPTED | [112-file final manifest](../execution/P06-final-candidate.sha256) | [acceptance](../execution/P06-handoff.md) | Independent review PASS; full DB-safe gate PASS; P07 eligible |
-| P07 | PREFLIGHT COMPLETE | P06 unaccepted | [preflight](../execution/P07-preflight.md) | One runtime/neutral entry/borrowed logical detach/framing choices recorded; own plan after dependency, no implementation |
+| P07 | ACCEPTED | [13-file manifest](../execution/P07-final-candidate.sha256) | [acceptance](../execution/P07-handoff.md) | Independent review PASS; DB-safe75files/886tests/173mappings; one runtime and explicit endpoint ownership; P08 eligible |
 | P08 | NOT STARTED | — | — | Await assignment and dependencies |
 | P09 | NOT STARTED | — | — | Await assignment and dependencies |
 | P10 | NOT STARTED | — | — | Await assignment and dependencies |

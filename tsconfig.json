@@ -37,6 +37,8 @@
       "@toolPolicy": ["./src/toolPolicy/index.ts"],
       "@toolPolicy/*": ["./src/toolPolicy/*"],
       "@toolExecution": ["./src/toolExecution/index.ts"],
+      "@toolExecution/client": ["./src/toolExecution/helpers/client/index.ts"],
+      "@toolExecution/client/transport": ["./src/toolExecution/helpers/client/helpers/transport/index.ts"],
       "@toolExecution/*": ["./src/toolExecution/*"],
       "@toolClient": ["./src/toolClient/index.ts"],
       "@toolClient/*": ["./src/toolClient/*"],
