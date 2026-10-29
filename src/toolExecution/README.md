@@ -1,8 +1,8 @@
 # Tool execution contracts
 
-R5 action and challenge contracts. The P01 contract boundary is accepted; later changes require an explicit amendment. Importing this module does not load a transport, database, or executor. There is no dispatcher, cleanup runner, or artifact verifier here.
+R5 action/challenge contracts and a local action dispatcher. Importing this module does not load a transport, database or platform executor. There is no artifact verifier or challenge continuation store. The local dispatcher is trusted host wiring; public transport admission remains separate.
 
-Current behavior is the `ToolAction` type contract and presentation schemas. Optional `prepare` means `execute` receives `TPrepared | undefined`. Validation has one canonical input, not a separate validated argument. `executor` is an `ExecutorRevision`, not only an actor ref.
+The existing `ToolAction` class and presentation schemas remain the contract. Optional `prepare` means `execute` receives `TPrepared | undefined`. Validation has one canonical input, not a separate validated argument. `executor` is an `ExecutorRevision`, not only an actor ref.
 
 ## Files
 
@@ -16,18 +16,26 @@ Current behavior is the `ToolAction` type contract and presentation schemas. Opt
 | `helpers/client/helpers/transport/index.ts` | Client transport wrapper export. |
 | `helpers/client/helpers/transport/types.ts` | Internal extension invocation shape. |
 | `helpers/client/helpers/transport/helpers.ts` | Sole local invocation router, staged handlers, UUID request correlation and endpoint cleanup. |
+| `helpers/action/index.ts` | Action registration exports and the existing ToolAction class. |
+| `helpers/action/types.ts` | Trusted schema/action registration and internal JSON capture contracts. |
+| `helpers/action/helpers.ts` | Captured schema/implementation registration and bounded immutable JSON copying. |
+| `helpers/dispatcher/index.ts` | Local dispatcher public boundary. |
+| `helpers/dispatcher/types.ts` | Ports, limits, safe outcomes, lifecycle handles and runtime context schemas. |
+| `helpers/dispatcher/helpers.ts` | Ordered gates, draining ownership, output budgets, cleanup and bounded shutdown. |
 
 ## Public names
 
 Types: `Awaitable`, `ValidationResult`, `ToolPreparationHooks`, `ToolActionContext`, `ToolAction`, `ChallengePresentation`, `ChallengeContinuation`, `ChallengeProof`, `ChallengeVerification`, `ChallengeStatus`, `ChallengeAdapter`, `ArtifactDescriptor`.
 
-Values: `ToolAction`, `challengePresentationSchema`, `createChallengePresentationSchema`.
+Values: `ToolAction`, `challengePresentationSchema`, `createChallengePresentationSchema`, `createToolActionRegistration`, `createToolDispatcher`.
+
+Registration/dispatcher types: `ToolActionRegistration`, `ToolActionRegistrationOptions`, `ToolDispatchFacts`, `ToolDispatchPorts`, `ToolDispatchLimits`, `ToolDispatchPhase`, `ToolDispatchFailureCode`, `ToolDispatchOutcome`, `ToolDispatchHandle`, `ToolDispatchRequest`, `ToolDispatcherOptions`, `ToolDispatcher`.
 
 `ToolActionContext` keeps caller, executor revision, origin, targets, contract revision, implementation binding, call id, `AbortSignal`, and an authority stamp separate. Redirect text is length-bounded and must be a syntactically valid `http` or `https` URL. That check is not approval.
 
 ## Omissions
 
-No action pipeline, challenge store, output validator, artifact transport or server executor. The separate client entry described below is implemented. Root policy/action imports remain free of server and framework imports.
+No challenge store, artifact transport, public wire dispatcher integration or server executor adapter. The separate client entry below remains transitional. Root imports remain free of server and framework imports.
 
 ## Client entry and ownership
 
@@ -97,3 +105,19 @@ fake transports in `src/tests/toolExecution/clientBoundary.test.ts`. The existin
 URL initialization-failure test exercises the actual socket adapter. These checks
 do not certify a browser bundle or universal package portability; the project
 build remains SSR. Implementation/source binding is not remote code attestation.
+
+## Local action dispatcher
+
+`createToolActionRegistration` captures a trusted contract definition, exact implementation binding and action factory. It reuses the existing draft-07 compiler. Schemas remain serializable; executable factories are separate host registrations. Generic input/output types are the host's schema/action pairing, checked against schemas on every invocation. Missing output schemas accept bounded JSON. Constructors must be inert: factories and supplementary authentication/validation are not privileged preparation.
+
+`createToolDispatcher` owns aggregate capacity across registrations. Trusted per-call ports resolve context/resources, check coarse access, return full policy decision/authority, and check currentness synchronously. These ports are not client JSON, self-reported grants or public authentication. The host must retain complete invocation-specific freshness evidence privately; AuthorityRevisionStamp alone lacks LocalDecisionStamp expiry/external evidence. Initial authority is provisional. Prepare/execute receive the captured full-decision authority.
+
+Order: bounded immutable input/schema; resolved initial context/coarse access; fresh action instance; optional authenticate/validate; recaptured and schema-checked normalization; resolved target route; full policy; prepare; execute; bounded output/schema; cleanup; current result delivery. Caller/auth/connection, executor, origin incarnation, contract and implementation stay pinned. New normalized targets require fresh resolution and authorization. Challenges fail closed until P13. Every action object can be used once per dispatcher, including sequential calls; weak tracking does not strongly retain completed instances.
+
+Input/output/context facts are copied as bounded plain JSON without invoking getters. Constructor/prototype keys remain data. Cycles, nonfinite numbers, non-JSON prototypes and accessors reject. This is not a hostile-proxy sandbox or control of arbitrary trusted hook CPU/external effects. Prepared callbacks/handles remain local and are not copied or serialized. The dispatcher supplies AbortSignal.
+
+`dispatch` returns `result`, `settled`, and `cancel()`. Success waits for cleanup/final currentness. Cancel/deadline may settle result early; settled waits for actual work and cleanup. Capacity and retained output bytes stay owned while draining. Late preparation may register cleanup until prepare actually settles; its returned handle reaches cleanup even after timeout. Action cleanup precedes registered LIFO callbacks, each registration once, with all attempted after failures. Registration after prepare settles rejects.
+
+Failures expose only fixed code, phase, effectPossible and cleanup failure count. EffectPossible means prepare or execute was admitted, not that an effect is proven. Primary errors survive cleanup errors; successful work followed by cleanup failure returns cleanup-failed. No automatic retries. Early results cannot contain future cleanup diagnostics; settled supplies the final safe outcome. No completed replay cache exists here; caller retention and wire request reuse belong to caller/transport ownership.
+
+Default/maximum limits: in-flight64/1024; input/output1MiB/16MiB; JSON depth64/128 and keys131072/1048576; retained output16MiB/256MiB; overall timeout30s/120s, hook timeout5s/60s, shutdown wait5s/60s. Context capture separately bounds2MiB/depth64/131072keys. Overrides are positive safe integers. The injected clock must stay finite and nondecreasing. Shutdown stops admissions, cancels, waits its drain budget and reports remaining calls. Unsettled work stays owned and cleans up later. Shutdown cannot forcibly terminate code or undo effects.

@@ -1,18 +1,19 @@
 # R5 execution continuation
 
-Execute mode. P06 and P07 accepted; next packet P08. Full P06-P19 goal ACTIVE.
-P06 pushed bd46480bed27477b6262b0e8b63179aec74c05fa. P07 accepted candidate:
-P07-handoff.md / P07-final-candidate.sha256 (13files; SHA6e1622b9d6d6d35d69ae4848e0208d7da8293d9a042f772f934a6e3243961ce2).
-Final DB-safe gate P07-accepted-validate.log PASS75files/886tests/173mappings.
-Independent p06_review source/docs PASS; two real regressions fixed. All checks
-lead-run, failure logs retained. Existing suites unchanged. Next commit/push P07,
-verify remote, then P08 action dispatcher/cleanup. Packet P08 and EXECUTION
-contracts read; no P08 edits/plan yet. Lead sole writer, reviewer read-only.
+Execute mode. P06-P08 accepted; next packet P09. Full P06-P19 goal ACTIVE.
+P06 pushed bd46480bed27477b6262b0e8b63179aec74c05fa; P07 pushed and remote verified
+e3dafe4b215d42a5c8223316b209389ae3f52747. P08 accepted: P08-handoff.md and
+P08-final-candidate.sha256, eleven files, SHAeac8e7740b20ce3d42f6457fc7df49b177ec92380bff6f1b92f3d842819f18bd.
+P08-final-validate.log PASS77files/941tests/179mappings. Independent p06_review
+source/docs PASS; runtime all lead-run. Reentrant admission defect fixed with
+real RED/green evidence; all old tests/assertions preserved. Next commit/push
+P08, verify remote, then P09 canonical tool dispatch/advertisement admission.
+P09 packet read; no P09 source/plan changes yet. Lead sole writer, reviewer
+read-only, no nested delegation. P08 local fake-port tests are not public proof.
 
-User explicitly approved all tested R5 checkpoint pushes to origin/agentIdentity
-in chat after initial auto-review rejection. Do not ask again. No dependency
-installs/live persistence/reset/stash/force push/model changes. Every check uses
-Invoke-DbSafeCheck.ps1 child environment. Unrelated nul remains untouched/untracked.
-X05/X06/E05 plan additions are recorded but NOT RUN: P12 two client routes, P15
-server execution, P19 all three on final integrated candidate. No later-packet
-completion may be inferred from P07 or internal private-kernel compatibility.
+User approved all tested R5 checkpoint pushes to origin/agentIdentity in chat.
+No dependency installs/live persistence/reset/stash/force push/model changes.
+Every check uses Invoke-DbSafeCheck.ps1 child environment. Unrelated nul stays
+untouched/untracked. Failure logs retained locally. X05/X06/E05 target additions
+exist but remain NOT RUN: P12 owns two client routes, P15 server execution,
+P19 all three and full negative matrices on final integrated candidate.
