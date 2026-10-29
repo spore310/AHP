@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AhpTransport } from "@microsoft/agent-host-protocol/client";
-import { connectToolClient, type ToolClient } from "@toolClient";
+import { connectToolClient, type ToolClient } from "./legacyToolClient";
 import type { AHPServerHandle, WebSocketConnectionContext } from "@websocket";
 import { createToolPolicyHost, connectPolicyTransport, toolPolicyChannel as channel } from "./toolPolicyFixture";
 import { contract } from "../toolExecution/fixtures";

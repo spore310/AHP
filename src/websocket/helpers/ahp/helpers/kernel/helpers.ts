@@ -518,7 +518,7 @@ export const createAHPKernel = (
     },
   };
 
-  const handlers: Record<string, JsonRpcHandler> = { ...baselineHandlers };
+  const handlers: Record<string, JsonRpcHandler> = { ...baselineHandlers, ...toolInvocations.privateHandlers };
   if (protectedDelivery !== undefined) {
     handlers.initialize = async (params, context, invocation): Promise<InitializeResult> => {
       const peer = requirePeer(context);

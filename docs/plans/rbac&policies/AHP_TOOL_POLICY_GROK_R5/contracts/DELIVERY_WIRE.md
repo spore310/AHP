@@ -164,3 +164,13 @@ must not encode hidden rows; bind them to scope and view revision and invalidate
 on changes. A listener/publisher cannot cache a raw pre-revocation payload as a
 permanent permission to send it later. Recheck every queued protected payload at
 the final local send admission point.
+
+## P11 correlation amendment
+
+The host may send notification x-ahp/tools/cancel to the selected executor using
+the exact invoke correlation fields, excluding input. The same method in the
+caller-to-host request direction still accepts only version and callId. The client
+aborts only the matching active local call. This is cooperative; cancellation,
+timeout or disconnect never proves remote work has stopped or frees its draining
+slot. Exact completion can retire owned work even after policy revocation, without
+releasing a result to an unauthorized caller.

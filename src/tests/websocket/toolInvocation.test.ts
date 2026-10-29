@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseUnknownJson } from "@jsonrpc";
 import { ACTION_TYPE_SESSION_ACTIVE_CLIENT_SET } from "@sessions/constants";
-import { connectToolClient, type ToolClient } from "@toolClient";
+import { connectToolClient, type ToolClient } from "./legacyToolClient";
 import { defineToolContract, toAhpToolDefinition } from "@tools";
 import { type AHPServerHandle } from "@websocket";
 

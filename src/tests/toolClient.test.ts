@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { parseUnknownJson } from "@jsonrpc";
 import { defineToolContract } from "@tools";
 import { ToolInvocationTransport } from "@toolClient/transport";
+import { privateWireFixture } from "./toolExecution/privateWireFixture";
 
 const definition = defineToolContract({
   id: "11111111-1111-4111-8111-111111111111",
@@ -55,13 +56,13 @@ describe("tool invocation SDK transport", () => {
   it("uses isolated UUID string request IDs and correlates multiple calls", async () => {
     const inner = new FakeTransport();
     const transport = new ToolInvocationTransport(inner);
-    const first = transport.requestCall({ channel: "ahp-session:/example", key: definition.key, version: 1, input: {} });
-    const second = transport.requestCall({ channel: "ahp-session:/example", key: definition.key, version: 1, input: {} });
-    const requests = inner.sent.map(sentMessage).filter((message) => message.method === "x-ahp/tools/call");
+    const first = transport.request("x-ahp/tools/dispatch", { version: 2, channel: "ahp-session:/example", contract: { id: definition.id, key: definition.key, version: 1 }, input: {} });
+    const second = transport.request("x-ahp/tools/dispatch", { version: 2, channel: "ahp-session:/example", contract: { id: definition.id, key: definition.key, version: 1 }, input: {} });
+    const requests = inner.sent.map(sentMessage).filter((message) => message.method === "x-ahp/tools/dispatch");
     const firstId = requests[0]?.id;
     const secondId = requests[1]?.id;
-    expect(firstId).toEqual(expect.stringMatching(/^x-ahp-tool-call:[0-9a-f-]{36}$/));
-    expect(secondId).toEqual(expect.stringMatching(/^x-ahp-tool-call:[0-9a-f-]{36}$/));
+    expect(firstId).toEqual(expect.stringMatching(/^x-ahp-tool:[0-9a-f-]{36}$/));
+    expect(secondId).toEqual(expect.stringMatching(/^x-ahp-tool:[0-9a-f-]{36}$/));
     expect(firstId).not.toBe(secondId);
 
     const reader = transport.recv();
@@ -82,16 +83,10 @@ describe("tool invocation SDK transport", () => {
     const inner = new FakeTransport();
     const transport = new ToolInvocationTransport(inner);
     const execute = vi.fn(() => ({ result: "executed" }));
-    transport.stage("ahp-session:/example", "registration", [{ definition, execute }]);
-    transport.activate("ahp-session:/example", "registration");
+    transport.stage("ahp-session:/example", "registration", [{ definition, execute }], privateWireFixture(definition, "ahp-session:/example").assigned);
+    transport.activate("ahp-session:/example", "registration", privateWireFixture(definition, "ahp-session:/example").acknowledgement);
 
-    const invokeParams = {
-      callId: "11111111-2222-4333-8444-555555555555",
-      channel: "ahp-session:/example",
-      key: definition.key,
-      version: 1,
-      input: {},
-    };
+    const invokeParams = privateWireFixture(definition, "ahp-session:/example").invoke();
     const requestShaped: TransportFrame = {
       kind: "text",
       text: JSON.stringify({ jsonrpc: "2.0", id: "request", method: "x-ahp/tools/invoke", params: invokeParams }),

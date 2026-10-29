@@ -12,10 +12,10 @@ The existing `ToolAction` class and presentation schemas remain the contract. Op
 | `index.ts` | Public exports. |
 | `helpers/client/index.ts` | Separate client entry exports; root action entry does not import it. |
 | `helpers/client/types.ts` | Local implementation, invocation context, options, client and transport ownership contracts. |
-| `helpers/client/helpers.ts` | SDK connection, manifest selection, serialized joins and exact advertisement acknowledgement. |
+| `helpers/client/helpers.ts` | Minimal SDK initialization, private negotiation/assignment, serialized registration, receipt/status APIs and bounded polling. |
 | `helpers/client/helpers/transport/index.ts` | Client transport wrapper export. |
-| `helpers/client/helpers/transport/types.ts` | Internal extension invocation shape. |
-| `helpers/client/helpers/transport/helpers.ts` | Sole local invocation router, staged handlers, UUID request correlation and endpoint cleanup. |
+| `helpers/client/helpers/transport/types.ts` | Staged and active exact private registration contracts. |
+| `helpers/client/helpers/transport/helpers.ts` | Strict v2 local invocation router, exact staging, replay protection, cooperative cancellation, bounded work and endpoint cleanup. |
 | `helpers/action/index.ts` | Action registration exports and the existing ToolAction class. |
 | `helpers/action/types.ts` | Trusted schema/action registration and compatibility JSON capture type exports. |
 | `helpers/action/helpers.ts` | Captured schema/implementation registration and compatibility bounded JSON capture export. |
@@ -50,17 +50,17 @@ Registration/dispatcher types: `ToolActionRegistration`, `ToolActionRegistration
 
 ## Omissions
 
-No challenge store, artifact transport, public wire dispatcher integration or server executor adapter. The separate client entry below remains transitional. Root imports do not load a transport or session factory; resource-view cursors use Node crypto.
+No challenge store, artifact transport or server executor adapter. The separate client entry uses the private v2 protocol. Root imports do not load a transport or session factory; resource-view cursors use Node crypto.
 
-## Private protocol foundations (P11 in progress)
+## Private protocol
 
 The browser-safe `helpers/client/helpers/protocol` boundary validates strict v2
 DTOs after a bounded immutable plain-JSON capture (2 MiB, depth 64, 131072 keys).
 Requests contain selectors rather than authority. Required payload fields reject
 undefined; unknown versions/fields reject. Schemas describe private assignment,
 advertisement, dispatch, status and exact execution correlation. Capabilities
-currently declares continuation unsupported. These DTOs are not yet connected to
-the public host/client runtime; public tool routes remain closed.
+declares continuation unsupported. The public host and client negotiate these DTOs;
+legacy public call/completion envelopes fail closed.
 
 `helpers/calls` owns private result retention for an exact trusted connection lease.
 It does not authorize policy access. A host adapter must freshly authorize reads and
@@ -70,14 +70,18 @@ are 1024 records, 16 MiB per output, 256 MiB retained and 120 seconds. Expiry ru
 on access and bounded timers. Immutable status proofs invalidate when their status
 or record changes. Foreign leases and absent/expired records have the same absence.
 Cancel/expiry/disposal request cancellation without pretending remote work settled;
-only the dispatcher owns and releases draining execution capacity. No retries occur.
+only the dispatcher owns and releases draining execution capacity. A custom retention
+clock requires a separate pure `fenceNow` reader in the same clock domain. Its final
+check follows authority callbacks, rejects deadline crossing and clock rollback,
+and cannot invoke application hooks. The default captures the platform clock.
+Repeated identical status updates preserve the issued status identity. No retries occur.
 
 The existing client proxy dispatcher now exposes admission before remote completion
 and an internal `refresh(signal)` operation for retained-result authorization.
 Refresh rechecks the captured input, original full route and selected executor with
 isolated proofs; it neither executes again nor replaces execution proofs. The
-embedding caller owns refresh concurrency/deadlines until the private adapter is
-integrated. Invoke/advertise/execute freshness uses the canonical actor-aware cohort
+private WebSocket adapter bounds refresh concurrency to 64 and deadlines to 5 seconds;
+unsettled refresh work retains its slot. Invoke/advertise/execute freshness uses the canonical actor-aware cohort
 check at a shared time, followed by the owned connection/resource fence. Discovery
 requires a genuine discover assignment with reveal. Source approval remains distinct
 from remote code attestation.
@@ -128,7 +132,7 @@ remote protocol completion; cancellation settles the caller wait but retains bou
 draining capacity until that completion. A lost connection can leave unresolved work
 through shutdown. The host cannot prove remote cleanup or undo admitted side effects.
 The WebSocket adapter supplies final enqueue/reply admission checks. Its public facade
-still denies tool routes pending private assignment/projection integration.
+rejects legacy tool calls; negotiated v2 routes use this same dispatcher.
 
 ## Client entry and ownership
 
@@ -171,18 +175,33 @@ pipeline, cancellation of arbitrary user code, or proof of remote behavior.
 
 ## Client behavior and limits
 
-Joins serialize per channel and select implementations by exact contract
-id/key/version. Descriptors come from the issued manifest. Handlers activate only
-after matching channel, origin, sequence, action, client identity and exact
-descriptor acknowledgement; rejection/mismatch preserves the prior active set.
-An accepted empty list clears it. Unacknowledged registration times out after
-5 seconds. Up to 64 early invocations wait for staged activation; overflow follows
-the existing unavailable-handler response. Calls use isolated UUID identifiers
-and a 35-second response timeout. These are client behavior, not server authority.
+Native initialization requests no automatic subscriptions; the pinned SDK omits the
+empty list on the wire. Private capabilities negotiation precedes tool operations.
+Joins serialize per channel, subscribe through the native SDK, and select local
+implementations by exact assigned contract id/key/version and descriptor. No raw
+manifest fallback exists. Registration activates only after an exact private reply
+matches channel, view revision, resource incarnation, connection generation and
+selected tools; rejection/mismatch preserves prior handlers. Empty registration
+clears them. Requests time out after 5 seconds. At most 64 pending requests, 64 unresolved sends, 64 queued/active joins and
+64 whole convenience-call lifetimes are retained. Request timeout does not free
+unsettled send ownership. The active/staged channel union caps at 128; replacements
+remain allowed at capacity. At most 64 early invocations and 64 executing handlers
+are retained. Cooperative cancellation delivers an AbortSignal; active work keeps
+its slot until the local handler settles. Unrelated or stale correlation cannot
+cancel it. Exact call-ID tombstones prevent replay; at 4096 admitted IDs the
+endpoint closes instead of evicting replay protection.
+
+The public client exposes dispatchTool, statusTool, cancelTool and resumeTool.
+Resume currently returns unsupported. Convenience callTool resolves an exact
+private assignment, dispatches once, and polls status with 25-500 ms backoff and
+a 35-second overall budget. It returns only completed output; known unresolved
+receipts throw ToolPendingError(callId), and challenge replies throw
+ToolChallengeRequiredError(reply). Lost dispatch replies are never retried.
+No automatic challenge resume or execution resubmission occurs.
 
 The wrapper intercepts valid JSON-RPC 2.0 notification-only invocations and its
-own correlated responses in text, binary and parsed SDK frames. Text preserves
-the existing JSON parser semantics. Binary interception decodes valid UTF-8 only
+own correlated responses in text, binary and parsed SDK frames. Private envelopes use the shared 2 MiB/depth-64 JSON capture. Text over the
+interception limit passes to the SDK. Binary interception decodes valid UTF-8 only
 up to a 2 MiB envelope; oversized/invalid binary and other ordinary frames pass
 unchanged to the SDK. That limit does not enforce underlying transport admission.
 Parsed frames are trusted SDK adapter objects with supplier-owned framing/size
@@ -191,8 +210,9 @@ authentication and safe error semantics. The runtime does not synthesize auth
 headers/query tokens or log credential URLs. URL adapter errors are not promised
 to be sanitized by this layer.
 
-The client remains transitional: private assignment projection, protected
-dispatcher enforcement and public protected tool execution are later R5 packets.
+The public v2 path is exercised by `src/tests/websocket/toolProtocolV2.test.ts`
+with the real supported host and pinned SDK transport. Full X05/X06 negative
+matrices remain P12 work; server execution remains P15 work.
 Import isolation is tested with throwing module sentinels and the real SDK over
 fake transports in `src/tests/toolExecution/clientBoundary.test.ts`. The existing
 URL initialization-failure test exercises the actual socket adapter. These checks

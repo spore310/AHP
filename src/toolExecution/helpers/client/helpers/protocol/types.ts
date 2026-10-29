@@ -50,6 +50,8 @@ const correlation = { version, callId: z.uuid(), channel, contract: toolContract
   route: z.strictObject({ origin: resourceRefSchema, targets: z.array(resourceRefSchema).max(64) }),
   execution, connection, advertisementId: revision };
 export const toolInvokeSchema = z.strictObject({ ...correlation, input: json });
+/** Host-to-executor cooperative cancellation; distinct from the caller request selector. */
+export const toolExecutorCancelSchema = z.strictObject(correlation);
 export const toolCompleteSchema = z.union([
   z.strictObject({ ...correlation, output: json }),
   z.strictObject({ ...correlation, error: z.literal("execution-failed") }),
@@ -61,6 +63,7 @@ export type ToolAdvertiseReply = z.infer<typeof toolAdvertiseReplySchema>;
 export type ToolDispatchReply = z.infer<typeof toolDispatchReplySchema>;
 export type ToolStatusReply = z.infer<typeof toolStatusReplySchema>;
 export type ToolInvoke = z.infer<typeof toolInvokeSchema>;
+export type ToolExecutorCancel = z.infer<typeof toolExecutorCancelSchema>;
 export type ToolComplete = z.infer<typeof toolCompleteSchema>;
 
 /** A known call remains resumable by explicit status; this error never resubmits it. */

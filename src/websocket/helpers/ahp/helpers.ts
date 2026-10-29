@@ -3,8 +3,9 @@ import { JsonRpcErrorCodes } from "@microsoft/agent-host-protocol";
 import { RpcError } from "@jsonrpc";
 import type { SessionsFactory } from "@sessions/types";
 import type { JsonRpcHandlers, WebSocketConnectionContext } from "@websocket/types";
+import { parseToolWire, toolCompleteSchema } from "@toolExecution/helpers/client/helpers/protocol";
 
-import { AGENT_WORK_REQUEST_METHODS } from "./constants";
+import { AGENT_WORK_REQUEST_METHODS, TOOL_PRIVATE_REQUEST_METHODS, TOOL_CALL_METHOD, TOOL_COMPLETE_METHOD } from "./constants";
 import { createAHPKernel, type AHPBinding } from "./helpers/kernel/helpers";
 import { initializeParamsSchema, type AHPBindingOptions, type AHPDiagnostic } from "./types";
 
@@ -45,9 +46,27 @@ export const createAHPBinding = (
     throw new Error("Invalid initial subscription limit.");
   }
   const kernel = createAHPKernel(factory, reportDiagnostic, options);
+  const isPrivateCompletion = (params: unknown, context: WebSocketConnectionContext): boolean => {
+    try {
+      return kernel.isToolCompletion(parseToolWire(toolCompleteSchema, params), context);
+    } catch {
+      return false;
+    }
+  };
   const handlers: Record<string, JsonRpcHandlers[string]> = {};
   for (const [method, handler] of Object.entries(kernel.handlers)) {
     handlers[method] = (params, context, invocation) => {
+      if (TOOL_PRIVATE_REQUEST_METHODS.has(method)) {
+        kernel.beforeDispatch({ method, params, context, invocation, kind: invocation.kind });
+        return Promise.resolve().then(() => handler(params, context, invocation)).catch(() => {
+          throw new RpcError(JsonRpcErrorCodes.InvalidRequest, "Tool operation unavailable");
+        });
+      }
+      if (method === TOOL_COMPLETE_METHOD) {
+        if (!isPrivateCompletion(params, context)) return null;
+        return handler(params, context, invocation);
+      }
+      if (method === TOOL_CALL_METHOD) throw new RpcError(JsonRpcErrorCodes.InvalidRequest, "Tool protocol extension required");
       if (method === "createSession") {
         // Preserve canonical ready-state/kind gating; a live setup alone is not initialized.
         kernel.beforeDispatch({ method, params, context, invocation, kind: invocation.kind });
@@ -103,7 +122,7 @@ export const createAHPBinding = (
       kernel.onConnection(context);
     },
     beforeDispatch: kernel.beforeDispatch.bind(kernel),
-    isToolCompletion: () => false,
+    isToolCompletion: isPrivateCompletion,
     dispose: () => {
       for (const lifetime of lifetimes.values()) lifetime.abort();
       lifetimes.clear();

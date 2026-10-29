@@ -9,6 +9,30 @@ import { clientPolicyFixture } from "./clientPolicyFixture";
 afterEach(() => vi.useRealTimers());
 const contract = { id: "11111111-1111-4111-8111-111111111111", key: "test.echo", version: 1 };
 const succeeded = (output: unknown): ToolDispatchOutcome<unknown> => ({ status: "succeeded", output, cleanupFailures: 0 });
+
+it("final retention fences catch expiry after authority callbacks without invoking callback-bearing clocks", async () => {
+  let time = 0;
+  const sample = vi.fn(() => time);
+  const store = createPrivateToolCalls({ now: sample, fenceNow: () => time, limits: { ttlMs: 100 } });
+  const work = pending(), owner = {};
+  const receipt = store.start(owner, () => work.handle);
+  if (receipt === undefined) throw new Error("Missing record");
+  work.admitted.resolve(true);
+  await receipt.admitted;
+  work.result.resolve(succeeded("retained canary"));
+  work.settled.resolve(succeeded("retained canary"));
+  await work.settled.promise;
+  time = 99;
+  const read = store.read(receipt.callId, owner);
+  expect(read?.current()).toBe(true);
+  const samples = sample.mock.calls.length;
+  time = 100;
+  expect(read?.fence()).toBe(false);
+  expect(sample.mock.calls.length).toBe(samples);
+  time = 99;
+  expect(read?.fence()).toBe(false);
+  store.dispose();
+});
 function pending() {
   const admitted = Promise.withResolvers<boolean>();
   const result = Promise.withResolvers<ToolDispatchOutcome<unknown>>();
@@ -24,7 +48,7 @@ it.each(["expired", "invalid", "disposed"] as const)("does not publish delayed a
   const store = createPrivateToolCalls({ now: () => {
     onClock();
     return time;
-  }, limits: { ttlMs: 100 } });
+  }, fenceNow: () => time, limits: { ttlMs: 100 } });
   const work = pending();
   const owner = {};
   const record = store.start(owner, () => work.handle);
@@ -208,7 +232,7 @@ it("invalid or reentrant clocks close retention and cannot recreate expired reco
   const store = createPrivateToolCalls({ now: () => {
     onClock();
     return time;
-  } });
+  }, fenceNow: () => time });
   const work = pending();
   const owner = {};
   const record = store.start(owner, () => work.handle);

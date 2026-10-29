@@ -1,2 +1,2 @@
 export * from "./types";
-export { parseToolWire } from "./helpers";
+export { parseToolWire, toolCorrelation } from "./helpers";

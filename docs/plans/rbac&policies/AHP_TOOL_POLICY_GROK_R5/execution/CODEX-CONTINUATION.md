@@ -1,6 +1,6 @@
 # R5 execution continuation
 
-Execute mode. P06-P10 accepted. Full P06-P19 goal ACTIVE; P11 in progress.
+Execute mode. P06-P11 accepted. Full P06-P19 goal ACTIVE; P12 next.
 P06 pushed bd46480bed27477b6262b0e8b63179aec74c05fa; P07 pushed
  e3dafe4b215d42a5c8223316b209389ae3f52747; P08 pushed
  c378c92d16b9e317a80c175b434d3e16da643ca1; P09 pushed
@@ -32,11 +32,22 @@ verified all25hashes, no material findings remain. Provenance uses single indexe
 capture/safe-integer lengths; delayed receipts/results sample logical expiry;
 cohort512auth/1024stamps supports multiple purposes. Actual session cap64 stays;
 wire64positive/65,128cataloguenegative/129adnegative and neutralproofcaps tested.
-Next inspect/stage scoped32paths, commit/push foundations checkpoint (not accepted
-packet), verify remote SHA. Then integrate sole broker/private server adapter, migrate client runtime/tests,
-prove W01-W06 and public positive invocation, run full gate/review and accept P11.
-No public v2 handlers or client migration have been implemented yet. Lead sole writer;
-existing p06_review stays read-only, no nested delegation. No live check remains.
+Foundations checkpoint committed/pushed as f3e74c73abc5bc7598165c6a0ae5e9fe68450c17;
+exact origin/agentIdentity SHA verified.
+
+P11 integrated candidate accepted after independent final review PASS on all53
+raw hashes, no material blockers. Final manifest P11-final-candidate.sha256 SHA
+c37717c72a5884a55ca987c77687031a47e0001268188459b82b6107d6d315c0. Full DB-safe gate reviewed-integration-validate-2 PASS87files/
+1074tests/199mappings plus lint/typecheck/build; final packet-focused PASS3files20tests.
+Final acceptance P11-final-validate.log PASS87files/1074tests/199mappings, lint/typecheck/build CHECK_EXIT0. Commit/push pending. Production public
+v2 SDK execution/cancellation/revocation, final TTL fence, exact private correlation
+and all bounded retention/send/poll/join gates implemented. P11-handoff.md maps
+W01-W06 and every preserved RED/GREEN review regression. Historical P09 assertions
+use only tests/websocket/legacyToolClient; production has no fallback. Source binding
+is not remote code attestation. Lead sole writer; p06_review read-only.
+Next verify final gate, stage scoped files excluding nul, commit/push/verify SHA,
+then plan/review/implement P12 X01-X06 with full matrices. P12 packet, SCENARIOS,
+CONTRACT_CARD, TEST_RUNBOOK section9 and broker contracts read; no P12 edits yet.
 
 User approved all tested R5 checkpoint pushes to origin/agentIdentity in chat.
 No dependency installs/live persistence/reset/stash/force push/model changes.

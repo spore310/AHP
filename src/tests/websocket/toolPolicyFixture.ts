@@ -18,8 +18,10 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
   readonly challenge?: boolean;
   readonly onSecurityCheck?: (context: TrustedRequestContext) => void;
   readonly registryNow?: () => number;
+  readonly securityNow?: () => number;
   readonly protectedViews?: boolean;
   readonly creatorView?: boolean;
+  readonly toolDiscovery?: readonly string[];
 } = {}) {
   const roles = options.roles ?? { fixture: ["invoke", "advertise", "execute"] };
   const policy = { id: "fixture.tools", revision: 1 };
@@ -87,7 +89,7 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
       : {}),
     sessions: { providers: [createMockProvider()], application: { catalogue: createSessionTypeCatalogue({ tools: createToolCatalogue({ definitions }), types: [type.registration] }), defaultType: sessionType }, creationSecurity: { registry, policies } },
     toolExecution: { registry, policies, registrations, resolve: ({ origin }) => ({ route: { origin, targets: [origin] } }), dispatcher: { limits: { shutdownWaitMs: 20 } } },
-    security: { composition, initialAuthority: { prepare: ({ context, fence }) => {
+    security: { composition, ...(options.securityNow === undefined ? {} : { now: options.securityNow }), initialAuthority: { prepare: ({ context, fence }) => {
       const releaseSignal = Promise.withResolvers<undefined>();
       const record = { context, fence, tuples: installConnection(context, fence), released: releaseSignal.promise };
       contexts.set(context.connectionId, record);
@@ -114,7 +116,8 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
       const actor = { kind: "user" as const, principal: { domainId: "local", subject } };
       const bindingId = "fixture-grant-" + subject;
       registry.installBinding({ id: bindingId, actor, scope, roles: actorRoles, policies: [policy], revision: 1, authority: { kind: "host-policy", policy } });
-      for (const definition of definitions) for (const operation of ["invoke", "advertise"] as const) registry.installToolAssignment({ resource: scope, route, recipient: actor,
+      const operations: readonly ToolOperation[] = options.toolDiscovery?.includes(subject) === true ? ["discover", "invoke", "advertise"] : ["invoke", "advertise"];
+      for (const definition of definitions) for (const operation of operations) registry.installToolAssignment({ resource: scope, route, recipient: actor,
         contract: { id: definition.id, key: definition.key, version: definition.version }, operation, bindingId, policyRef: policy });
     }
     for (const record of contexts.values()) {

@@ -115,3 +115,19 @@ DB-safe typecheck; focused clientProtocol/toolProtocolV2/connection suites; docs
 full `pnpm validate`; independent final review. P12 remains responsible for the
 expanded X05/X06 proof matrix; this packet still requires a real successful public
 client invocation and private result as its own outcome.
+
+## Integration amendments and evidence
+
+The server-to-executor x-ahp/tools/cancel notification uses the exact v2 invocation
+correlation without input; this is distinct from the caller request selector.
+Local handlers receive AbortSignal. Neither signal nor receipt releases unsettled
+work capacity. Retention custom clocks require a pure same-domain fenceNow reader
+for a final deadline check after authority callbacks (public expiry regression).
+Identical status transitions retain identity to prevent a spurious cancel-reply veto.
+
+The old depth-80 transport parity case is split into bounded depth-48 positive
+parity and depth-80 rejection on text/binary/parsed private frames, matching the
+already accepted strict depth-64 envelope contract. Ordinary frames still pass.
+P09 suites pin the prior client as a test-only internal native-broker fixture,
+preserving their existing assertions. Both production import surfaces use only
+the new runtime, with separate real public SDK proof. No production fallback.

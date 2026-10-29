@@ -13,11 +13,15 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
   for (const key of Object.keys(defaults) as Array<keyof PrivateToolCallLimits>) {
     if (!Number.isSafeInteger(limits[key]) || limits[key] < 1 || limits[key] > maximum[key]) throw new TypeError("Invalid private call limit.");
   }
-  const now = options.now === undefined ? Date.now.bind(Date) : options.now.bind(options);
+  if ((options.now === undefined) !== (options.fenceNow === undefined)) throw new TypeError("A custom call clock requires a pure deadline reader.");
+  const platformClock = Date.now.bind(Date);
+  const now = options.now === undefined ? platformClock : options.now.bind(options);
+  const fenceNow = options.fenceNow === undefined ? platformClock : options.fenceNow.bind(options);
   const entries = new Map<string, Entry>();
   let closed = false;
   let retainedBytes = 0;
   let lastTime = Number.NEGATIVE_INFINITY;
+  let lastFenceTime = Number.NEGATIVE_INFINITY;
   const owned = (entry: Entry): boolean => !closed && entries.get(entry.callId) === entry;
   const cancelWork = (entry: Entry): void => {
     try {
@@ -49,7 +53,7 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
       dispose();
       throw new TypeError("Invalid private call clock.");
     }
-    if (!Number.isFinite(time) || time < lastTime) {
+    if (!Number.isFinite(time) || time < Math.max(lastTime, lastFenceTime)) {
       dispose();
       throw new TypeError("Invalid private call clock.");
     }
@@ -58,6 +62,7 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
     return time;
   };
   const state = (entry: Entry, status: "waiting" | "running" | "draining" | "failed" | "cancelled"): void => {
+    if (entry.status.status === status) return;
     entry.status = Object.freeze({ version: 2, callId: entry.callId, status });
   };
   const live = (entry: Entry): boolean => {
@@ -154,18 +159,38 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
     read(callId, owner) {
       clock();
       const entry = entries.get(callId);
-      if (entry === undefined || entry.owner !== owner || !owned(entry)) return undefined;
+      if (entry === undefined || entry.owner !== owner || entry.handle === undefined || !owned(entry)) return undefined;
       const status = entry.status;
-      const fence = (): boolean => owned(entry) && entry.status === status;
-      return Object.freeze({ status, fence, current: () => {
+      const fence = (): boolean => {
+        if (!owned(entry) || entry.status !== status) return false;
+        try {
+          const time = fenceNow();
+          if (!Number.isFinite(time) || time < Math.max(lastTime, lastFenceTime)) return false;
+          lastFenceTime = time;
+          return time < entry.expiresAt && owned(entry) && entry.status === status;
+        } catch {
+          return false;
+        }
+      };
+      return Object.freeze({ status, handle: entry.handle, fence, current: () => {
         clock();
         return fence();
       } });
     },
-    cancel(callId, owner) {
+    cancel(callId, owner, admission) {
       clock();
       const entry = entries.get(callId);
       if (entry === undefined || entry.owner !== owner || !owned(entry)) return false;
+      try {
+        const allowed: unknown = admission === undefined ? true : admission();
+        if (allowed !== true) {
+          void Promise.resolve(allowed).catch(() => undefined);
+          return false;
+        }
+      } catch {
+        return false;
+      }
+      if (!owned(entry)) return false;
       if (entry.finished || entry.cancelled) return true;
       entry.cancelled = true;
       retainedBytes -= entry.bytes;

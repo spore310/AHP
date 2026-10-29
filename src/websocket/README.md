@@ -249,7 +249,7 @@ Its synchronous guard, expiry and release cover this permission as well as scope
 facts; revocation must make that guard false. Consumers needing only scoped views
 cannot use native initialize without permitting that host-wide cursor, because
 the pinned protocol requires the real current serverSeq. Protected native views
-preserve this sequence; private tool interoperability remains separate work.
+preserve this sequence; private v2 tool execution uses separate correlated messages.
 Legacy agentWork authentication by itself does not establish this metadata permission.
 The application selects existing full resource incarnations and grant revisions; setup calls
 `resources.resolve` and `bindings.read({actor,scope,grantRevision})` exactly. It
@@ -308,7 +308,7 @@ remain. The new public tests below use the real unmocked facade/host alongside t
 | [`src/tests/websocket/composition.test.ts`](../tests/websocket/composition.test.ts) | Two composed hosts do not share sessions; stop and failed start are terminal for start and session mutations. |
 | [`src/tests/websocket/sdk.test.ts`](../tests/websocket/sdk.test.ts) | Installed SDK client initializes, observes catalogue fan-out, and receives one accepted rename. |
 | [`src/tests/websocket/sessionTypeCapacity.test.ts`](../tests/websocket/sessionTypeCapacity.test.ts) | A header-enum session type accepts creation, omits admin tools, and rejects object or unmapped headers. |
-| [`src/tests/websocket/toolInvocation.test.ts`](../tests/websocket/toolInvocation.test.ts) | Real SDK sockets: matching manifests, atomic/private advertisement denial, local calls/results and privacy, outsider/schema rejection, forged/stale/ambiguous executors, disconnect/URI reuse, concurrent self-calls, capacity/release, and empty registration. |
+| [`src/tests/websocket/toolInvocation.test.ts`](../tests/websocket/toolInvocation.test.ts) | Internal kernel and pinned test-only legacy client over real SDK sockets: matching manifests, atomic/private advertisement denial, local calls/results and privacy, outsider/schema rejection, forged/stale/ambiguous executors, disconnect/URI reuse, concurrent self-calls, capacity/release, and empty registration. |
 | [`src/tests/websocket/deferred.test.ts`](../tests/websocket/deferred.test.ts) | A broken completion predicate cannot escape the ordered socket queue. |
 | [`src/tests/agents/authenticator.test.ts`](../tests/agents/authenticator.test.ts) | Bearer parsing, exact token lookup, missing/unknown credentials, repeated headers, and value-free errors. |
 | [`src/tests/agents/directory.test.ts`](../tests/agents/directory.test.ts) | Stable registration, cross-principal denial, disabled agents, one live binding, generation fencing, expiry, and stale release. |
@@ -320,8 +320,8 @@ remain. The new public tests below use the real unmocked facade/host alongside t
 
 ## Private canonical compatibility kernel (not a public tool route)
 
-The supported facade denies legacy `x-ahp/tools/call`/completion. Private assignment,
-and public tool SDK integration must be completed before tool delivery opens.
+The supported facade rejects legacy `x-ahp/tools/call` and legacy completion.
+Negotiated strict v2 private methods use the same canonical broker/dispatcher.
 Internal compatibility tests use the same private kernel directly (or a file-local
 isolated binding-factory substitution), without changing their canonical assertions.
 They do not prove public multi-user privacy or authorized SDK interoperability.
@@ -414,3 +414,39 @@ still no canonical server-tool producer until its later execution packet.
   error mapping and classification rules.
 - [`docs/technical/runtime-lifecycles.md`](../../docs/technical/runtime-lifecycles.md)
   — the server lifecycle state machine in detail.
+
+## Private v2 socket adapter
+
+Native AHP remains 1.0.0. After minimal initialization, explicit capabilities
+negotiation enables strict selector-only assignment/advertisement/dispatch/status/
+cancel/resume requests. Capabilities reveal no catalogue. Assigned descriptors
+require actual discover/reveal proofs and independent allowed purposes; executable
+entries include exact approved source/implementation/registration and connection
+facts. Views are recipient-owned and capped at 128 per peer, 1024 total, with
+64 staged preparations. Negotiation caps 1024 peers including pending reservations.
+Existing view refresh works at capacity; failed enqueue preserves prior state.
+Advertisements commit only after exact reply enqueue and trailing owned fences.
+
+Dispatch reserves private retention before using the sole canonical dispatcher,
+then replies at admission rather than remote completion. Status/cancel freshly
+authorize the original caller, route and selected executor; final record/deadline
+fences follow authority callbacks. Foreign leases return safe absence. The exact
+selected connection alone can complete a v2 invocation. Host-to-executor cancel
+notifications carry its exact correlation without input and request cooperative
+cancellation; unresolved work remains draining until actual completion/settlement.
+No public legacy alias or unnegotiated completion bypass is enabled. Resume remains
+unsupported until P13. Approved source identity is not remote code attestation.
+
+| File | Responsibility |
+| --- | --- |
+| helpers/ahp/helpers/toolProtocol/index.ts | Private socket protocol exports. |
+| helpers/ahp/helpers/toolProtocol/types.ts | Trusted broker ports, staged views and adapter lifetime. |
+| helpers/ahp/helpers/toolProtocol/helpers.ts | Negotiation, bounded assigned views, exact advertisement, receipt/status/cancel and cleanup. |
+
+The public tests in toolProtocolV2.test.ts exercise real authenticated sockets,
+recipient-specific raw-wire canaries, exact completions, cancellation/draining,
+final status TTL expiry, and actual local handler execution through the public
+client and pinned SDK. toolProtocolCapacity.test.ts tests adapter capacity with
+synthetic ports and makes no authorization claim. Historical P09 native-broker
+assertions use the frozen test-only client under tests/websocket/legacyToolClient;
+it is not exported by production and does not verify the current client runtime.

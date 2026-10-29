@@ -1,6 +1,7 @@
 import type { AhpTransport } from "@microsoft/agent-host-protocol/client";
 
 import type { ToolContractDefinition } from "@tools";
+import type { ToolInvoke, ToolDispatchReply, ToolStatusReply } from "./helpers/protocol";
 
 /** A local, client-executed implementation pinned to one contract. */
 export interface LocalToolImplementation {
@@ -8,11 +9,12 @@ export interface LocalToolImplementation {
   execute(input: unknown, context: ToolInvocationContext): unknown;
 }
 
-export interface ToolInvocationContext {
+export interface ToolInvocationContext extends Omit<ToolInvoke, "version" | "input"> {
   readonly callId: string;
   readonly channel: string;
   readonly key: string;
   readonly version: number;
+  readonly signal: AbortSignal;
 }
 
 export interface ToolClientOptions {
@@ -24,10 +26,14 @@ export interface ToolClientOptions {
 export interface ToolClient {
   /** The installed public AHP SDK client used for ordinary protocol operations. */
   readonly client: import("@microsoft/agent-host-protocol/client").AhpClient;
-  /** Subscribe to a typed session, discover its manifest, and advertise local tools. */
+  /** Subscribe, obtain private assignments, and activate an exact private advertisement. */
   joinSession(channel: string, implementations: readonly LocalToolImplementation[]): Promise<void>;
   /** Ask a connected session tool provider to execute one exact contract. */
-  callTool(channel: string, ref: { readonly key: string; readonly version: number }, input: unknown): Promise<unknown>;
+  callTool(channel: string, ref: { readonly id?: string; readonly key: string; readonly version: number }, input: unknown): Promise<unknown>;
+  dispatchTool(channel: string, contract: ToolInvoke["contract"], input: unknown): Promise<ToolDispatchReply>;
+  statusTool(callId: string): Promise<ToolStatusReply>;
+  cancelTool(callId: string): Promise<ToolStatusReply>;
+  resumeTool(continuationId: string, proofRef: string): Promise<ToolDispatchReply>;
   shutdown(): Promise<void>;
 }
 

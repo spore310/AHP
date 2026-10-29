@@ -8,6 +8,9 @@ import { canonicalJsonEqual, toAhpToolDefinition, TOOL_CONTRACT_META_KEY } from 
 import type { ExecutorRevision, ResourceRef } from "@authorization";
 import { createClientToolDispatcher, type ClientToolBrokerOptions, type ClientToolProof, type ClientToolRegistration } from "@toolExecution/helpers/client/helpers/broker";
 import type { ToolDispatchHandle } from "@toolExecution/helpers/dispatcher";
+import { parseToolWire, toolCorrelation, assignedToolSchema, toolAssignedReplySchema, toolInvokeSchema, toolCompleteSchema, toolExecutorCancelSchema } from "@toolExecution/helpers/client/helpers/protocol";
+import type { AssignedTool, ToolInvoke } from "@toolExecution/helpers/client/helpers/protocol";
+import { createPrivateToolProtocol, type PrivateAssignmentTicket } from "./helpers/toolProtocol";
 import type { ConnectionSecuritySnapshot } from "@websocket/helpers/security/types";
 import type { JsonRpcInvocation, WebSocketConnectionContext } from "../../types";
 import { TOOL_INVOCATION_METHOD } from "./constants";
@@ -16,6 +19,7 @@ import type { AHPPeer } from "./types";
 const toolCallParamsSchema = z.strictObject({ channel: z.string().min(1).max(2048), key: z.string().min(1).max(256), version: z.int().positive(), input: z.unknown() });
 const toolCompletionParamsSchema = z.strictObject({ callId: z.uuid(), channel: z.string().min(1).max(2048), key: z.string().min(1).max(256), version: z.int().positive(), output: z.unknown().optional(), error: z.string().max(4096).optional() })
   .refine((value) => (value.output === undefined) !== (value.error === undefined));
+const completionSchema = z.union([toolCompletionParamsSchema, toolCompleteSchema]);
 const unavailable = (): never => {
   throw new RpcError(JsonRpcErrorCodes.InvalidParams, "Tool operation unavailable");
 };
@@ -31,6 +35,7 @@ const sameTools = (left: readonly ToolDefinition[], right: readonly ToolDefiniti
   && left.every((tool, index) => right[index] !== undefined && sameDescriptor(tool, right[index]));
 
 interface Advertisement {
+  readonly advertisementId?: string;
   readonly clientId: string;
   readonly origin: ResourceRef<"session">;
   readonly setup: ConnectionSecuritySnapshot;
@@ -51,6 +56,8 @@ interface AdvertisementTicket {
 }
 
 interface PendingCompletion {
+  release(): void;
+  readonly invocation?: ToolInvoke;
   readonly context: WebSocketConnectionContext;
   readonly generation: number;
   readonly channel: string;
@@ -71,6 +78,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
   const advertisements = new Map<string, Map<string, Advertisement>>();
   const sessionTokens = new Map<string, ResourceRef<"session">>();
   const stagedAdvertisements = new Set<StagedAdvertisement>();
+  const stagedPrivateAdvertisements = new Set<object>();
   const pending = new Map<string, PendingCompletion>();
   const calls = new Map<string, { readonly caller: WebSocketConnectionContext; readonly executor: WebSocketConnectionContext;
     readonly channel: string; readonly handle: ToolDispatchHandle<unknown>; }>();
@@ -107,6 +115,99 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
     const entries = advertisements.get(peer.context.connectionId);
     entries?.delete(channel);
     if (entries?.size === 0) advertisements.delete(peer.context.connectionId);
+  };
+
+  const assignment = async (context: WebSocketConnectionContext, channel: string, signal: AbortSignal): Promise<PrivateAssignmentTicket> => {
+    const peer = requirePeer(context);
+    const setup = context.security;
+    if (dispatcher === undefined || options === undefined || setup === undefined || !livePeer(peer, setup)
+      || !peer.subscriptions.has(channel) || signal.aborted) return unavailable();
+    const facts = session(channel);
+    const epoch = options.registry.captureFence();
+    const executor: ExecutorRevision = { actor: setup.context.actor, connectionId: context.connectionId,
+      generation: setup.fence.connectionGeneration, registrationRevision: 1 };
+    const tools: AssignedTool[] = [];
+    const proofs: ClientToolProof[] = [];
+    const entries: Array<{ readonly tool: AssignedTool; readonly registration: ClientToolRegistration; readonly executor: ExecutorRevision }> = [];
+    for (const contract of facts.manifest.toolContracts) {
+      const permitted: Array<{ readonly tool: AssignedTool; readonly registration: ClientToolRegistration;
+        readonly executor: ExecutorRevision; readonly proofs: ClientToolProof[]; }> = [];
+      for (const registration of dispatcher.policy.registrations.filter((candidate) => candidate.definition.id === contract.id)) {
+        const selectedExecutor = { ...executor, registrationRevision: registration.revision };
+        const base = { caller: setup.context, origin: facts.origin, sessionType: facts.sessionType, providerId: facts.providerId,
+          registration, input: null, signal };
+        try {
+          const resolution = await dispatcher.policy.resolve(base);
+          const discover = await dispatcher.policy.authorize({ ...base, resolution, operation: "discover" });
+          const currentProofs = [discover];
+          const purposes: AssignedTool["purposes"] = ["discover"];
+          for (const operation of ["invoke", "advertise", "execute"] as const) {
+            try {
+              const proof = await dispatcher.policy.authorize({ ...base, resolution, operation,
+                ...(operation === "execute" ? { executor: selectedExecutor, executorContext: setup.context } : {}) });
+              purposes.push(operation);
+              currentProofs.push(proof);
+            } catch { /* An affordance cannot create its missing grant. */ }
+          }
+          const executable = purposes.includes("advertise") && purposes.includes("execute");
+          const tool = parseToolWire(assignedToolSchema, { contract: { id: contract.id, key: contract.key, version: contract.version },
+            descriptor: toAhpToolDefinition(registration.definition), purposes, conditions: [],
+            ...(executable ? { execution: { binding: registration.implementation, registrationRevision: registration.revision, source: registration.source } } : {}) });
+          permitted.push({ tool, registration, executor: selectedExecutor, proofs: currentProofs });
+        } catch { /* Private descriptors require a complete discover/reveal path. */ }
+      }
+      // No implicit implementation selection when several exact candidates remain.
+      const selected = permitted[0];
+      if (permitted.length !== 1 || selected === undefined) continue;
+      tools.push(selected.tool);
+      entries.push(selected);
+      proofs.push(...selected.proofs);
+    }
+    const value = parseToolWire(toolAssignedReplySchema.omit({ version: true, channel: true, viewRevision: true }), {
+      resource: facts.origin, connection: { id: context.connectionId, generation: setup.fence.connectionGeneration }, tools });
+    const fence = (): boolean => !signal.aborted && epoch() && ownedPeer(peer, setup)
+      && peer.subscriptions.has(channel) && sessionTokens.get(channel) === facts.origin;
+    const current = (): boolean => !signal.aborted && livePeer(peer, setup) && liveSession(facts.origin)
+      && (proofs.length === 0 || dispatcher.policy.current(proofs)) && fence();
+    if (!current()) return unavailable();
+    return { value, current, fence,
+      advertise(contracts, advertisementId) {
+        if (!current() || stagedPrivateAdvertisements.size >= 64) return unavailable();
+        const selected: typeof entries = [];
+        const seen = new Set<string>();
+        for (const contract of contracts) {
+          const entry = entries.find((candidate) => candidate.tool.contract.id === contract.id
+            && candidate.tool.contract.key === contract.key && candidate.tool.contract.version === contract.version);
+          if (entry === undefined || entry.tool.execution === undefined || seen.has(contract.id)) return unavailable();
+          seen.add(contract.id);
+          selected.push(entry);
+        }
+        const previous = advertisements.get(context.connectionId)?.get(channel);
+        const advertisement: Advertisement = { advertisementId, clientId: peer.clientId ?? "", origin: facts.origin, setup,
+          entries: selected.map((entry) => ({ registration: entry.registration, executor: entry.executor })) };
+        const token = {};
+        stagedPrivateAdvertisements.add(token);
+        const owns = (): boolean => fence() && stagedPrivateAdvertisements.has(token)
+          && advertisements.get(context.connectionId)?.get(channel) === previous
+          && ![...advertisements.entries()].some(([connectionId, values]) => connectionId !== context.connectionId && values.get(channel)?.clientId === advertisement.clientId);
+        return { tools: selected.map((entry) => entry.tool), current: () => current() && owns(),
+          commit: () => {
+            if (!owns()) return false;
+            if (selected.length === 0) clearAdvertisement(peer, channel);
+            else {
+              const registered = advertisements.get(context.connectionId) ?? new Map<string, Advertisement>();
+              registered.set(channel, advertisement);
+              advertisements.set(context.connectionId, registered);
+            }
+            stagedPrivateAdvertisements.delete(token);
+            return true;
+          },
+          release: () => {
+            stagedPrivateAdvertisements.delete(token);
+          },
+        };
+      },
+    };
   };
 
   const prepareAdvertisement = async (peer: AHPPeer, channel: string, action: Record<string, unknown>) => {
@@ -198,18 +299,17 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
     }
   };
 
-  const call = async (params: unknown, context: WebSocketConnectionContext, invocation: JsonRpcInvocation): Promise<unknown> => {
+  const startCall = (request: z.infer<typeof toolCallParamsSchema>, context: WebSocketConnectionContext, callId: string, expectedContractId?: string) => {
     const caller = requirePeer(context);
-    const request = toolCallParamsSchema.parse(params);
     const setup = context.security;
-    if (invocation.guardReply === undefined || dispatcher === undefined || setup === undefined || !livePeer(caller, setup) || !caller.subscriptions.has(request.channel)
+    if (dispatcher === undefined || setup === undefined || !livePeer(caller, setup) || !caller.subscriptions.has(request.channel)
       || admissions + dispatcher.stats().active >= 64) return unavailable();
     admissions += 1;
     let admitting = true;
     try {
       const facts = session(request.channel);
       const contract = facts.manifest.toolContracts.find((entry) => entry.key === request.key && entry.version === request.version);
-      if (contract === undefined) return unavailable();
+      if (contract === undefined || (expectedContractId !== undefined && contract.id !== expectedContractId)) return unavailable();
       const idCounts = new Map<string, number>();
       for (const peer of peers.values()) if (peer.phase === "ready" && peer.clientId !== undefined) idCounts.set(peer.clientId, (idCounts.get(peer.clientId) ?? 0) + 1);
       const candidates: { peer: AHPPeer; ad: Advertisement; registration: ClientToolRegistration; executor: ExecutorRevision }[] = [];
@@ -221,7 +321,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
       // Admission is checked again by the one dispatcher; ambiguity is never an implicit routing policy.
       const selected = candidates[0];
       if (selected === undefined || candidates.length !== 1) return unavailable();
-      const callId = randomUUID();
+      if (expectedContractId !== undefined && selected.ad.advertisementId === undefined) return unavailable();
       const controller = new AbortController();
       const current = (): boolean => livePeer(caller, setup) && caller.subscriptions.has(request.channel)
         && ownAdvertisement(selected.peer, request.channel, selected.ad) && liveSession(facts.origin);
@@ -232,46 +332,108 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
       const handle = dispatcher.dispatch({ caller: setup.context, origin: facts.origin, sessionType: facts.sessionType,
         providerId: facts.providerId, registration: selected.registration, input: request.input,
         signal: controller.signal, callId, executor: selected.executor, executorContext: selected.ad.setup.context, current, fence,
-        send: (input) => new Promise<unknown>((resolve, reject) => {
+        send: (input, actionContext) => new Promise<unknown>((resolve, reject) => {
           if (!current()) {
             reject(new Error("Unavailable"));
             return;
           }
-          pending.set(callId, { context: selected.peer.context, generation: selected.executor.generation,
-            channel: request.channel, key: request.key, version: request.version, resolve, reject });
+          const privateInvocation = expectedContractId === undefined
+            ? undefined
+            : parseToolWire(toolInvokeSchema, {
+                version: 2, callId, channel: request.channel, contract: { id: contract.id, key: contract.key, version: contract.version },
+                route: actionContext.resources, execution: { binding: selected.registration.implementation,
+                  registrationRevision: selected.registration.revision, source: selected.registration.source },
+                connection: { id: selected.peer.context.connectionId, generation: selected.executor.generation },
+                advertisementId: selected.ad.advertisementId, input,
+              });
+          let enqueued = false;
+          let cancellationSent = false;
+          const cancel = (): void => {
+            if (!enqueued || cancellationSent || privateInvocation === undefined) return;
+            cancellationSent = true;
+            const correlation = toolCorrelation(privateInvocation);
+            selected.peer.context.send({ jsonrpc: JSONRPC_VERSION, method: "x-ahp/tools/cancel",
+              params: jsonRpcParamsSchema.parse(parseToolWire(toolExecutorCancelSchema, correlation)) },
+            () => pending.get(callId) === entry && ownedPeer(selected.peer, selected.ad.setup));
+          };
+          const entry: PendingCompletion = { context: selected.peer.context, generation: selected.executor.generation,
+            channel: request.channel, key: request.key, version: request.version, resolve, reject,
+            release: () => {
+              actionContext.signal.removeEventListener("abort", cancel);
+            },
+            ...(privateInvocation === undefined ? {} : { invocation: privateInvocation }) };
+          pending.set(callId, entry);
+          actionContext.signal.addEventListener("abort", cancel, { once: true });
           const message: JsonRpcMessage = { jsonrpc: JSONRPC_VERSION, method: TOOL_INVOCATION_METHOD,
-            params: jsonRpcParamsSchema.parse(parseUnknownJson(JSON.stringify({ callId, channel: request.channel, key: request.key, version: request.version, input }))) };
-          if (!selected.peer.context.send(message, handle.current)) {
+            params: jsonRpcParamsSchema.parse(privateInvocation ?? parseUnknownJson(JSON.stringify({ callId, channel: request.channel, key: request.key, version: request.version, input }))) };
+          enqueued = selected.peer.context.send(message, handle.current);
+          if (!enqueued) {
             // A boolean enqueue failure is not a remote termination guarantee.
             handle.cancel();
           }
+          if (actionContext.signal.aborted) cancel();
         }),
       });
       admissions -= 1;
       admitting = false;
       calls.set(callId, { caller: context, executor: selected.peer.context, channel: request.channel, handle });
-      invocation.guardReply(handle.current);
+
       void handle.settled.then(() => {
         calls.delete(callId);
+        pending.get(callId)?.release();
         pending.delete(callId);
       });
-      const outcome = await handle.result;
-      if (outcome.status !== "succeeded" || !handle.current()) return unavailable();
-      return outcome.output;
+      return handle;
     } finally {
       if (admitting) admissions -= 1;
     }
   };
+  const call = async (params: unknown, context: WebSocketConnectionContext, invocation: JsonRpcInvocation): Promise<unknown> => {
+    if (invocation.guardReply === undefined) return unavailable();
+    const handle = startCall(toolCallParamsSchema.parse(params), context, randomUUID());
+    invocation.guardReply(handle.current);
+    const outcome = await handle.result;
+    if (outcome.status !== "succeeded" || !handle.current()) return unavailable();
+    return outcome.output;
+  };
   const matched = (params: unknown, context: WebSocketConnectionContext) => {
-    const parsed = toolCompletionParamsSchema.safeParse(params);
-    if (!parsed.success) return undefined;
+    let parsed: ReturnType<typeof completionSchema.safeParse>;
+    try {
+      parsed = { success: true, data: parseToolWire(completionSchema, params) };
+    } catch {
+      return undefined;
+    }
     const entry = pending.get(parsed.data.callId);
     if (entry === undefined || entry.context !== context || entry.generation !== context.connectionGeneration
-      || entry.channel !== parsed.data.channel || entry.key !== parsed.data.key || entry.version !== parsed.data.version) return undefined;
+      || entry.channel !== parsed.data.channel) return undefined;
+    if ("contract" in parsed.data) {
+      const completion = parsed.data;
+      if (entry.invocation === undefined || !privateProtocol?.negotiated(context)
+        || !(["version", "callId", "channel", "contract", "route", "execution", "connection", "advertisementId"] as const)
+          .every((key) => JSON.stringify(completion[key]) === JSON.stringify(entry.invocation?.[key]))) return undefined;
+    } else if (entry.invocation !== undefined || entry.key !== parsed.data.key || entry.version !== parsed.data.version) return undefined;
     return { entry, completion: parsed.data };
   };
+  const privateProtocol = options === undefined
+    ? undefined
+    : createPrivateToolProtocol({
+        ready: (context) => {
+          const peer = peers.get(context.connectionId), setup = context.security;
+          return peer !== undefined && setup !== undefined && livePeer(peer, setup);
+        },
+        fence: (context) => {
+          const peer = peers.get(context.connectionId), setup = context.security;
+          return peer !== undefined && setup !== undefined && ownedPeer(peer, setup);
+        },
+        assignment,
+        dispatch: (context, request, callId) => startCall({ channel: request.channel,
+          key: request.contract.key, version: request.contract.version, input: request.input }, context, callId, request.contract.id),
+        onInvalidate: (listener) => options.registry.onInvalidate(listener),
+      });
   return {
     call, prepareAdvertisement,
+    privateHandlers: privateProtocol?.handlers ?? {},
+    negotiated: (context: WebSocketConnectionContext) => privateProtocol?.negotiated(context) === true,
     observeEnvelope(envelope: ActionEnvelope): void {
       const action = envelope.action;
       if (action.type !== ACTION_TYPE_SESSION_ACTIVE_CLIENT_SET && action.type !== ACTION_TYPE_SESSION_ACTIVE_CLIENT_REMOVED) return;
@@ -295,30 +457,39 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
       requirePeer(context);
       const match = matched(params, context);
       if (match === undefined) return null;
+      match.entry.release();
       pending.delete(match.completion.callId);
-      if (match.completion.error !== undefined) match.entry.reject(new Error("Remote tool failed"));
-      else match.entry.resolve(match.completion.output);
+      if ("error" in match.completion && match.completion.error !== undefined) match.entry.reject(new Error("Remote tool failed"));
+      else if ("output" in match.completion) match.entry.resolve(match.completion.output);
       return null;
     },
     isCompletion(params: unknown, context: WebSocketConnectionContext): boolean {
       return matched(params, context) !== undefined;
     },
-    unsubscribe: clearAdvertisement,
+    unsubscribe: (peer: AHPPeer, channel: string) => {
+      clearAdvertisement(peer, channel);
+      privateProtocol?.forget(peer.context, channel);
+    },
     removeSession(channel: string): void {
+      privateProtocol?.removeSession(channel);
       sessionTokens.delete(channel);
       for (const staged of stagedAdvertisements) if (staged.channel === channel) stagedAdvertisements.delete(staged);
       for (const sessions of advertisements.values()) sessions.delete(channel);
       for (const call of calls.values()) if (call.channel === channel) call.handle.cancel();
     },
     removeConnection(connectionId: string): void {
+      const peer = peers.get(connectionId);
+      if (peer !== undefined) privateProtocol?.forget(peer.context);
       advertisements.delete(connectionId);
       for (const call of calls.values()) if (call.caller.connectionId === connectionId || call.executor.connectionId === connectionId) call.handle.cancel();
     },
     dispose(): void {
       disposed = true;
+      privateProtocol?.dispose();
       advertisements.clear();
       sessionTokens.clear();
       stagedAdvertisements.clear();
+      stagedPrivateAdvertisements.clear();
       for (const call of calls.values()) call.handle.cancel();
     },
     drain: () => dispatcher?.shutdown() ?? Promise.resolve({ draining: 0 }),

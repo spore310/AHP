@@ -1,15 +1,18 @@
 import type { AhpTransport, TransportFrame } from "@microsoft/agent-host-protocol/client";
-
 import { parseUnknownJson } from "@jsonrpc";
-
+import { canonicalJsonEqual } from "@tools/helpers/protocol";
 import type { LocalToolImplementation } from "../../types";
-import type { InvokeParams } from "./types";
+import { parseToolWire, toolCorrelation, toolInvokeSchema, toolCompleteSchema, toolExecutorCancelSchema, toolAssignmentsChangedSchema } from "../protocol";
+import type { ToolInvoke, ToolAssignedReply, ToolAdvertiseReply, ToolExecutorCancel } from "../protocol";
+import type { ActiveToolRegistration, StagedToolRegistration } from "./types";
 
-/** Intercepts the opt-in extension while forwarding all standard SDK frames. */
+/** One reader owns private messages and forwards ordinary frames to the pinned SDK. */
 export class ToolInvocationTransport implements AhpTransport {
-  private readonly implementations = new Map<string, Map<string, LocalToolImplementation>>();
-  private readonly stagedImplementations = new Map<string, Map<string, Map<string, LocalToolImplementation>>>();
-  private readonly queuedInvocations: InvokeParams[] = [];
+  private readonly implementations = new Map<string, ActiveToolRegistration>();
+  private readonly staged = new Map<string, { readonly channel: string; readonly registration: StagedToolRegistration }>();
+  private readonly queued: ToolInvoke[] = [];
+  private readonly seen = new Set<string>();
+  private readonly active = new Map<string, { readonly invoke: ToolInvoke; readonly controller: AbortController }>();
   private readonly requests = new Map<string, {
     readonly timer: ReturnType<typeof setTimeout>;
     resolve(value: unknown): void;
@@ -17,21 +20,24 @@ export class ToolInvocationTransport implements AhpTransport {
   }>();
 
   private closed = false;
+  private sendCount = 0;
   private readonly readers = new Set<(frame: null) => void>();
   private closing: Promise<void> | undefined;
 
-  constructor(
-    private readonly inner: AhpTransport,
-    private readonly release: () => void | Promise<void> = inner.close.bind(inner),
-  ) {}
+  constructor(private readonly inner: AhpTransport,
+    private readonly release: () => void | Promise<void> = inner.close.bind(inner)) {}
 
   async send(message: Parameters<AhpTransport["send"]>[0]): Promise<void> {
     this.assertOpen();
+    if (this.sendCount >= 64) throw new Error("Tool transport send capacity unavailable.");
+    this.sendCount += 1;
     try {
       await this.inner.send(message);
     } catch (error) {
       void this.close().catch(() => undefined);
       throw error;
+    } finally {
+      this.sendCount -= 1;
     }
   }
 
@@ -53,31 +59,49 @@ export class ToolInvocationTransport implements AhpTransport {
         void this.close().catch(() => undefined);
         return null;
       }
-      const parsed: unknown = parseFrame(frame);
-      if (!isRecord(parsed)) return frame;
-      if ((typeof parsed.id === "string" || typeof parsed.id === "number") && this.requests.has(String(parsed.id))) {
-        const requestId = String(parsed.id);
-        const pending = this.requests.get(requestId);
-        this.requests.delete(requestId);
+      const parsed = parseFrame(frame);
+      if (!isRecord(parsed) || parsed.jsonrpc !== "2.0") return frame;
+      if (typeof parsed.id === "string" && this.requests.has(parsed.id) && !Object.hasOwn(parsed, "method")) {
+        const pending = this.requests.get(parsed.id);
+        this.requests.delete(parsed.id);
         if (pending !== undefined) {
           clearTimeout(pending.timer);
-          if (isRecord(parsed.error)) pending.reject(new Error("Tool invocation failed."));
+          if (Object.hasOwn(parsed, "error") || !Object.hasOwn(parsed, "result")) pending.reject(new Error("Tool operation unavailable."));
           else pending.resolve(parsed.result);
         }
         continue;
       }
-      if (parsed.jsonrpc !== "2.0" || Object.hasOwn(parsed, "id") || parsed.method !== "x-ahp/tools/invoke") return frame;
-      const invoke = parseInvoke(parsed.params);
-      if (invoke === undefined) continue;
-      const identity = refKey(invoke.key, invoke.version);
-      const hasActiveImplementation = this.implementations.get(invoke.channel)?.has(identity) === true;
-      const hasStagedImplementation = [...(this.stagedImplementations.get(invoke.channel)?.values() ?? [])]
-        .some((candidate) => candidate.has(identity));
-      if (!hasActiveImplementation && hasStagedImplementation && this.queuedInvocations.length < 64) {
-        this.queuedInvocations.push(invoke);
-      } else {
-        void this.execute(invoke);
+      if (Object.hasOwn(parsed, "id")) return frame;
+      if (parsed.method === "x-ahp/tools/invoke") {
+        try {
+          this.receiveInvoke(parseToolWire(toolInvokeSchema, parsed.params));
+        } catch { /* Invalid private messages cannot execute. */ }
+        continue;
       }
+      if (parsed.method === "x-ahp/tools/cancel") {
+        try {
+          const cancel = parseToolWire(toolExecutorCancelSchema, parsed.params);
+          const active = this.active.get(cancel.callId);
+          if (active !== undefined && sameCorrelation(active.invoke, cancel)) active.controller.abort();
+          for (let index = this.queued.length - 1; index >= 0; index -= 1) {
+            const queued = this.queued[index];
+            if (queued !== undefined && sameCorrelation(queued, cancel)) {
+              this.queued.splice(index, 1);
+              void this.complete(queued, { error: "execution-failed" });
+            }
+          }
+        } catch { /* Invalid cancellation cannot affect owned work. */ }
+        continue;
+      }
+      if (parsed.method === "x-ahp/tools/assignmentsChanged") {
+        try {
+          const change = parseToolWire(toolAssignmentsChangedSchema, parsed.params);
+          this.implementations.delete(change.channel);
+          for (const [token, entry] of this.staged) if (entry.channel === change.channel) this.discard(change.channel, token);
+        } catch { /* Invalid hints do not change registrations. */ }
+        continue;
+      }
+      return frame;
     }
   }
 
@@ -86,12 +110,16 @@ export class ToolInvocationTransport implements AhpTransport {
     this.closed = true;
     for (const resolve of this.readers) resolve(null);
     this.readers.clear();
-    this.rejectRequests("Tool invocation transport closed.");
+    for (const pending of this.requests.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("Tool invocation transport closed."));
+    }
+    this.requests.clear();
     this.implementations.clear();
-    this.stagedImplementations.clear();
-    this.queuedInvocations.length = 0;
-    // Publish the single cleanup promise before invoking a reentrant supplier.
+    this.staged.clear();
+    this.queued.length = 0;
     this.closing = Promise.resolve().then(() => this.release());
+    for (const entry of this.active.values()) entry.controller.abort();
     return this.closing;
   }
 
@@ -103,122 +131,151 @@ export class ToolInvocationTransport implements AhpTransport {
     if (this.closed) throw new Error("Tool invocation transport closed.");
   }
 
-  requestCall(params: { readonly channel: string; readonly key: string; readonly version: number; readonly input: unknown }): Promise<unknown> {
-    if (this.closed) return Promise.reject(new Error("Tool invocation transport closed."));
-    const id = `x-ahp-tool-call:${globalThis.crypto.randomUUID()}`;
-    const message = JSON.stringify({ jsonrpc: "2.0", id, method: "x-ahp/tools/call", params });
+  request(method: string, params: unknown, timeoutMs = 5000): Promise<unknown> {
+    this.assertOpen();
+    if (this.requests.size >= 64 || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 35_000) throw new Error("Tool request capacity unavailable.");
+    const id = `x-ahp-tool:${globalThis.crypto.randomUUID()}`;
+    const message = JSON.stringify({ jsonrpc: "2.0", id, method, params });
     return new Promise<unknown>((resolve, reject) => {
-      const requestKey = id;
       const timer = setTimeout(() => {
-        this.requests.delete(requestKey);
-        reject(new Error("Tool invocation timed out."));
-      }, 35_000);
-      this.requests.set(requestKey, { timer, resolve, reject });
+        this.requests.delete(id);
+        reject(new Error("Tool operation timed out."));
+      }, timeoutMs);
+      this.requests.set(id, { timer, resolve, reject });
       void this.send(message).catch((error: unknown) => {
-        const pending = this.requests.get(requestKey);
-        this.requests.delete(requestKey);
+        const pending = this.requests.get(id);
+        this.requests.delete(id);
         if (pending !== undefined) clearTimeout(pending.timer);
-        reject(error instanceof Error ? error : new Error("Tool invocation send failed."));
+        reject(error instanceof Error ? error : new Error("Tool operation send failed."));
       });
     });
   }
 
-  private rejectRequests(message: string): void {
-    for (const [id, pending] of this.requests) {
-      clearTimeout(pending.timer);
-      pending.reject(new Error(message));
-      this.requests.delete(id);
-    }
+  stage(channel: string, token: string, tools: readonly LocalToolImplementation[], view: ToolAssignedReply): void {
+    this.assertOpen();
+    const retainedChannels = new Set([...this.implementations.keys(), ...[...this.staged.values()].map((entry) => entry.channel)]);
+    if (view.channel !== channel || this.staged.size >= 64 || this.staged.has(token)
+      || (!retainedChannels.has(channel) && retainedChannels.size >= 128)) throw new Error("Tool registration unavailable.");
+    this.staged.set(token, { channel, registration: { view, implementations: new Map(tools.map((tool) => [identity(tool.definition), tool])) } });
   }
 
-  stage(channel: string, token: string, tools: readonly LocalToolImplementation[]): void {
+  activate(channel: string, token: string, acknowledgement: ToolAdvertiseReply): void {
     this.assertOpen();
-    const staged = this.stagedImplementations.get(channel) ?? new Map<string, Map<string, LocalToolImplementation>>();
-    staged.set(token, new Map(tools.map((tool) => [refKey(tool.definition.key, tool.definition.version), tool])));
-    this.stagedImplementations.set(channel, staged);
-  }
-
-  activate(channel: string, token: string): void {
-    this.assertOpen();
-    const staged = this.stagedImplementations.get(channel);
-    if (staged === undefined) throw new Error("Tool registration staging was lost.");
-    const candidate = staged.get(token);
-    if (candidate === undefined) throw new Error("Tool registration staging was lost.");
-    this.implementations.set(channel, candidate);
-    staged.delete(token);
-    if (staged.size === 0) this.stagedImplementations.delete(channel);
-    this.flushQueuedInvocations(channel);
+    const entry = this.staged.get(token);
+    if (entry === undefined || entry.channel !== channel) throw new Error("Tool registration staging was lost.");
+    if (!this.implementations.has(channel) && this.implementations.size >= 128) throw new Error("Tool registration unavailable.");
+    const view = entry.registration.view;
+    if (acknowledgement.channel !== channel || acknowledgement.viewRevision !== view.viewRevision
+      || !canonicalJsonEqual(acknowledgement.resource, view.resource) || !canonicalJsonEqual(acknowledgement.connection, view.connection)
+      || acknowledgement.tools.length !== view.tools.length
+      || !acknowledgement.tools.every((tool, index) => sameTool(tool, view.tools[index]))) throw new Error("Server acknowledged a different tool advertisement.");
+    this.implementations.set(channel, { ...entry.registration, acknowledgement });
+    this.staged.delete(token);
+    this.flush(channel);
   }
 
   discard(channel: string, token: string): void {
-    const staged = this.stagedImplementations.get(channel);
-    staged?.delete(token);
-    if (staged !== undefined && staged.size === 0) this.stagedImplementations.delete(channel);
-    this.flushQueuedInvocations(channel);
+    if (this.staged.get(token)?.channel === channel) this.staged.delete(token);
+    this.flush(channel);
   }
 
-  private flushQueuedInvocations(channel: string): void {
-    const retained: InvokeParams[] = [];
-    for (const invoke of this.queuedInvocations) {
-      if (invoke.channel === channel) void this.execute(invoke);
-      else retained.push(invoke);
+  private matches(invoke: ToolInvoke, registration: StagedToolRegistration): boolean {
+    const tool = registration.view.tools.find((entry) => identity(entry.contract) === identity(invoke.contract));
+    return tool !== undefined && tool.execution !== undefined && tool.purposes.includes("execute") && tool.purposes.includes("advertise")
+      && canonicalJsonEqual(tool.execution, invoke.execution) && canonicalJsonEqual(registration.view.resource, invoke.route.origin)
+      && canonicalJsonEqual(registration.view.connection, invoke.connection) && registration.implementations.has(identity(invoke.contract));
+  }
+
+  private receiveInvoke(invoke: ToolInvoke): void {
+    if (this.seen.has(invoke.callId)) return;
+    const active = this.implementations.get(invoke.channel);
+    const matching = active !== undefined && active.acknowledgement.advertisementId === invoke.advertisementId && this.matches(invoke, active);
+    const staging = [...this.staged.values()].some((entry) => entry.channel === invoke.channel && this.matches(invoke, entry.registration));
+    if (!matching && !staging) return;
+    // Never evict replay tombstones and re-execute an old call on this endpoint.
+    if (this.seen.size >= 4096) {
+      void this.close().catch(() => undefined);
+      return;
     }
-    this.queuedInvocations.splice(0, this.queuedInvocations.length, ...retained);
+    this.seen.add(invoke.callId);
+    if (matching) void this.execute(invoke);
+    else if (this.queued.length < 64) this.queued.push(invoke);
+    else void this.complete(invoke, { error: "execution-failed" });
   }
 
-  private async execute(invoke: InvokeParams): Promise<void> {
-    if (this.closed) return;
-    const identity = refKey(invoke.key, invoke.version);
-    const implementation = this.implementations.get(invoke.channel)?.get(identity);
-    let completion: Record<string, unknown>;
-    if (implementation === undefined) {
-      completion = { callId: invoke.callId, channel: invoke.channel, key: invoke.key, version: invoke.version, error: "Tool implementation unavailable." };
-    } else {
-      try {
-        const output: unknown = await implementation.execute(invoke.input, {
-          callId: invoke.callId,
-          channel: invoke.channel,
-          key: invoke.key,
-          version: invoke.version,
-        });
-        completion = { callId: invoke.callId, channel: invoke.channel, key: invoke.key, version: invoke.version, output };
-      } catch {
-        completion = { callId: invoke.callId, channel: invoke.channel, key: invoke.key, version: invoke.version, error: "Tool execution failed." };
+  private flush(channel: string): void {
+    for (let index = this.queued.length - 1; index >= 0; index -= 1) {
+      const invoke = this.queued[index];
+      if (invoke === undefined || invoke.channel !== channel) continue;
+      const active = this.implementations.get(channel);
+      if (active !== undefined && active.acknowledgement.advertisementId === invoke.advertisementId && this.matches(invoke, active)) {
+        this.queued.splice(index, 1);
+        void this.execute(invoke);
+      } else if (![...this.staged.values()].some((entry) => entry.channel === channel && this.matches(invoke, entry.registration))) {
+        this.queued.splice(index, 1);
+        void this.complete(invoke, { error: "execution-failed" });
       }
     }
+  }
+
+  private async execute(invoke: ToolInvoke): Promise<void> {
+    if (this.closed) return;
+    const registration = this.implementations.get(invoke.channel);
+    const implementation = registration?.implementations.get(identity(invoke.contract));
+    if (registration === undefined || implementation === undefined || registration.acknowledgement.advertisementId !== invoke.advertisementId
+      || !this.matches(invoke, registration) || this.active.size >= 64) {
+      await this.complete(invoke, { error: "execution-failed" });
+      return;
+    }
+    const controller = new AbortController();
+    this.active.set(invoke.callId, { invoke, controller });
     try {
-      if (this.isClosed()) return;
-      await this.send({ jsonrpc: "2.0", method: "x-ahp/tools/complete", params: completion });
+      const output: unknown = await implementation.execute(invoke.input, { ...invoke, key: invoke.contract.key,
+        version: invoke.contract.version, signal: controller.signal });
+      await this.complete(invoke, { output });
     } catch {
-      // A disconnected executor cannot complete its outstanding call.
+      await this.complete(invoke, { error: "execution-failed" });
+    } finally {
+      this.active.delete(invoke.callId);
     }
   }
-}
 
-const refKey = (key: string, version: number): string => `${key}@${String(version)}`;
-
-function parseInvoke(value: unknown): InvokeParams | undefined {
-  if (!isRecord(value)) return undefined;
-  const { callId, channel, key, version } = value;
-  if (typeof callId !== "string" || typeof channel !== "string" || typeof key !== "string"
-    || typeof version !== "number" || !Number.isSafeInteger(version) || !("input" in value)) {
-    return undefined;
+  private async complete(invoke: ToolInvoke, outcome: { readonly output: unknown } | { readonly error: "execution-failed" }): Promise<void> {
+    if (this.closed) return;
+    const correlation = toolCorrelation(invoke);
+    try {
+      let completion;
+      try {
+        completion = parseToolWire(toolCompleteSchema, { ...correlation, ...outcome });
+      } catch {
+        completion = parseToolWire(toolCompleteSchema, { ...correlation, error: "execution-failed" });
+      }
+      await this.send(JSON.stringify({ jsonrpc: "2.0", method: "x-ahp/tools/complete", params: completion }));
+    } catch { /* A disconnected executor cannot complete its outstanding call. */ }
   }
-  return { callId, channel, key, version, input: value.input };
 }
-
+export const identity = (ref: { readonly id: string; readonly key: string; readonly version: number }): string => `${ref.id}\u0000${ref.key}\u0000${String(ref.version)}`;
+export function sameTool(left: unknown, right: unknown): boolean {
+  if (!isRecord(left) || !isRecord(right)) return false;
+  const entries = Object.entries(left);
+  return Object.keys(right).length === entries.length && entries.every(([key, value]) => key === "descriptor"
+    ? sameTool(value, right[key])
+    : canonicalJsonEqual(value, right[key]));
+}
+function sameCorrelation(invoke: ToolInvoke, cancel: ToolExecutorCancel): boolean {
+  return (["version", "callId", "channel", "contract", "route", "execution", "connection", "advertisementId"] as const)
+    .every((key) => canonicalJsonEqual(invoke[key], cancel[key]));
+}
 function parseFrame(frame: TransportFrame): unknown {
   try {
     if (frame.kind === "parsed") return frame.message;
-    if (frame.kind === "text") return parseUnknownJson(frame.text);
-    // Adapter owns frame admission. This bounds only new binary interception.
+    if (frame.kind === "text") return frame.text.length > 2 * 1024 * 1024 ? undefined : parseUnknownJson(frame.text);
     if (frame.data.byteLength > 2 * 1024 * 1024) return undefined;
     return parseUnknownJson(new TextDecoder("utf-8", { fatal: true }).decode(frame.data));
   } catch {
     return undefined;
   }
 }
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

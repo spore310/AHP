@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 
 import { defineToolContract } from "@tools";
 import { ToolInvocationTransport } from "@toolClient/transport";
+import { privateWireFixture } from "../toolExecution/privateWireFixture";
 
 const definition = defineToolContract({
   id: "11111111-1111-4111-8111-111111111111",
@@ -26,14 +27,16 @@ it("does not execute a request-shaped invoke frame", async () => {
   const inbound: TransportFrame[] = [requestFrame];
   const sent: Array<unknown> = [];
   const inner: AhpTransport = {
-    send: (message) => { sent.push(message); },
+    send: (message) => {
+      sent.push(message);
+    },
     recv: () => Promise.resolve(inbound.shift() ?? null),
     close: () => undefined,
   };
   const transport = new ToolInvocationTransport(inner);
   const execute = vi.fn(() => ({ ok: true }));
-  transport.stage("ahp-session:/test", "registration", [{ definition, execute }]);
-  transport.activate("ahp-session:/test", "registration");
+  transport.stage("ahp-session:/test", "registration", [{ definition, execute }], privateWireFixture(definition, "ahp-session:/test").assigned);
+  transport.activate("ahp-session:/test", "registration", privateWireFixture(definition, "ahp-session:/test").acknowledgement);
 
   await expect(transport.recv()).resolves.toEqual(requestFrame);
   expect(execute).not.toHaveBeenCalled();
