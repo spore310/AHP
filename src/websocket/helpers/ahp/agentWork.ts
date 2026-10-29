@@ -11,7 +11,7 @@ import {
   WORK_MAX_REQUEST_KEY_LENGTH,
   WORK_MAX_RESULT_BYTES,
   type AuthorizedAgentContext,
-  type SessionOwnerRegistry,
+  type SessionOwnerLookup,
   type WorkService,
 } from "@work";
 
@@ -32,7 +32,7 @@ import {
 export interface AgentWorkExtensionOptions {
   readonly agents?: AgentDirectory;
   readonly work?: WorkService;
-  readonly sessionOwners: SessionOwnerRegistry;
+  readonly sessionOwners: SessionOwnerLookup;
 }
 
 export interface AgentWorkExtension {

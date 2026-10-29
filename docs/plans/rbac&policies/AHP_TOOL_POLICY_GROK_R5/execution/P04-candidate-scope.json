@@ -1,0 +1,8 @@
+{
+  "predecessorVerified": 56,
+  "workerHashesVerified": 28,
+  "unchangedSuiteBodies": 7,
+  "files": 84,
+  "manifest": "docs/plans/rbac&policies/AHP_TOOL_POLICY_GROK_R5/execution/P04-candidate.sha256",
+  "sha256": "9a2c89413d4ba649dedbde6d4be5d1a53ca266bb0812a4018da0fe61e492f754"
+}

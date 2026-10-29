@@ -1,4 +1,5 @@
 import { SESSION_TYPE_KEY_PATTERN } from "@sessions/constants";
+import { captureCreationPolicy, freezeCreation } from "@sessions/helpers/creation";
 import {
   MAX_CONTRACT_VERSION,
   MAX_MANIFEST_BYTES,
@@ -37,6 +38,7 @@ export function createSessionTypeCatalogue(
   for (const registration of options.types) {
     const definition = captureDefinition(registration.definition);
     assertIdentity(definition);
+    if (typeof registration.enabledForCreation !== "boolean") throw new SessionTypeError("invalid-definition", "Invalid creation enablement.");
     if (seenIds.has(definition.id)) {
       throw new SessionTypeError("duplicate-revision", "Duplicate session type id.");
     }
@@ -49,7 +51,8 @@ export function createSessionTypeCatalogue(
     byIdentity.set(identity, {
       definition,
       tools,
-      config: registration.config,
+      config: Object.freeze({ schema: freezeCreation(structuredClone(registration.config.schema)), parse: registration.config.parse.bind(registration.config) }),
+      ...(registration.policy === undefined ? {} : { policy: captureCreationPolicy(registration.policy) }),
       enabledForCreation: registration.enabledForCreation,
     });
   }
@@ -66,6 +69,7 @@ export function createSessionTypeCatalogue(
       definition: structuredClone(found.definition),
       tools: found.tools.map((tool) => structuredClone(tool)),
       config: found.config,
+      ...(found.policy === undefined ? {} : { policy: found.policy }),
       enabledForCreation: found.enabledForCreation,
     };
   };
@@ -80,7 +84,9 @@ export function createSessionTypeCatalogue(
 }
 
 function captureDefinition(definition: SessionTypeDefinition): SessionTypeDefinition {
-  return structuredClone(definition);
+  return { id: definition.id, key: definition.key, version: definition.version, providerId: definition.providerId,
+    configSchema: structuredClone(definition.configSchema), tools: structuredClone(definition.tools),
+  };
 }
 
 function assertIdentity(definition: SessionTypeDefinition): void {
@@ -140,6 +146,7 @@ function identityKey(definition: Pick<SessionTypeDefinition, "key" | "version">)
 }
 
 interface StoredSessionType {
+  readonly policy?: ApplicationSessionType["policy"];
   readonly definition: SessionTypeDefinition;
   readonly tools: readonly ToolContractDefinition[];
   readonly config: ApplicationSessionType["config"];

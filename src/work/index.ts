@@ -9,6 +9,7 @@ export {
 } from "./helpers/helpers";
 export type {
   AuthorizedAgentContext,
+  SessionOwnerLookup,
   SessionOwnerRegistry,
   WorkErrorCode,
   WorkFailure,

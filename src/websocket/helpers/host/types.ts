@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import type { ConnectionAuthenticator } from "@agents";
 import type { AgentRegistrationRepository, WorkRepository } from "@persistence/types";
 import type { SessionsFactory, SessionsFactoryOptions } from "@sessions/types";
+import type { AHPServerSecurityOptions } from "../security/types";
 
 /**
  * Optional durable agent and work-leasing wiring.
@@ -35,6 +36,8 @@ export interface AHPServerOptions {
   readonly sessions: SessionsFactoryOptions;
   /** Optional authenticated agent identity and durable work leasing. */
   readonly agentWork?: AHPServerAgentWorkOptions;
+  /** Trusted connection setup, independent of work storage. Not permission to disclose native views. */
+  readonly security?: AHPServerSecurityOptions;
 }
 
 /**

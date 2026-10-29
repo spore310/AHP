@@ -34,6 +34,21 @@ export async function executeCreateSession(
   rawParams: unknown,
   onRecordCreated?: (sessionUri: string) => void,
 ): Promise<void> {
+  const prepared = prepareCreateSession(dependencies, rawParams);
+  const { record } = prepared;
+  dependencies.sessions.add(record);
+  try {
+    onRecordCreated?.(record.sessionUri);
+  } catch (error) {
+    if (dependencies.sessions.get(record.sessionUri) === record) dependencies.sessions.delete(record.sessionUri);
+    throw error;
+  }
+  publishCreatedSession(dependencies, record);
+  await startSessionBackend(dependencies, record, prepared.workingDirectories, prepared.config);
+}
+
+/** Internal pure preparation shared by legacy and contextual creation. No registration or publication. */
+export function prepareCreateSession(dependencies: SessionsDependencies, rawParams: unknown) {
   const parsed = createSessionParamsSchema.safeParse(rawParams);
   if (!parsed.success) {
     throw new SessionsError(
@@ -93,25 +108,14 @@ export async function executeCreateSession(
     ...(prepared.binding === undefined ? {} : { application: prepared.binding }),
   };
 
-  dependencies.sessions.add(record);
-  // The installer hook runs at the record-attach moment, before the catalogue
-  // broadcast and the backend start, so an identity-scoped installer (for
-  // example an owner binding) exists exactly while this call still owns its
-  // record and can never claim a URI a later creator is attaching. A throwing
-  // hook fails the create with no record left behind, so the URI stays
-  // re-creatable instead of being glued to a half-attached session.
-  try {
-    onRecordCreated?.(record.sessionUri);
-  } catch (error) {
-    dependencies.sessions.delete(record.sessionUri);
-    throw error;
-  }
+  return { record, workingDirectories, config };
+}
+
+export function publishCreatedSession(dependencies: SessionsDependencies, record: SessionRecord): void {
   dependencies.emitCatalogueNotification({
     method: "root/sessionAdded",
     params: { channel: ROOT_CHANNEL_URI, summary: buildSessionSummary(record) },
   });
-
-  await startBackend(dependencies, record, workingDirectories, config);
 }
 
 function resolveProvider(
@@ -165,12 +169,14 @@ function parseSessionConfig(
   }
 }
 
-async function startBackend(
+export async function startSessionBackend(
   dependencies: SessionsDependencies,
   record: SessionRecord,
   workingDirectories: readonly string[],
   config: Readonly<Record<string, unknown>>,
+  beforeFailure?: () => void,
 ): Promise<void> {
+  if (dependencies.sessions.get(record.sessionUri) !== record) return;
   let action: SessionAction;
   try {
     const backend = await record.provider.startSession({
@@ -207,6 +213,7 @@ async function startBackend(
     return;
   }
 
+  if (action.type === ACTION_TYPE_SESSION_CREATION_FAILED) beforeFailure?.();
   const envelope = applySessionAction(
     record,
     action,

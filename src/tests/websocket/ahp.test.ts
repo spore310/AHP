@@ -8,7 +8,9 @@ import {
   type SessionsFactory,
 } from "@sessions";
 import { mockProvider } from "@sessions/mock";
-import { createAHPConnectionModule, createWebSocketServer, type WebSocketServerHandle } from "@websocket";
+import { createWebSocketServer, type WebSocketServerHandle } from "@websocket";
+// INTERNAL canonical protocol/lifecycle compatibility, not public protected-host evidence.
+import { createAHPKernel as createAHPConnectionModule } from "@websocket/helpers/ahp/helpers/kernel/helpers";
 
 import { FrameLog, methodFrame, responseWithId } from "./helpers";
 

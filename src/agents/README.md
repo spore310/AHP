@@ -16,11 +16,19 @@ registration and a live presence binding are separate concepts.
 | `constants.ts` | Default 90-second presence TTL. |
 | `helpers/authenticator.ts` | `createStaticTokenAuthenticator`: exact bearer-token lookup from the handshake `Authorization` header. |
 | `helpers/directory.ts` | `createAgentDirectory`: durable registration resolution, one live binding per agent, generation fencing, renewal, and connection-scoped release. |
+| `helpers/policyIdentity/types.ts` | Exact legacy authenticator/domain bridge options. |
+| `helpers/policyIdentity/helpers.ts` | Explicit subject-to-domain adapter with private exact-source provenance; no actor inference. |
+| `helpers/policyIdentity/index.ts` | Public bridge factory/type exports only; internal provenance lookup is not exported. |
 | `helpers/errors.ts` | Sanitized `AgentDirectoryError` codes (`invalid`, `not_found`, `unauthorized`, `conflict`). |
 | `index.ts` | Public surface for the module. |
 
 ## API
 
+- `createLegacyConnectionIdentityAdapter({ authenticator, domainId })` — explicit
+  adapter for the accepted authorization identity port, over one exact legacy
+  authenticator. Captures domain/source once; maps only valid subjects and never
+  classifies a user/agent. Mixed host security/work composition verifies its private
+  provenance and exact authenticator instance, plus the same configured work domain.
 - `createStaticTokenAuthenticator(tokens: ReadonlyMap<string, string>)` — maps an
   exact token to a principal subject. Missing, malformed, repeated, or unknown
   credentials resolve to `undefined`; tokens are never logged or echoed.
@@ -71,8 +79,15 @@ for work authorization.
   map-reading conflict pre-check, then compete for the one live binding it may
   hold), or one agent key raced across two connections (one row via upsert, one
   failed bind).
-- A connection without a valid credential may still use baseline AHP methods;
-  authenticated agent/work methods fail closed.
+- Native initialize discloses the real shared server sequence even with empty
+  snapshots. It therefore requires verified live setup with explicit trusted
+  `allowGlobalSequence: true`; absent/false permission denies before the getter.
+  This authorizes host-wide activity metadata, not resources, scoped counts or
+  tools. Authentication/the legacy bridge alone never supplies that permission.
+  Ping follows successful native initialization. Authenticated agent/work methods
+  remain fail-closed. Initial actor/scoped setup lives
+  in the websocket security helper and is independent of persistence; successful
+  identity resolution alone never grants permission.
 - `agentKey` and `displayName` use the shared portable-text interoperability
   profile before repository calls; this validation is independent of the
   selected database adapter.
@@ -84,6 +99,7 @@ for work authorization.
 
 | Test | Pins |
 | ---- | ---- |
+| [`src/tests/agents/policyActor.test.ts`](../tests/agents/policyActor.test.ts) | Exact scoped setup reads, bridge capture, trusted user/registered-agent controls, captured limits, invalidation/expiry and successor-safe presence release. |
 | [`src/tests/agents/authenticator.test.ts`](../tests/agents/authenticator.test.ts) | Bearer parsing, exact token lookup, missing/unknown credentials, repeated headers, and rejection of empty tokens or subjects. |
 | [`src/tests/agents/directory.test.ts`](../tests/agents/directory.test.ts) | Stable registration, cross-principal denial, disabled agents, one live binding per agent and connection, generation fencing, expiry, and stale release. |
 

@@ -24,3 +24,7 @@ export type { AHPBinding, AHPConnectionModuleOptions, AHPDiagnostic } from "./he
 export { createAHPServer } from "./helpers/host";
 export type { AHPServerAgentWorkOptions, AHPServerHandle, AHPServerOptions } from "./helpers/host";
 export { createWebSocketServer } from "./helpers/server";
+export type {
+  AHPServerSecurityOptions, ConnectionFence, ConnectionSecuritySnapshot, ConnectionSetupAdapter,
+  InitialAuthoritySource, InitialBindingScope, InitialScopeAuthority, PreparedConnectionSetup, PreparedInitialScopes,
+} from "./helpers/security/types";

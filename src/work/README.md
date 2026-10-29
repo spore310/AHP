@@ -9,7 +9,7 @@ ports and the live agent directory.
 
 | File | Responsibility |
 | ---- | -------------- |
-| `types.ts` | `WorkService`, `WorkSubmission`, `WorkLease`, `WorkView`, `WorkErrorCode`, `AuthorizedAgentContext`, `WorkPresence`, and `SessionOwnerRegistry`. |
+| `types.ts` | `WorkService`, `WorkSubmission`, `WorkLease`, `WorkView`, `WorkErrorCode`, `AuthorizedAgentContext`, `WorkPresence`, `SessionOwnerLookup`, and legacy `SessionOwnerRegistry`. |
 | `helpers/errors.ts` | `WorkError`: sanitized `invalid`, `not_found`, `unauthorized`, `conflict`, `stale`, or `exhausted` failures. |
 | `helpers/helpers.ts` | `createSessionOwnerRegistry`, `createWorkService`, bounded validation, presence/registration revalidation, and repository-error mapping. |
 | `index.ts` | Public surface for the module. |
@@ -37,9 +37,16 @@ ports and the live agent directory.
   portable-text profile (no repository access happens), then rejects
   while any work row references the session.
 
-`createSessionOwnerRegistry()` keeps the in-process session-owner binding. A
-session is bound only after an authenticated `createSession`; a different
-principal cannot rebind it.
+`WorkServiceOptions.sessions` requires only `SessionOwnerLookup.owner(uri)`.
+`SessionOwnerRegistry` extends that read-only interface with legacy bind/unbind/clear;
+`createSessionOwnerRegistry()` still provides the standalone trusted legacy store.
+Protected host composition never uses it as a competing owner authority: it reads
+current live session full ref -> canonical P03 owner -> subject only within the
+configured work domain. Failed-but-live records retain their canonical owner; no live
+record projects no owner, including while an owner-free disposal marker settles.
+Ownership alone is not readiness. Work owner equality, presence/lease enforcement,
+repositories and persistence semantics are unchanged; a junior scoped participant
+never substitutes the creator's principal for work.
 
 ## Authorization
 
@@ -109,15 +116,17 @@ registration fails closed.
   `failed` status instead of throwing a fresh observable error. Keep the mapping
   as reserved behavior until a producer exists.
 - **One owner authority in the host wiring.** The live projection's owner is
-  sourced from the same session-owner registry the service checks, so the
-  submit pre-check corroborates one fact rather than two independent ones; a
-  production projection would read the durable `sessions` owner instead.
+  sourced from the same read-only lookup the service checks: canonical full-ref
+  owner in a protected host, legacy registry otherwise. The submit pre-check thus
+  corroborates one fact rather than maintaining another owner map.
 - **Same-owner recreate residual.** The projection carries no stable
   session-generation field (`createdAt` is the fetch time), so a same-owner
   dispose→recreate landing inside a submission's write window is not detected by
   the reconciliation; cross-principal and owner-removal cases are caught.
-  Detecting it requires a session-identity field on the snapshot, a contract
-  change deferred out of v1.
+  P05 fences protected session creation/disposal/backend cleanup with full refs,
+  but does not add an instance field to the frozen work/persistence write contract.
+  Durable write reconciliation therefore retains this v1 residual; it is not
+  claimed fixed by the new canonical read-only lookup.
 
 ## Related Documentation
 

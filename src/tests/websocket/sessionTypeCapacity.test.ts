@@ -1,7 +1,7 @@
 import type { SessionConfigSchema } from "@microsoft/agent-host-protocol";
 import { JsonRpcErrorCodes } from "@microsoft/agent-host-protocol";
 import WebSocket from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { createSessionConfig, createSessionTypeCatalogue, SESSION_URI_PREFIX } from "@sessions";
@@ -13,6 +13,11 @@ import type { ToolCatalogue, ToolContractDefinition } from "@tools";
 import { createAHPServer, type AHPServerHandle } from "@websocket";
 
 import { FrameLog, responseWithId } from "./helpers";
+
+// INTERNAL canonical type/capacity compatibility with the real host composition.
+vi.mock("@websocket/helpers/ahp", async () => ({
+  createAHPBinding: (await import("@websocket/helpers/ahp/helpers/kernel/helpers")).createAHPKernel,
+}));
 
 const schema: SessionConfigSchema = {
   type: "object",

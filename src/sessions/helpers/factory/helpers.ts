@@ -2,7 +2,8 @@ import { AhpErrorCodes, JsonRpcErrorCodes, type ActionEnvelope } from "@microsof
 import { parseUnknownJson } from "@jsonrpc";
 
 import { ACTION_TYPE_ROOT_ACTIVE_SESSIONS_CHANGED, ROOT_CHANNEL_URI } from "@sessions/constants";
-import { executeCreateSession } from "@sessions/createSession";
+import { executeCreateSession, prepareCreateSession, publishCreatedSession, startSessionBackend } from "@sessions/createSession";
+import { captureCreationSecurity, createSessionAuthorization, freezeCreation, validateCreationRegistrations } from "@sessions/helpers/creation";
 import {
   BASELINE_UNSUPPORTED_ACTION_REASON,
   isBaselineSupportedSessionAction,
@@ -42,9 +43,17 @@ import type {
  * or JSON-RPC transport and can be composed behind any transport.
  */
 export function createSessionsFactory(options: SessionsFactoryOptions): SessionsFactory {
-  const providers = buildProviderMap(options.providers);
+  const creationSecurity = captureCreationSecurity(options.creationSecurity);
+  const providers = new Map(buildProviderMap(options.providers));
+  if (creationSecurity !== undefined) {
+    for (const [id, provider] of providers) {
+      providers.set(id, Object.freeze({ providerId: id, agentInfo: freezeCreation(structuredClone(provider.agentInfo)), startSession: provider.startSession.bind(provider),
+        ...(provider.config === undefined ? {} : { config: Object.freeze({ schema: freezeCreation(structuredClone(provider.config.schema)), parse: provider.config.parse.bind(provider.config) }) }),
+      }));
+    }
+  }
   const defaultProviderId = resolveDefaultProviderId(options, providers);
-  const application = captureSessionApplication(options.application);
+  const application = captureSessionApplication(options.application, creationSecurity !== undefined);
   if (application !== undefined) {
     for (const definition of application.catalogue.list()) {
       if (!providers.has(definition.providerId)) {
@@ -55,6 +64,10 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
       application.catalogue.resolveForCreation(application.defaultType);
     }
   }
+  if (creationSecurity === undefined && application?.catalogue.list().some((definition) => application.catalogue.resolveExisting(definition).policy !== undefined) === true) {
+    throw new Error("Policy-bearing session types require protected creation.");
+  }
+  if (creationSecurity !== undefined) validateCreationRegistrations(creationSecurity, application);
   const sessions = options.registryFactory === undefined
     ? createInMemorySessionRegistry()
     : options.registryFactory();
@@ -66,6 +79,7 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
   const envelopeListeners = new Set<(envelope: ActionEnvelope) => void>();
 
   let shutdown: Promise<void> | null = null;
+  let disposing = false;
 
   const dependencies: SessionsDependencies = {
     providers,
@@ -92,12 +106,28 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
   };
 
   const dispose = (): Promise<void> => {
-    // Share one in-flight shutdown so concurrent callers await the same
-    // cleanup, then reset so a later dispose cleans a reused factory again.
-    shutdown ??= performDispose().finally(() => {
-      shutdown = null;
+    // Publish the barrier BEFORE synchronous cleanup can reenter dispose().
+    if (shutdown !== null) return shutdown;
+    disposing = true;
+    let complete = (): void => undefined;
+    let fail: (error: unknown) => void = () => undefined;
+    const completion = new Promise<void>((resolve, reject) => {
+      complete = () => {
+        resolve();
+      };
+      fail = (error) => {
+        reject(error instanceof Error ? error : new Error("Session factory shutdown failed.", { cause: error }));
+      };
     });
-    return shutdown;
+    const owned: Promise<void> = completion.finally(() => {
+      if (shutdown === owned) {
+        shutdown = null;
+        disposing = false;
+      }
+    });
+    shutdown = owned;
+    void performDispose().then(complete, fail);
+    return owned;
   };
 
   /**
@@ -118,16 +148,34 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
     deliver(envelopeListeners, envelope);
   };
 
+  const creation = creationSecurity === undefined
+    ? undefined
+    : createSessionAuthorization(dependencies, creationSecurity, {
+        prepare: (params) => prepareCreateSession(dependencies, params),
+        publish: (record) => { publishCreatedSession(dependencies, record); },
+        start: (prepared, beforeFailure) => startSessionBackend(dependencies, prepared.record, prepared.workingDirectories, prepared.config, beforeFailure),
+        changed: emitActiveSessionsChanged,
+        isStopping: () => disposing,
+      });
+
   async function performDispose(): Promise<void> {
+    creation?.cancelAll();
     const records = sessions.records();
+    const failures: unknown[] = [];
     sessions.clear();
+    for (const record of records) {
+      try {
+        creation?.teardown(record);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
     if (records.length > 0) {
       emitActiveSessionsChanged();
     }
     catalogueListeners.clear();
     envelopeListeners.clear();
 
-    const failures: unknown[] = [];
     for (const record of records) {
       // A record without a backend is still starting; its completion detects
       // the cleared registry and disposes itself without publishing.
@@ -150,13 +198,15 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
   }
 
   return {
+    ...(creation === undefined ? {} : { authorization: creation.authorization }),
     createSession: (params: unknown, onRecordCreated?: (sessionUri: string) => void): Promise<void> => {
       // Disposal clears the registry and listeners and releases attached
       // backends; accepting a session now would register it after that
       // boundary. Reuse is allowed again once disposal settles.
-      if (shutdown !== null) {
+      if (disposing) {
         return Promise.reject(new SessionsDisposingError());
       }
+      if (creation !== undefined) return Promise.reject(new SessionsError(JsonRpcErrorCodes.InvalidRequest, "Trusted creation context required."));
       const previousCount = sessions.size;
       return executeCreateSession(dependencies, params, onRecordCreated).then(() => {
         if (sessions.size !== previousCount) {
@@ -199,6 +249,10 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
       const record = sessions.get(channel);
       if (record === undefined) {
         throw new SessionsError(AhpErrorCodes.SessionNotFound, `Session not found: ${channel}`);
+      }
+      if (creation !== undefined && record.resource !== undefined) {
+        await creation.authorization.disposeSession(record.resource);
+        return;
       }
       sessions.delete(record.sessionUri);
       dependencies.emitCatalogueNotification({

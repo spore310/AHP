@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import type { AgentDirectory } from "@agents";
 import type { JsonRpcMessage } from "@jsonrpc";
-import type { SessionOwnerRegistry, WorkService } from "@work";
+import type { SessionOwnerLookup, SessionOwnerRegistry, WorkService } from "@work";
 import type { WebSocketConnectionContext } from "../../types";
 import { CLIENT_SESSION_ACTION_NAMES } from "./constants";
 
@@ -67,7 +67,9 @@ export interface AHPConnectionModuleOptions {
 
 /** Optional authenticated agent/work extension wiring for an AHP binding. */
 export interface AHPBindingOptions {
+  readonly maxInitialSubscriptions?: number;
   readonly agents?: AgentDirectory;
   readonly work?: WorkService;
   readonly sessionOwners?: SessionOwnerRegistry;
+  readonly ownerLookup?: SessionOwnerLookup;
 }

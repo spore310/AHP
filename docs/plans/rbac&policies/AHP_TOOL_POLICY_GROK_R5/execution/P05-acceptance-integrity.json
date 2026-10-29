@@ -1,0 +1,40 @@
+{
+  "verifiedAt": "2026-10-27T03:29:09.087Z",
+  "head": "22fa7955b8e43839e041228f647f26e00762ebbe",
+  "files": 106,
+  "manifest": "P05-accepted.sha256",
+  "sha256": "97f8c95f904c9357ee4c8b89fc5d53ee261fc603d2c4bc8e418d78aec7252121",
+  "extra": [],
+  "previous": {
+    "P03-accepted.sha256": {
+      "manifestHash": "fa567a9c5558f0c3250d4460ab35846bb7a9e4f6bd818fbf520176cf27c98497",
+      "entries": 56,
+      "unchanged": 51,
+      "changed": [
+        "src/authorization/README.md",
+        "src/authorization/helpers/evaluate/constants.ts",
+        "src/authorization/helpers/evaluate/helpers.ts",
+        "src/authorization/helpers/evaluate/types.ts",
+        "src/tests/authorization/admissionInputReview.test.ts"
+      ]
+    },
+    "P04-accepted.sha256": {
+      "manifestHash": "47b9e34efcb5b705de486ea05d9033c167850ad02fcad81698b56d3a25de4e08",
+      "entries": 85,
+      "unchanged": 74,
+      "changed": [
+        "src/authorization/README.md",
+        "src/authorization/helpers/evaluate/constants.ts",
+        "src/authorization/helpers/evaluate/helpers.ts",
+        "src/authorization/helpers/evaluate/types.ts",
+        "src/tests/authorization/admissionInputReview.test.ts",
+        "src/tests/websocket/policyInitialization.test.ts",
+        "src/websocket/README.md",
+        "src/websocket/helpers/ahp/helpers.ts",
+        "src/websocket/helpers/ahp/helpers/kernel/helpers.ts",
+        "src/websocket/helpers/ahp/types.ts",
+        "src/websocket/helpers/host/helpers.ts"
+      ]
+    }
+  }
+}

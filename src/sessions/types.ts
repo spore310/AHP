@@ -10,6 +10,8 @@ import type {
 } from "@microsoft/agent-host-protocol";
 import { z } from "zod";
 
+import type { ResourceRef } from "@authorization";
+import type { SessionCreationSecurityOptions, SessionFactoryAuthorization } from "./helpers/creation/types";
 import { SESSION_URI_PREFIX } from "./constants";
 import type { SessionApplicationBinding, SessionApplicationOptions } from "./helpers/application";
 import type { SessionToolManifest } from "./helpers/application/manifest";
@@ -112,6 +114,7 @@ export type CatalogueNotification
 
 /** One live session owned by the factory. */
 export interface SessionRecord {
+  readonly resource?: ResourceRef<"session">;
   readonly sessionUri: string;
   readonly provider: SessionProvider;
   /** Creation timestamp (ISO 8601). */
@@ -196,6 +199,7 @@ export interface SessionSnapshot {
 
 /** Construction options for {@link SessionsFactory}. */
 export interface SessionsFactoryOptions {
+  readonly creationSecurity?: SessionCreationSecurityOptions;
   /** Session types this host can create sessions with. At least one is required. */
   readonly providers: readonly SessionProvider[];
   /** Provider used when `createSession.provider` is omitted. Defaults to the first registered. */
@@ -235,6 +239,7 @@ export interface SessionsFactoryOptions {
 
 /** Transport-agnostic session factory: the host's only way to create sessions. */
 export interface SessionsFactory {
+  readonly authorization?: SessionFactoryAuthorization;
   /**
    * Creates a session at the client-chosen URI. Validates params, enforces the
    * create-session contract, registers the session, emits `root/sessionAdded`,

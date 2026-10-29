@@ -1,0 +1,29 @@
+{
+  "base": "22fa7955b8e43839e041228f647f26e00762ebbe",
+  "status": "P06 incomplete checkpoint",
+  "sourceCount": 112,
+  "changedFromP05": [
+    "src/authorization/README.md",
+    "src/authorization/helpers/bindings/types.ts",
+    "src/authorization/helpers/evaluate/helpers.ts",
+    "src/authorization/helpers/evaluate/types.ts",
+    "src/authorization/helpers/resources/types.ts",
+    "src/authorization/index.ts",
+    "src/sessions/README.md",
+    "src/sessions/helpers/creation/helpers.ts",
+    "src/sessions/helpers/creation/types.ts",
+    "src/tests/sessions/policyCreation.test.ts",
+    "src/websocket/README.md",
+    "src/websocket/helpers/host/helpers.ts",
+    "src/websocket/helpers/security/helpers.ts"
+  ],
+  "added": [
+    "src/authorization/helpers/grants/constants.ts",
+    "src/authorization/helpers/grants/types.ts",
+    "src/authorization/helpers/grants/helpers.ts",
+    "src/authorization/helpers/grants/index.ts",
+    "src/tests/authorization/delegation.test.ts",
+    "src/tests/authorization/freshness.test.ts"
+  ],
+  "unaccounted": []
+}

@@ -2,7 +2,8 @@ import { JsonRpcErrorCodes } from "@microsoft/agent-host-protocol";
 
 import { SESSION_TYPE_KEY_PATTERN } from "@sessions/constants";
 import { SessionsError } from "@sessions/helpers/errors";
-import { SessionTypeError } from "@sessions/helpers/sessionTypes";
+import { SessionTypeError, type ResolvedSessionType } from "@sessions/helpers/sessionTypes";
+import { captureCreationPolicy, freezeCreation } from "@sessions/helpers/creation";
 import { SESSION_TYPE_SELECTOR_KEY, type ToolContractRef } from "@tools";
 
 import { ClientAccessRole, ToolAccessLevel } from "./constants";
@@ -24,11 +25,31 @@ export interface PreparedSessionCreation {
 /** Capture host policy once; later caller edits cannot switch a live factory's policy. */
 export function captureSessionApplication(
   application: SessionApplicationOptions | undefined,
+  protectedCreation = false,
 ): SessionApplicationOptions | undefined {
   if (application === undefined) {
     return undefined;
   }
-  const { catalogue } = application;
+  let { catalogue } = application;
+  if (protectedCreation) {
+    const entries = new Map<string, ResolvedSessionType>();
+    for (const definition of catalogue.list()) {
+      const resolved = catalogue.resolveExisting(definition);
+      entries.set(`${definition.key}@${String(definition.version)}`, freezeCreation({
+        definition: structuredClone(resolved.definition), tools: structuredClone(resolved.tools), enabledForCreation: resolved.enabledForCreation,
+        config: { schema: structuredClone(resolved.config.schema), parse: resolved.config.parse.bind(resolved.config) },
+        ...(resolved.policy === undefined ? {} : { policy: captureCreationPolicy(resolved.policy) }),
+      }));
+    }
+    const find = (ref: { key: string; version: number }, creating: boolean): ResolvedSessionType => {
+      const found = entries.get(`${ref.key}@${String(ref.version)}`);
+      if (found === undefined || (creating && !found.enabledForCreation)) throw new SessionTypeError("type-not-found", "Invalid captured session type.");
+      return found;
+    };
+    catalogue = { list: () => [...entries.values()].map((entry) => structuredClone(entry.definition)),
+      resolveExisting: (ref) => find(ref, false), resolveForCreation: (ref) => find(ref, true),
+    };
+  }
   return {
     catalogue: {
       list: catalogue.list.bind(catalogue),
@@ -171,7 +192,7 @@ function splitSelector(config: Readonly<Record<string, unknown>> | undefined): {
 }
 
 function enabledVersion(application: SessionApplicationOptions, key: string): number {
-  const matches = application.catalogue.list().filter((definition) => definition.key === key);
+  const matches = application.catalogue.list().filter((definition) => definition.key === key && application.catalogue.resolveExisting(definition).enabledForCreation);
   const [only] = matches;
   if (only === undefined || matches.length !== 1) {
     throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid session type header.");

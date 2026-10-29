@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentInfo } from "@microsoft/agent-host-protocol";
 import { createStaticTokenAuthenticator } from "@agents";
@@ -17,6 +17,12 @@ import {
   WORK_KIND,
 } from "../agents/fixtures";
 import { FrameLog, responseWithId } from "./helpers";
+
+// INTERNAL canonical native setup only: real host/owner/work/hostedSessions/stop remain exercised.
+// This file-local mock does not certify public protected-host disclosure or affect other suites.
+vi.mock("@websocket/helpers/ahp", async () => ({
+  createAHPBinding: (await import("@websocket/helpers/ahp/helpers/kernel/helpers")).createAHPKernel,
+}));
 
 const hosts: AHPServerHandle[] = [];
 const sockets: WebSocket[] = [];

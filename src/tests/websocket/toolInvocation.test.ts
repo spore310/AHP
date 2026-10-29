@@ -1,7 +1,7 @@
 import type { ActionEnvelope, SessionConfigSchema } from "@microsoft/agent-host-protocol";
 import { AhpClient, type AhpTransport } from "@microsoft/agent-host-protocol/client";
 import { WebSocketTransport } from "@microsoft/agent-host-protocol/ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { parseUnknownJson } from "@jsonrpc";
@@ -11,6 +11,11 @@ import { createMockProvider } from "@sessions/mock";
 import { connectToolClient, type ToolClient } from "@toolClient";
 import { createToolCatalogue, defineToolContract, toAhpToolDefinition } from "@tools";
 import { createAHPServer, type AHPServerHandle } from "@websocket";
+
+// INTERNAL canonical broker/correlation compatibility; no public-host authorization claim.
+vi.mock("@websocket/helpers/ahp", async () => ({
+  createAHPBinding: (await import("@websocket/helpers/ahp/helpers/kernel/helpers")).createAHPKernel,
+}));
 
 const definition = defineToolContract({
   id: "11111111-1111-4111-8111-111111111111", key: "test.echo", version: 1, name: "echo",

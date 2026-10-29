@@ -6,7 +6,8 @@ import { createSessionsFactory } from "@sessions";
 import type { SessionBackend, SessionProvider } from "@sessions/types";
 import { createSessionOwnerRegistry, createWorkService, type SessionOwnerRegistry } from "@work";
 import type { DurableSessionInput, WorkRepository } from "@persistence/types";
-import { createAHPBinding } from "@websocket/helpers/ahp";
+// INTERNAL canonical owner/disposal compatibility; assertions are unchanged.
+import { createAHPKernel as createAHPBinding } from "@websocket/helpers/ahp/helpers/kernel/helpers";
 import { isSettlingSession } from "@websocket/helpers/settling";
 import type { JsonRpcInvocation, WebSocketConnectionContext } from "@websocket";
 

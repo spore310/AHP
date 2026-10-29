@@ -1,7 +1,8 @@
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createAgentDirectory, createStaticTokenAuthenticator, type ConnectionAuthenticator } from "@agents";
+import { createAgentDirectory, createLegacyConnectionIdentityAdapter, createStaticTokenAuthenticator, type ConnectionAuthenticator } from "@agents";
+import { createConnectionSetupAdapter } from "@websocket/helpers/security";
 import { createSessionsFactory } from "@sessions";
 import { mockProvider } from "@sessions/mock";
 import {
@@ -58,10 +59,35 @@ const setup = async (authenticator: ConnectionAuthenticator) => {
     work: work.service,
     sessionOwners,
   });
+  // PUBLIC fixture: verified subjects explicitly approve host-wide cursor metadata only.
+  // The real bridge/setup runs once; no kernel mock, fake connection context or second authenticator.
+  const domainId = "work-transport-test";
+  const verifiedUsers = new Set(["alice", "bob"]);
+  const connectionSetup = createConnectionSetupAdapter({
+    composition: {
+      identity: createLegacyConnectionIdentityAdapter({ authenticator, domainId }),
+      actors: { resolve: (input) => {
+        if (!verifiedUsers.has(input.principal.subject)) return Promise.reject(new Error("Unknown fixture actor"));
+        return Promise.resolve({ actor: { kind: "user" as const, principal: input.principal }, connectionId: input.connectionId, authRevision: input.authRevision });
+      } },
+      bindings: { read: () => Promise.resolve([]) },
+      resources: { resolve: () => Promise.reject(new Error("No initial resource expected")) },
+      policies: { evaluate: () => Promise.resolve({ effect: "deny" as const, code: "no-tool-authority" }) },
+      grants: {
+        prepare: () => Promise.reject(new Error("No issuance expected")),
+        commit: () => { throw new Error("No issuance expected"); },
+        rollback: () => undefined, revoke: () => Promise.resolve(),
+      },
+      freshness: { current: () => Promise.resolve({ domainId, revision: 1, invalidated: false }), invalidate: () => Promise.resolve() },
+    },
+    initialAuthority: { prepare: () => Promise.resolve({ scopes: [], allowGlobalSequence: true,
+      validUntil: Date.now() + 60000, isCurrent: () => true, release: () => undefined,
+    }) },
+  });
   const server = createWebSocketServer({
     host: "127.0.0.1",
     port: 0,
-    authenticator,
+    connectionSetup,
     handlers: binding.handlers,
     onConnection: (context) => {
       binding.onConnection(context);
@@ -185,7 +211,7 @@ describe("authenticated agent/work transport", () => {
 
     const anonymous = await connect(url);
     expect((await initialize(anonymous.socket, anonymous.frames, "alice")).error)
-      .toBeUndefined();
+      .toEqual({ code: -32600, message: "Protected view unavailable" });
     const denied = await rpc(
       anonymous.socket,
       anonymous.frames,
@@ -194,7 +220,7 @@ describe("authenticated agent/work transport", () => {
     );
     expect(denied.error).toEqual({
       code: -32600,
-      message: "Authentication required",
+      message: "Connection not initialized",
     });
     expect(registrations.records.size).toBe(2);
     expect(work.calls).toEqual(["submit"]);

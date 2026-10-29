@@ -1,0 +1,21 @@
+{
+  "workerFiles": 10,
+  "workerDigest": "6f194e2729ecef2b8c77519261e06de3aa7a80cf6452a482cdb7803c08bc1d05",
+  "predecessorChanged": [
+    "src/authorization/README.md",
+    "src/authorization/helpers/evaluate/constants.ts",
+    "src/authorization/helpers/evaluate/helpers.ts",
+    "src/authorization/helpers/evaluate/types.ts",
+    "src/sessions/README.md",
+    "src/sessions/helpers/creation/helpers.ts",
+    "src/tests/authorization/admissionInputReview.test.ts",
+    "src/tests/authorization/bindingRemoval.test.ts",
+    "src/tests/sessions/policyCreation.test.ts",
+    "src/websocket/README.md"
+  ],
+  "unaccounted": [],
+  "restoredP03TestHash": "d0a33b069cefb72b30d961b66c0facaed10f4b40801d54b8abb33c6c58832c3a",
+  "files": 106,
+  "manifest": "docs/plans/rbac&policies/AHP_TOOL_POLICY_GROK_R5/execution/P05-correction-candidate.sha256",
+  "sha256": "97f8c95f904c9357ee4c8b89fc5d53ee261fc603d2c4bc8e418d78aec7252121"
+}

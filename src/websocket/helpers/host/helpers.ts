@@ -1,6 +1,10 @@
 import type { AddressInfo } from "node:net";
+import { resourceRefSchema, type ReferenceAuthorizer, type ResourceRef } from "@authorization";
+import { sameResource } from "@authorization/helpers/context";
+import type { SessionCreationContext, SessionFactoryAuthorization } from "@sessions/helpers/creation/types";
 
 import { createAgentDirectory } from "@agents";
+import { legacyIdentitySource } from "@agents/helpers/policyIdentity/helpers";
 import type { DurableSessionInput } from "@persistence/types";
 import { createActionSequence, createSessionsFactory } from "@sessions";
 import type { SessionsFactory } from "@sessions/types";
@@ -10,6 +14,7 @@ import { createAHPBinding } from "../ahp";
 import { TOOL_CALL_METHOD, TOOL_COMPLETE_METHOD } from "../ahp/constants";
 import { isSettlingSession } from "../settling";
 import { createWebSocketServer } from "../server";
+import { createConnectionSetupAdapter, setupCount, setupDeadline } from "../security";
 import type { AHPServerHandle, AHPServerOptions } from "./types";
 
 const HOST_STOPPED = "AHP host cannot be started after shutdown has begun.";
@@ -61,12 +66,45 @@ const describeSession = (
  * and attempts every cleanup even when one fails.
  */
 export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
+  const security = options.security;
+  const creationConfig = options.sessions.creationSecurity;
+  const coherent: unknown = creationConfig?.registry.usesPolicyFactory(creationConfig.policies);
+  if (creationConfig !== undefined && (security === undefined || coherent !== true)) {
+    throw new Error("Protected host creation requires security and coherent compiler identity.");
+  }
+  const canonicalOwner = creationConfig?.registry.owner.bind(creationConfig.registry);
+  const workDomain = security?.workDomainId;
+  if (security !== undefined && options.agentWork !== undefined) {
+    const source = legacyIdentitySource(security.composition.identity);
+    if (source === undefined || source.authenticator !== options.agentWork.authenticator
+      || source.domainId !== security.workDomainId) {
+      throw new Error("Conflicting security and work identity sources.");
+    }
+  }
+  // Validate/capture before creating sessions, listeners, directory or work services.
+  const connectionSetup = security === undefined ? undefined : createConnectionSetupAdapter(security);
+  const deadlineMs = setupDeadline(security?.setupDeadlineMs);
+  const maxInitialSubscriptions = setupCount(security?.maxInitialSubscriptions);
   const sequence = options.sessions.sequence ?? createActionSequence();
   const sessions: SessionsFactory = createSessionsFactory({
     ...options.sessions,
     sequence,
   });
-  const sessionOwners = createSessionOwnerRegistry();
+  let stopped = false;
+  const isStopped = (): boolean => stopped;
+  const actualAuthorization = sessions.authorization;
+  const capturedGetResource = actualAuthorization?.getResource.bind(actualAuthorization);
+  const capturedIsReady = actualAuthorization?.isReady.bind(actualAuthorization);
+  const capturedUsesRegistry = actualAuthorization?.usesRegistry.bind(actualAuthorization);
+  const sessionOwners = actualAuthorization === undefined ? createSessionOwnerRegistry() : undefined;
+  const ownerLookup = { owner: (uri: string): string | undefined => {
+    if (stopped) return undefined;
+    if (sessionOwners !== undefined) return sessionOwners.owner(uri);
+    const ref = capturedGetResource?.(uri);
+    const owner = ref === undefined ? undefined : canonicalOwner?.(ref);
+    if (ref === undefined || capturedGetResource?.(uri) !== ref || isStopped()) return undefined;
+    return owner?.domainId === workDomain ? owner?.subject : undefined;
+  } };
   const agents = options.agentWork === undefined
     ? undefined
     : createAgentDirectory({
@@ -81,7 +119,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     ? undefined
     : createWorkService({
         repository: options.agentWork.work,
-        sessions: sessionOwners,
+        sessions: ownerLookup,
         presence: agents,
         registrations: options.agentWork.registrations,
         describeSession: (sessionUri): DurableSessionInput | undefined => {
@@ -89,7 +127,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
           if (projection === undefined) {
             return undefined;
           }
-          const owner = sessionOwners.owner(sessionUri);
+          const owner = ownerLookup.owner(sessionUri);
           return owner === undefined
             ? undefined
             : { ...projection, ownerPrincipalSubject: owner };
@@ -101,11 +139,12 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     sessions,
     () => undefined,
     options.agentWork === undefined || agents === undefined || work === undefined
-      ? undefined
+      ? { maxInitialSubscriptions }
       : {
+          maxInitialSubscriptions,
           agents,
           work,
-          sessionOwners,
+          ...(sessionOwners === undefined ? { ownerLookup } : { sessionOwners }),
         },
   );
   const transport = createWebSocketServer({
@@ -113,9 +152,12 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     port: options.port,
     path: options.path,
     handlers: binding.handlers,
-    ...(options.agentWork !== undefined
-      ? { authenticator: options.agentWork.authenticator }
-      : {}),
+    setupDeadlineMs: deadlineMs,
+    ...(connectionSetup !== undefined
+      ? { connectionSetup }
+      : options.agentWork !== undefined
+        ? { authenticator: options.agentWork.authenticator }
+        : {}),
     onConnection: (context) => {
       binding.onConnection(context);
     },
@@ -127,8 +169,6 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
       matches: (params, context) => binding.isToolCompletion(params, context),
     }]]),
   });
-  let stopped = false;
-
   const assertSessionsOpen = (): void => {
     if (stopped) {
       throw new Error(HOST_SESSIONS_STOPPED);
@@ -143,7 +183,38 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     return typeof channel === "string" ? channel : undefined;
   };
 
+  const hostedAuthorization: SessionFactoryAuthorization | undefined = actualAuthorization === undefined
+    ? undefined
+    : Object.freeze({
+        usesRegistry: (registry: ReferenceAuthorizer) => capturedUsesRegistry?.(registry) === true,
+        isReady: (expected: ResourceRef<"session">) => !stopped && capturedIsReady?.(expected) === true && !stopped,
+        createSession: (params: unknown, caller: SessionCreationContext) => {
+          assertSessionsOpen();
+          return actualAuthorization.createSession(params, caller);
+        },
+        getResource: (uri: string) => {
+          assertSessionsOpen();
+          return capturedGetResource?.(uri);
+        },
+        isSettling: (uri: string) => {
+          assertSessionsOpen();
+          return actualAuthorization.isSettling(uri);
+        },
+        disposeSession: async (expected: ResourceRef<"session">) => {
+          assertSessionsOpen();
+          const parsed = resourceRefSchema.parse(expected);
+          if (parsed.kind !== "session") throw new Error("Invalid session resource.");
+          const captured = Object.freeze({ ...parsed, kind: "session" as const });
+          const current = actualAuthorization.getResource(captured.id);
+          if (current === undefined) return actualAuthorization.disposeSession(captured);
+          if (!sameResource(current, captured)) return false;
+          await work?.assertSessionDisposable(captured.id);
+          return actualAuthorization.disposeSession(captured);
+        },
+      });
+
   const hostedSessions: SessionsFactory = {
+    ...(hostedAuthorization === undefined ? {} : { authorization: hostedAuthorization }),
     createSession: (params: unknown): Promise<void> => {
       if (stopped) {
         return Promise.reject(new Error(HOST_SESSIONS_STOPPED));
@@ -152,7 +223,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
       // Mirror the AHP handler: an owner binding without a live record marks a
       // disposal still settling, and a create landing in the window would leave
       // an ownerless record behind once the settlement releases the binding.
-      if (channel !== undefined && isSettlingSession(sessionOwners, sessions, channel)) {
+      if (channel !== undefined && (actualAuthorization?.isSettling(channel) ?? (sessionOwners !== undefined && isSettlingSession(sessionOwners, sessions, channel)))) {
         return Promise.reject(new Error(HOST_SESSIONS_SETTLING));
       }
       return sessions.createSession(params);
@@ -169,6 +240,12 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
         throw new Error(HOST_SESSIONS_STOPPED);
       }
       const channel = channelFromParams(params);
+      if (hostedAuthorization !== undefined && channel !== undefined) {
+        const expected = actualAuthorization?.getResource(channel);
+        if (expected === undefined) return sessions.disposeSession(params);
+        await hostedAuthorization.disposeSession(expected);
+        return;
+      }
       if (work !== undefined && channel !== undefined) {
         await work.assertSessionDisposable(channel);
       }
@@ -178,7 +255,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
         // Mirror the AHP handler: the owner binding is released when the
         // record is removed, even when backend disposal fails.
         if (channel !== undefined) {
-          sessionOwners.unbind(channel);
+          sessionOwners?.unbind(channel);
         }
       }
     },
@@ -206,8 +283,14 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
       return;
     }
     stopped = true;
-    sessionOwners.clear();
+    sessionOwners?.clear();
     const failures: unknown[] = [];
+    // Protected in-process callers must be cancelled synchronously too, before socket shutdown awaits.
+    const earlyDisposal = actualAuthorization === undefined
+      ? undefined
+      : sessions.dispose().catch((error: unknown) => {
+          collectFailure(failures, error);
+        });
     try {
       await transport.stop();
     } catch (error) {
@@ -219,7 +302,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
       collectFailure(failures, error);
     }
     try {
-      await sessions.dispose();
+      await (earlyDisposal ?? sessions.dispose());
     } catch (error) {
       collectFailure(failures, error);
     }

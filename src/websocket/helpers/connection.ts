@@ -26,6 +26,7 @@ import {
 
 import { WEBSOCKET_CLOSE_UNSUPPORTED_DATA } from "../constants";
 import type { AuthenticatedPrincipal } from "@agents";
+import type { ConnectionAttachment } from "./security/types";
 import type {
   JsonRpcHandler,
   JsonRpcHandlers,
@@ -289,6 +290,7 @@ export const attachConnection = (
   beforeDispatch?: (dispatch: WebSocketDispatchContext) => void,
   deferredRequestCompletionMethods: ReadonlyMap<string, import("../types").DeferredRequestCompletionRule> = new Map(),
   principal?: AuthenticatedPrincipal,
+  attachment?: ConnectionAttachment,
 ): WebSocketConnectionContext => {
   const closeHandlers = new Set<() => void>();
   let closed = false;
@@ -297,13 +299,41 @@ export const attachConnection = (
   const pendingDeferredRequests = new Map<Promise<void>, string>();
   const queuedFrames: string[] = [];
 
+  const setup = attachment?.setup;
+  const isCurrent = setup?.isCurrent.bind(setup);
   const context: WebSocketConnectionContext = {
-    connectionId: randomUUID(),
+    connectionId: attachment?.fence.connectionId ?? randomUUID(),
+    connectionGeneration: attachment?.fence.connectionGeneration ?? 1,
+    ...(setup === undefined ? {} : { security: setup.snapshot }),
+    isSecurityCurrent: (): boolean => {
+      try {
+        return !closed && socket.readyState === socket.OPEN && isCurrent?.() === true;
+      } catch {
+        return false;
+      }
+    },
     ...(principal !== undefined ? { principal } : {}),
     send: (message: JsonRpcMessage): boolean => {
       if (closed || socket.readyState !== socket.OPEN) {
         return false;
       }
+      if (setup !== undefined) {
+        let current = false;
+        try {
+          current = isCurrent?.() === true;
+        } catch {
+          // A failed synchronous guard cannot authorize output.
+        }
+        if (!current) {
+          try {
+            socket.close();
+          } catch {
+            // The close/error path still owns local cleanup.
+          }
+          return false;
+        }
+      }
+      // No await between the final currentness check and local enqueue.
       try {
         socket.send(JSON.stringify(message));
         return true;

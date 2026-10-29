@@ -26,6 +26,10 @@ client-connection adapter; see
 | `helpers/configuration/index.ts` | Re-exports `createSessionConfig`. |
 | `helpers/factory/helpers.ts` | `createSessionsFactory`: wiring, event delivery, and disposal. |
 | `helpers/factory/index.ts` | Re-exports `createSessionsFactory`. |
+| `helpers/creation/types.ts` | Trusted type/provider creation capability, exact request/template approval, contextual factory output capability. |
+| `helpers/creation/constants.ts` | Independent finite creation count, input and bootstrap-lifetime budgets. |
+| `helpers/creation/helpers.ts` | Immutable registration/callback capture, compiler coherence, JSON bounds, reservations, atomic attach/rollback, conditional bootstrap withdrawal and exact settle cleanup. |
+| `helpers/creation/index.ts` | Internal orchestration and public creation type exports. |
 | `helpers/registry/helpers.ts` | `createInMemorySessionRegistry`: the live-session store. |
 | `helpers/registry/index.ts` | Re-exports the registry factory. |
 | `helpers/sequence/types.ts` | `ActionSequence`: `next()` / non-allocating `current()`. |
@@ -57,6 +61,17 @@ client-connection adapter; see
 
 ## API
 
+Protected factories expose `authorization.usesRegistry(registry)` as a strict
+identity check and `authorization.isReady(fullSessionRef)` as an ownership-aware
+readiness projection. Readiness requires the current record, ready lifecycle,
+backend and exact canonical resource installation, with no stopping/settling state.
+`getResource(uri)` returns the record's stable ref only while that installation is
+still owned. A failed record can retain ownership while remaining non-ready.
+Bootstrap withdrawal and resource disposal carry preknown single-use installation
+tokens, so delayed failure/rollback cannot remove a replacement with identical
+nominal IDs. Instrumented install adapters must forward those tokens even if they
+throw after installing. See [authorization](../authorization/README.md).
+
 `createSessionsFactory(options)` returns a `SessionsFactory`:
 
 - `createSession(params, onRecordCreated?): Promise<void>` — validate, register,
@@ -82,7 +97,7 @@ client-connection adapter; see
 
 Options: `providers` (required), `defaultProviderId`, `now`, `sequence`,
 `nextServerSeq` (legacy adapter), `registryFactory`, `onDiagnostic`, and
-optional `application` for a typed host.
+optional `application` for a typed host, and `creationSecurity` for protected contextual creation.
 
 Typed session surface:
 
@@ -93,11 +108,73 @@ Typed session surface:
   that header to its authorized tools.
 - `createSessionTypeCatalogue({ tools, types })` resolves exact tool revisions.
   A missing contract fails construction.
-- `createApplicationSession(factory, { channel, type, config })` calls
+- `createApplicationSession(factory, { channel, type, config }, caller?)` uses the
+  protected output capability when the trusted context is supplied; without it,
+  it calls
   `factory.createSession` with `config["x-ahp-session-type"]` set to the
   header string. Other `config` keys are application config, not provider config.
 - `visibleTools(grants, role)` returns standard tools for `anonymous` and adds
   admin tools only for the server role `admin`.
+
+### Protected contextual creation (P05)
+
+`creationSecurity` requires the genuine registry and its exact captured compiler:
+`registry.usesPolicyFactory(policies)` must return true before allocation/admission
+or host acquisition. Separate equivalent compilers reject. All captured type
+admissions are installed as one canonical `installAdmissions` cohort, including
+aggregate new-entry capacity, conflict and per-call input validation before mutation.
+A failed construction cannot leave a partial admission cohort or stale prior stamps. Each trusted type has
+an optional private `policy` registration: exact rules, creation capability/callback
+and fixed creator-bootstrap template. Catalogue definitions/manifests contain none
+of that executable policy/template inventory. Policy-bearing types without security,
+and protected global `role`/`authorizedTools` configurations, reject at construction.
+Provider, parser, schema, registration and callback properties are captured once.
+Header selection uses exact registered keys/uniquely enabled revisions or an exact
+default, never guessed suffixes/latest versions.
+
+Protected factories expose frozen `authorization`:
+
+- `createSession(params, caller)` requires current trusted context plus explicit
+  type/provider creation approval for the exact frozen SDK request. Invoke permission,
+  namespace membership, template presence and client role/owner claims never suffice.
+  An absent template needs explicit `none`; a template needs all exact entries and
+  bounded lifetimes. Owner is the actual creator principal, binding actor stays the
+  actual creator kind, and only registered roles/policies are materialized.
+- `getResource(uri)` returns the live record's immutable full session ref, never a
+  reservation or owner cache. Contextual creation validates the accepted default
+  ResourceRef (URI max512), UTF-8 JSON input (default and absolute **1MiB**, smaller
+  configured budgets allowed) before parsers/reservation/approval. JSON capture also
+  rejects cycles, accessors/coercion hooks, reserved keys and depth beyond64.
+- Preparation reserves synchronously, is invisible, and has finite count/deadline
+  budgets (counts128/max1024, hook5000/max60000ms). `maxPendingCreates` bounds
+  both visible reservations and actual unsettled prepare work. Abort/dispose/timeout
+  rejects promptly and releases the URI reservation, but cancelled/draining callbacks
+  still occupy capacity until their invocation settles. Disposal/bare-factory reuse
+  never resets that occupancy; an uncooperative adapter can saturate the bound, not
+  manufacture more slots. Late fulfillment is released once and rejection is observed. Guards/clock run before final SDK-owned
+  checks; record/resource/owner/bootstrap attach and rollback have no intervening await.
+  Publication/backend start follow complete installation. Legacy context-free create
+  and attach hooks are unavailable on protected factories.
+- Backend rejection preserves inspectable failed record/owner/admission but withdraws
+  exact bootstrap bindings before failure publication. Unexpected withdrawal failure
+  propagates without falsely publishing successful cleanup; the record remains
+  non-ready. Bootstrap lifetime is independently capped (host default1h/max24h;
+  each template declares its positive bound), not challenge/cache TTL.
+- `disposeSession(expectedFullRef)` cancels/removes only that pending/live instance.
+  Owner disappears immediately when the record is removed; an owner-free finite settle
+  marker excludes URI reuse until backend disposal finishes. Late backend/cleanup cannot
+  touch a same-URI successor. Factory disposal cancels preparations before await; bare
+  factories may be reused after disposal, but composed host stop is terminal.
+
+In-process callers need no native cursor permission; network native create additionally
+requires successful same-connection ready initialize and live explicit global-cursor
+permission. The wire result is only `null`; no snapshots, counts, tools or raw routes
+are reopened. Work owner lookup derives from current full ref -> canonical registry
+owner -> subject in the configured domain. Ownership is not readiness or invocation
+permission; P06/P09 still own later issuance/dispatch, P10/P12 recipient views/SDK proof.
+
+The role-based typed visibility/examples below describe **legacy trusted-kernel**
+configuration, not protected authority or public privacy certification.
 
 #### Arguments
 
@@ -116,13 +193,14 @@ and the visible tool contracts, including their input schemas. Admin tools are
 omitted unless the server role is `admin`. A client may advertise a subset of
 those contracts with `session/activeClientSet`. A different contract, schema, or
 nested client id is rejected without changing the session. Hiding or admitting a
-tool does not execute it. Authentication is not implemented.
+tool does not execute it. Sessions itself does not authenticate; protected context
+comes from trusted host/IAM composition.
 
 #### Caveats
 
 A client cannot submit an object selector or choose the role. An unknown header
 creates no session. Hiding an admin tool does not execute or authorize the
-tool. Authentication is not implemented. Client advertisements are claims and
+tool. Sessions itself does not authenticate. Client advertisements are claims and
 may remain stale after disconnect under the deferred presence policy. They do
 not prove that a tool can execute. Creation-time `activeClient` is rejected on a
 typed host; create, subscribe, then advertise instead. An explicitly untyped

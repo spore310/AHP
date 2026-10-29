@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
@@ -19,6 +20,8 @@ import type {
   WebSocketServerOptions,
 } from "../types";
 import { attachConnection } from "./connection";
+import { setupDeadline } from "./security/helpers";
+import type { PreparedConnectionSetup } from "./security/types";
 
 /** Free-form close code used only when handshake authentication throws. */
 const WEBSOCKET_CLOSE_AUTHENTICATION_FAILED = 1011;
@@ -58,12 +61,20 @@ export const createWebSocketServer = (
     path = WEBSOCKET_DEFAULT_PATH,
     handlers = {},
     authenticator,
+    connectionSetup,
     onConnection,
     beforeDispatch,
     deferredRequestCompletionMethods = new Map(),
     shutdownTimeoutMs = WEBSOCKET_SHUTDOWN_TIMEOUT_MS,
   } = options;
 
+  if (authenticator !== undefined && connectionSetup !== undefined) {
+    throw new Error("Conflicting connection setup authenticators.");
+  }
+  const setupDeadlineMs = setupDeadline(options.setupDeadlineMs);
+  const prepareConnection = connectionSetup?.prepare.bind(connectionSetup);
+  const verifyHandshake = authenticator?.authenticate.bind(authenticator);
+  let generation = 0;
   const httpServer = createServer((_request, response) => {
     // This listener speaks WebSocket only. Answer ordinary HTTP requests
     // explicitly so an accepted request cannot complicate HTTP shutdown.
@@ -139,10 +150,10 @@ export const createWebSocketServer = (
   const authenticate = async (
     request: IncomingMessage,
   ): Promise<AuthenticatedPrincipal | undefined> => {
-    if (authenticator === undefined) {
+    if (verifyHandshake === undefined) {
       return undefined;
     }
-    return authenticator.authenticate({
+    return verifyHandshake({
       headers: request.headers,
       ...(request.socket.remoteAddress !== undefined
         ? { remoteAddress: request.socket.remoteAddress }
@@ -151,58 +162,116 @@ export const createWebSocketServer = (
   };
 
   wsServer.on("connection", (socket, request) => {
-    const establish = (principal: AuthenticatedPrincipal | undefined): void => {
-      if (socket.readyState !== socket.OPEN) {
-        return;
-      }
-      alive.add(socket);
-      socket.on("pong", () => {
-        alive.add(socket);
-      });
-      const context = attachConnection(
-        socket,
-        handlers,
-        beforeDispatch,
-        deferredRequestCompletionMethods,
-        principal,
-      );
-      onConnection?.(context);
-    };
-
-    if (authenticator === undefined) {
-      establish(undefined);
+    generation += 1;
+    if (!Number.isSafeInteger(generation)) {
+      socket.close(WEBSOCKET_CLOSE_AUTHENTICATION_FAILED, "Connection rejected");
       return;
     }
-
-    // A socket that errors while authentication is in flight still closes; do
-    // not let that event escape as unhandled.
-    socket.on("error", () => undefined);
-    // Hold frames until the authenticated context is attached. Otherwise a
-    // client that sends immediately after `open` could have its first frames
-    // dropped while an asynchronous authenticator is still running.
-    socket.pause();
-    void (async (): Promise<void> => {
-      let principal: AuthenticatedPrincipal | undefined;
-      try {
-        principal = await authenticate(request);
-      } catch {
-        try {
-          socket.resume();
-          socket.close(WEBSOCKET_CLOSE_AUTHENTICATION_FAILED, "Connection rejected");
-        } catch {
-          // The close event still runs local socket cleanup.
-        }
+    const fence = Object.freeze({ connectionId: randomUUID(), connectionGeneration: generation });
+    const authRevision = randomUUID();
+    const abort = new AbortController();
+    let cancelled = false;
+    const isCancelled = (): boolean => cancelled;
+    let attached = false;
+    let prepared: PreparedConnectionSetup | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const clearDeadline = (): void => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+    const cancel = (): void => {
+      if (cancelled) {
         return;
       }
+      cancelled = true;
+      abort.abort();
+      clearDeadline();
+      prepared?.release();
+    };
+    const reject = (): void => {
+      cancel();
       try {
-        establish(principal);
+        socket.resume();
+        socket.close(WEBSOCKET_CLOSE_AUTHENTICATION_FAILED, "Connection rejected");
       } catch {
-        try {
-          socket.resume();
-          socket.close(WEBSOCKET_CLOSE_AUTHENTICATION_FAILED, "Connection rejected");
-        } catch {
-          // The close event still runs local socket cleanup.
+        socket.terminate();
+      }
+    };
+    const establish = (principal: AuthenticatedPrincipal | undefined): void => {
+      if (cancelled || attached || lifecycle !== "listening" || socket.readyState !== socket.OPEN) {
+        cancel();
+        return;
+      }
+      if (prepared !== undefined && (!prepared.isCurrent()
+        || prepared.snapshot.fence.connectionId !== fence.connectionId
+        || prepared.snapshot.fence.connectionGeneration !== fence.connectionGeneration
+        || prepared.snapshot.context.connectionId !== fence.connectionId
+        || prepared.snapshot.context.authRevision !== authRevision)) {
+        reject();
+        return;
+      }
+      // This final currentness check and local attach have no intervening await.
+      const context = attachConnection(socket, handlers, beforeDispatch, deferredRequestCompletionMethods, principal, { fence, ...(prepared === undefined ? {} : { setup: prepared }) });
+      attached = true;
+      clearDeadline();
+      onConnection?.(context);
+    };
+    alive.add(socket);
+    socket.on("pong", () => {
+      alive.add(socket);
+    });
+    socket.on("error", reject);
+    socket.once("close", cancel);
+    request.socket.once("close", cancel);
+    if (authenticator === undefined && connectionSetup === undefined) {
+      try {
+        establish(undefined);
+      } catch {
+        reject();
+      }
+      return;
+    }
+    socket.pause();
+    timer = setTimeout(reject, setupDeadlineMs);
+    const handshake = Object.freeze({
+      headers: Object.freeze(structuredClone(request.headers)),
+      ...(request.socket.remoteAddress === undefined ? {} : { remoteAddress: request.socket.remoteAddress }),
+    });
+    void (async (): Promise<void> => {
+      try {
+        if (prepareConnection === undefined) {
+          establish(await authenticate(request));
+        } else {
+          const result = await prepareConnection({ handshake, fence, authRevision, signal: abort.signal });
+          if (result !== undefined) {
+            const check = result.isCurrent.bind(result);
+            const dispose = result.release.bind(result);
+            let released = false;
+            prepared = {
+              snapshot: result.snapshot,
+              isCurrent: () => !cancelled && check(),
+              release: () => {
+                if (!released) {
+                  released = true;
+                  try {
+                    dispose();
+                  } catch {
+                    // One adapter cleanup failure cannot strand a socket.
+                  }
+                }
+              },
+            };
+          }
+          if (isCancelled()) {
+            prepared?.release();
+            return;
+          }
+          establish(prepared === undefined ? undefined : { subject: prepared.snapshot.context.actor.principal.subject });
         }
+      } catch {
+        reject();
       } finally {
         if (socket.readyState === socket.OPEN) {
           socket.resume();

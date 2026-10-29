@@ -33,6 +33,7 @@ export type {
 export { createActionSequence, createSequenceAllocator } from "./helpers/sequence";
 export type { ActionSequence } from "./helpers/sequence";
 
+export type { CreatorBindingTemplate, CreatorBootstrapApproval, CreatorBootstrapTemplate, SessionCreationApproval, SessionCreationCapabilityRef, SessionCreationContext, SessionCreationFacts, SessionCreationSecurityOptions, SessionFactoryAuthorization, SessionTypePolicyRegistration } from "./helpers/creation";
 export { sessionUriSchema } from "./types";
 export type {
   CatalogueNotification,

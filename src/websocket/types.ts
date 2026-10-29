@@ -2,11 +2,17 @@ import type { AddressInfo } from "node:net";
 
 import type { AuthenticatedPrincipal, ConnectionAuthenticator } from "@agents";
 import type { JsonRpcMessage, JsonRpcParams } from "@jsonrpc";
+import type { ConnectionSecuritySnapshot, ConnectionSetupAdapter } from "./helpers/security/types";
 
 /** Per-connection surface handed to JSON-RPC method handlers. */
 export interface WebSocketConnectionContext {
   /** Identifier for the connection, unique within the server. */
   readonly connectionId: string;
+  /** Optional for legacy in-process fixtures; every transport-created context supplies it. */
+  readonly connectionGeneration?: number;
+  readonly security?: ConnectionSecuritySnapshot;
+  /** Absent means no protected authority. Never invokes an asynchronous port. */
+  isSecurityCurrent?(): boolean;
   /**
    * Server-authenticated principal for the upgrade request.
    *
@@ -98,6 +104,9 @@ export interface WebSocketServerOptions {
    * server.
    */
   readonly authenticator?: ConnectionAuthenticator;
+  /** Mutually exclusive with authenticator. Reserves the actual fence before asynchronous setup. */
+  readonly connectionSetup?: ConnectionSetupAdapter;
+  readonly setupDeadlineMs?: number;
   /** Called once when a socket is accepted, before any frame is dispatched. */
   readonly onConnection?: (context: WebSocketConnectionContext) => void;
   /**

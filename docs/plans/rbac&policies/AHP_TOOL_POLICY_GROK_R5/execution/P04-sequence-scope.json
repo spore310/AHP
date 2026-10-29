@@ -1,0 +1,18 @@
+{
+  "predecessorVerified": 56,
+  "workerFilesVerified": 29,
+  "workerDigest": "8fc437a4c8ee5ecfb1dcd84bf3c0dbf8b8ff8cdc5138dfa17d7562e2b41f0566",
+  "changedFromPrior": [
+    "src/agents/README.md",
+    "src/tests/agents/policyActor.test.ts",
+    "src/tests/websocket/policyInitialization.test.ts",
+    "src/websocket/README.md",
+    "src/websocket/helpers/ahp/helpers.ts",
+    "src/websocket/helpers/security/helpers.ts",
+    "src/websocket/helpers/security/types.ts"
+  ],
+  "addedPublicTest": "src/tests/websocket/agentWork.transport.test.ts",
+  "files": 85,
+  "manifest": "docs/plans/rbac&policies/AHP_TOOL_POLICY_GROK_R5/execution/P04-sequence-candidate.sha256",
+  "sha256": "47b9e34efcb5b705de486ea05d9033c167850ad02fcad81698b56d3a25de4e08"
+}

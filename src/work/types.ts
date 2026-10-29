@@ -59,16 +59,19 @@ export interface WorkPresence {
   getByConnection(connectionId: string): PresenceBinding | undefined;
 }
 
-export interface SessionOwnerRegistry {
-  bind(sessionUri: string, principalSubject: string): void;
+export interface SessionOwnerLookup {
   owner(sessionUri: string): string | undefined;
+}
+
+export interface SessionOwnerRegistry extends SessionOwnerLookup {
+  bind(sessionUri: string, principalSubject: string): void;
   unbind(sessionUri: string): void;
   clear(): void;
 }
 
 export interface WorkServiceOptions {
   readonly repository: WorkRepository;
-  readonly sessions: SessionOwnerRegistry;
+  readonly sessions: SessionOwnerLookup;
   readonly presence: WorkPresence;
   readonly registrations: AgentRegistrationRepository;
   /** Builds the durable projection from the live session, or `undefined` if absent. */

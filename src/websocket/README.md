@@ -5,9 +5,38 @@ network boundary: upgrade handling, per-socket framing and dispatch, heartbeat,
 and race-safe start/stop with a bounded shutdown. It is session-agnostic;
 method handlers are injected.
 
-The contained AHP binding is AHP-aware. It owns connection lifetime,
-initialization, subscriptions, and fan-out. Session policy stays in `@sessions`;
-the binding does not import sockets into that module.
+The supported AHP binding/host is a safe facade over one private canonical
+kernel. Native initialize requires verified live setup with explicit permission to
+observe the host-wide global activity cursor; it is denied by default. Authorized
+minimal initialize returns the genuine current sequence and empty snapshots, and
+then ping works. P05 opens only contextual native create with separate explicit
+registered creation approval and a `null` reply. Raw protected native views,
+subscriptions, disposal/actions and legacy tool delivery remain unavailable until
+later authorization/projection integration. Authentication/setup is not disclosure
+permission. The generic transport still accepts arbitrary trusted application
+handlers; it does not sandbox application JavaScript.
+
+## Protected session creation and canonical work ownership
+
+A protected host reads `options.sessions.creationSecurity` only, requires P04 security,
+and rejects mismatched captured compiler identity before acquiring host resources.
+Public native `createSession` preserves canonical beforeDispatch ready-state/kind
+checks on the same actual connection. It also requires current exact-true captured
+`allowGlobalSequence`, matching live fence/snapshot, and the SDK factory output
+capability. A connection-wide abort signal cancels pending preparations without
+retaining one close handler per create. JSON actor/owner/roles/context claims cannot
+supply any of this. Cursor permission is metadata-only; exact registered type/provider
+creation and whole bootstrap-template approval remain separate requirements.
+
+Success returns native `null` only. There is no legacy factory-create fallback,
+no new snapshot/subscription/count/tool route and no raw kernel export. Protected
+binding rejects a competing mutable owner registry. Work consumes a read-only lookup
+of current full resource ref -> canonical owner -> subject in the configured domain;
+private kernel mutable hooks remain legacy/internal only. Exact-instance disposal
+captures before work awaits; protected lifecycle exclusion uses the factory's separate
+owner-free settle marker, not an owner-cache heuristic. Protected host stop cancels
+in-process preparations synchronously as well as closing network requests; terminal
+host fences prevent reuse even though standalone factories may be reused.
 
 ## Files
 
@@ -17,7 +46,12 @@ the binding does not import sockets into that module.
 | `helpers/server.ts` | `createWebSocketServer`: HTTP/WebSocket lifecycle, upgrade checks, handshake authentication, heartbeat, and shutdown. |
 | `helpers/connection.ts` | `attachConnection`: per-socket framing, serialized dispatch, reply settlement, principal attachment, and error mapping. |
 | `helpers/ahp/index.ts` | Public AHP binding exports. |
-| `helpers/ahp/helpers.ts` | `createAHPBinding`: initialize, subscriptions, publication, connection lifetime, session-owner binding acquired at the record-attach moment, and extension wiring. |
+| `helpers/ahp/helpers.ts` | Safe public facade: cursor-authorized ready initialize, separate contextual create/null, per-connection cancellation, protected-route deferral and work delegation. |
+| `helpers/ahp/helpers/kernel/helpers.ts` | Private canonical AHP mechanics: sequencing, subscriptions, reply commit, broker correlation, owner attach and cleanup. Not exported by any supported barrel. |
+| `helpers/security/types.ts` | P04-local setup options, scoped seeds, immutable connection fences/snapshots and adapter contracts. |
+| `helpers/security/constants.ts` | Independent initial setup count defaults/absolute ceilings. |
+| `helpers/security/helpers.ts` | Captured limits, scoped read preparation, identity/actor/resource/binding validation, bounded snapshot freshness and release. |
+| `helpers/security/index.ts` | Internal security orchestration and type exports. |
 | `helpers/ahp/agentWork.ts` | Authenticated agent registration/presence and work request handlers, schemas, and error mapping. |
 | `helpers/ahp/toolInvocation.ts` | Namespaced client-executed tool calls, accepted executor ownership, contract validation, and settlement. |
 | `helpers/ahp/types.ts` | AHP peer, adapter, parameter schemas, and `AHPBindingOptions`. |
@@ -25,7 +59,7 @@ the binding does not import sockets into that module.
 | `helpers/host/index.ts` | Public composed-host exports. |
 | `helpers/host/helpers.ts` | `createAHPServer`: owns sequence injection, sessions, binding, transport, and shutdown. |
 | `helpers/host/types.ts` | `AHPServerOptions` and `AHPServerHandle`. |
-| `helpers/settling.ts` | Shared settle-window probe: an owner binding without a live record means a disposal is still settling, so creates stay denied for every principal until the settlement releases the binding. |
+| `helpers/settling.ts` | Legacy/internal settle-window probe: an owner binding without a live record means a disposal is still settling, so creates stay denied for every principal until the settlement releases the binding. |
 | `constants.ts` | Default path, heartbeat interval, payload limit, close codes, shutdown deadline, and the `426` status. |
 | `index.ts` | Public surface: `createAHPConnectionModule`, `createAHPServer`, `createWebSocketServer`, option/handle types, and constants. |
 
@@ -50,8 +84,12 @@ the binding does not import sockets into that module.
 - `createAHPConnectionModule(factory, reportDiagnostic?, options?)` — wire-only
   handlers plus `onConnection`, `beforeDispatch`, and `dispose`. Cleanup is not
   an RPC method. The optional third argument enables the agent/work extension
-  with `agents`, `work`, and `sessionOwners`.
-- `createAHPServer({ host, port, path, sessions, agentWork? })` — composed host.
+  with `agents`, `work`, and either legacy mutable `sessionOwners` or read-only
+  `ownerLookup`. Protected SDK factories reject `sessionOwners`; the composed
+  protected host supplies `ownerLookup` from its canonical full-ref/domain owner
+  projection. The lookup has no bind/unbind/clear mutators and grants no new work
+  authority.
+- `createAHPServer({ host, port, path, sessions, agentWork?, security? })` — composed host.
   `agentWork` optionally adds the static-token authenticator, shared
   registration/work ports, allowed kinds, presence TTL, and provider cleanup.
   `stop()` releases transport, binding, sessions, and the optional provider. It is terminal,
@@ -148,22 +186,39 @@ const server = createWebSocketServer({
   remaining sockets and HTTP connections are force-closed; `stop()` still awaits
   local release. A slow remote peer is not guaranteed to observe the close
   handshake.
-- **Authentication is opt-in and fail-closed for the extension.** Only the
-  upgrade `Authorization` header is read; `initialize.clientId` is a label, not
-  identity. A missing credential still permits baseline methods but every
-  agent/work method rejects. Static bearer tokens are POC-grade, not production
-  identity.
+- **Native setup itself needs explicit metadata permission.** With no verified
+  setup, absent/false `PreparedInitialScopes.allowGlobalSequence`, or stale/expired
+  permission, initialize is denied before entering the kernel or reading its
+  sequence getter. The optional field defaults false, accepts actual booleans only,
+  and is captured immutably. Wire fields, role labels, scope grants and authentication
+  alone cannot supply it. No constant zero or missing native serverSeq substitutes
+  for the genuine canonical cursor. Permission explicitly permits observing
+  **host-wide activity**, not scoped counts, session/root data or tools.
+- **Native setup is not resource permission.** No-config and configured
+  hosts both reject nonempty initialSubscriptions, subscribe/repeat subscribe,
+  list/root/session views, native dispose/actions and legacy tools before
+  protected getters/effects. Empty initialize/ping remain supported only after
+  the explicit live global-sequence permission gate. The
+  explicit agent/work extension still requires its own principal/owner/presence
+  checks; configured security additionally requires current setup.
+- **Authentication has one source.** Security-only composition has no DB/work
+  requirement. Mixed security/agentWork requires the explicit agents bridge over
+  the exact same authenticator instance and matching workDomainId. A subject-only
+  principal is projected only in that configured domain; arbitrary domains are
+  not collapsed. clientId/kind/role are never identity. Static bearer tokens are
+  POC-grade, not production identity.
 - **Work is not tool invocation.** `x-ahp/tools/*` is short-lived and private;
   `x-ahp/work/*` is durable coordination with a database lease. The server never
   executes stored work.
-- **Host-side session creation has no authenticated owner.** Calling
-  `host.sessions.createSession` bypasses a WebSocket principal, so the resulting
-  session cannot own or accept work. Create work-enabled sessions through an
-  authenticated AHP `createSession`. Direct host disposal checks dependent work
-  and releases the owner binding when the record removal settles — success or
-  failure — but it does not add authorization.
-- **Session ownership binds at the record-attach moment.** The AHP
-  `createSession` acquires the owner binding when the record is attached —
+- **Trusted contextual creation owns exactly its creator.** Protected callers use
+  `host.sessions.authorization.createSession(params, context)` (no native cursor
+  prerequisite in-process); context-free create rejects. Public native create also
+  requires ready/cursor permission and explicit type capability approval. A legacy
+  unprotected host's context-free create still has no authenticated owner and cannot
+  own work. Direct host disposal checks work and captures the exact protected ref
+  before awaits; this is lifecycle fencing, not an extra caller authorization grant.
+- **Private canonical ownership mechanics remain regression-tested.** The internal
+  kernel's `createSession` acquires the owner binding when the record is attached —
   before the catalogue broadcast and the backend start — and verifies at
   resolution that the live record survived and is not owned by a different
   principal. A create whose record was removed mid-start (its own disposal, or
@@ -176,12 +231,73 @@ const server = createWebSocketServer({
   `host.sessions.createSession` alike — until the settlement releases the
   binding, and a custom owner registry whose `unbind` throws fails the
   disposal loudly instead of silently keeping a binding no settlement will
-  release.
+  release. Those mutable-map/same-owner assertions describe legacy/internal
+  mechanics only. P05 protected records instead use full-ref cleanup and owner-free
+  settle tokens; durable v1 work-write reconciliation remains a separate limitation.
+
+## Security setup API
+
+`security: AHPServerSecurityOptions` contains the unchanged `SecurityComposition`
+ports plus `initialAuthority.prepare({context,fence,signal})`. Its optional exact
+boolean `allowGlobalSequence` defaults false. Only a trusted adapter after verified
+identity/actor resolution may explicitly permit this shared-cursor disclosure.
+Its synchronous guard, expiry and release cover this permission as well as scope
+facts; revocation must make that guard false. Consumers needing only scoped views
+cannot use native initialize without permitting that host-wide cursor, because
+the pinned protocol requires the real current serverSeq. P10/P12 still own safe
+recipient-view interoperability; no native version or allocator semantics changed.
+Legacy agentWork authentication by itself does not establish this metadata permission.
+The application selects existing full resource incarnations and grant revisions; setup calls
+`resources.resolve` and `bindings.read({actor,scope,grantRevision})` exactly. It
+never issues/installs grants or manufactures resources. A synchronous seed guard
+must cover those exact locally mirrored facts; release owns only that connection's
+reservations. Remote revocation has the declared expiry/invalidation bound, not
+distributed atomicity. Roles/default scopes are not supplied by the transport.
+
+For canonical grants, construct the host before starting it, build the grant
+service from the actual `host.sessions.authorization`, bind the initially
+unavailable binding/source closures once, then start. The source retains issued
+scoped snapshots and seeds their exact grant revision; its currentness covers the
+actual identity/connection generation and canonical state after binding reads.
+See the [composition contract](../authorization/README.md#public-host-composition)
+and [executable fixture](../tests/authorization/freshness.test.ts). The host forwards
+captured registry/readiness capabilities and keeps readiness false after terminal
+stop. Its work-owner projection checks the same owned resource before and after
+canonical owner lookup.
+
+Setup samples the finite deadline clock before the final source-currentness
+predicate. No application clock runs after that canonical comparison; only SDK
+release/abort flags are rechecked. Nonfinite or throwing clocks fail closed.
+Canonical revocation invalidates retained setup even without a freshness event.
+
+All setup awaits share setupDeadlineMs (default 5000, absolute 60000). Initial
+scopes, total bindings, and subscription selectors each default to 128 with absolute
+1024; these are independent of policy reference/map caps. Options/callbacks are
+captured once. Cancel/timeout/stop prevent late attach and release late preparations.
+The final local currentness check and attach have no await between them. Every
+configured-context send also rechecks synchronously immediately before enqueue;
+stale setup closes the connection instead of delivering a result prepared before
+revocation (including deferred work reads). Every transport context carries its actual reserved ID/generation and currentness callback;
+these fields are optional only for old in-process contexts, where absence is no
+authority. Actor, auth revision and generation are immutable for a connection;
+reconnect, not in-place credential reassignment, establishes a new fence.
+
+Agent kind comes from the trusted ActorResolver/registered-agent facts, not missing
+presence. An agent without its required generation fails setup. Directory presence
+and transport generation are separate; P09 still owns actual executor admission.
+A ready setup snapshot alone neither authorizes an operation nor reveals tools.
 
 ## Testing
 
+The ahp/sdk/toolInvocation/capacity/owner-disposal/integration compatibility suites
+are explicitly **INTERNAL** canonical host-wiring evidence. File-local mocks replace
+only binding selection; real host/owner/work/stop services and original assertions
+remain. The new public tests below use the real unmocked facade/host alongside them.
+
 | Test | Pins |
 | ---- | ---- |
+| [`src/tests/websocket/policyInitialization.test.ts`](../tests/websocket/policyInitialization.test.ts) | Real public default cursor denial/zero getter access, explicit trusted canonical-cursor positive, immutable boolean/expiry/revocation/wire-spoof controls, protected denial, exact work bridge, parked authority and connection/currentness lifecycle. |
+| [`src/tests/agents/policyActor.test.ts`](../tests/agents/policyActor.test.ts) | Exact existing scope/revision reads, no issuance, trusted user/registered agent distinction, expiry/invalidation/limits and stale cleanup. |
 | [`src/tests/websocket.test.ts`](../tests/websocket.test.ts) | Request/result and error mapping, parse and invalid-request handling, notification silence, binary-frame close, upgrade path/malformed-target rejection, own-property dispatch, lifecycle (stop-races-bind, terminal stop, shared bind, retry after failure, heartbeat cleanup), and bounded shutdown. |
 | [`src/tests/websocket/ahp.test.ts`](../tests/websocket/ahp.test.ts) | Connection lifetime, single publication, pre-initialize rejection, unsupported-version close, failed-subscribe rollback, and post-snapshot action ordering. |
 | [`src/tests/websocket/composition.test.ts`](../tests/websocket/composition.test.ts) | Two composed hosts do not share sessions; stop and failed start are terminal for start and session mutations. |
@@ -197,9 +313,16 @@ const server = createWebSocketServer({
 | [`src/tests/websocket/agentWork.transport.test.ts`](../tests/websocket/agentWork.transport.test.ts) | Handshake auth vs. `clientId`, delayed auth frame buffering, thrown-authenticator containment, and real-socket extension calls. |
 | [`src/tests/websocket/agentWork.integration.test.ts`](../tests/websocket/agentWork.integration.test.ts) | Composed host: authenticated A/B submit → register → claim → renew → complete → get through the real work service, with owner and secret checks, and the fail-closed host facade during a settling disposal. |
 
-## Namespaced client tool invocation
+## Private canonical compatibility kernel (not a public tool route)
 
-The opt-in `x-ahp/tools/call` request validates against the session's issued
+The supported facade denies legacy `x-ahp/tools/call`/completion. P09/P10/P12 must
+provide actual authorized dispatch/projection/SDK evidence before delivery opens.
+Internal compatibility tests use the same private kernel directly (or a file-local
+isolated binding-factory substitution), without changing their canonical assertions.
+They do not prove public multi-user privacy or authorized SDK interoperability.
+No raw kernel, unsafe option, or no-config fallback is exported.
+
+Within that internal kernel, `x-ahp/tools/call` validates against the session's issued
 manifest and routes work only to the unique connected peer that both submitted
 an accepted advertisement and is still subscribed to that session. Duplicate
 claimed client IDs are ambiguous and rejected; a stale advertisement never

@@ -9,7 +9,8 @@ import { createAgentDirectory } from "@agents";
 import type { JsonRpcParams } from "@jsonrpc";
 import type { SessionSnapshot, SessionsFactory } from "@sessions/types";
 import { WorkError } from "@work";
-import { createAHPBinding } from "@websocket/helpers/ahp";
+// INTERNAL canonical owner/work lifecycle compatibility; assertions are unchanged.
+import { createAHPKernel as createAHPBinding } from "@websocket/helpers/ahp/helpers/kernel/helpers";
 import {
   AGENT_REGISTER_METHOD,
   WORK_SUBMIT_METHOD,
