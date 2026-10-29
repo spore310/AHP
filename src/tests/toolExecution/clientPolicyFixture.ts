@@ -8,7 +8,8 @@ import type { ClientToolBrokerOptions } from "@toolExecution/helpers/client/help
 import { contract } from "./fixtures";
 
 export const clientPolicyFixture = (options: { operations?: readonly ToolOperation[]; challenge?: boolean;
-  permission?: () => Promise<"allow" | "deny">; resolve?: ClientToolBrokerOptions["resolve"]; } = {}) => {
+  permission?: () => Promise<"allow" | "deny">; resolve?: ClientToolBrokerOptions["resolve"];
+  now?: () => number; decisionTtlMs?: number; } = {}) => {
   const policy = { id: "client-tool", revision: 1 };
   const sessionType = { key: "client-tools", version: 1 };
   const origin = { domainId: "local", kind: "session", id: "ahp-session:/tools", instanceId: "one" };
@@ -22,7 +23,8 @@ export const clientPolicyFixture = (options: { operations?: readonly ToolOperati
     { actor: { mode: "direct-grant" as const, actors: ["user" as const] }, ...(options.permission === undefined ? {} : { requiredPermissions: ["check"] }) }]));
   const policies = createToolPolicyFactory({ policies: [{ ...policy, operations: operationRules, challenge: { required: options.challenge ?? false } }],
     bindings: [{ sessionType, providerId: "test", admitted: { policies: [policy], namespaces: [] }, mandatory: [] }] });
-  const registry = createReferenceAuthorizer({ policies, now: Date.now,
+  const registry = createReferenceAuthorizer({ policies, now: options.now ?? Date.now,
+    ...(options.decisionTtlMs === undefined ? {} : { decisionTtlMs: options.decisionTtlMs }),
     ...(options.permission === undefined ? {} : { permissionEvaluators: { check: options.permission } }) });
   registry.installAdmission({ sessionType, providerId: "test" });
   registry.installResource({ resource: origin, route, owner: caller.actor.principal, externalAuthority: "none", admission: { sessionType, providerId: "test" } });

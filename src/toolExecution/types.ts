@@ -1,13 +1,13 @@
 import { z } from "zod";
 
-import {
-  POLICY_LIMIT_DEFAULTS,
-  policyLimitsSchema,
-  type AuthorityRevisionStamp,
-  type ExecutorRevision,
-  type PolicyLimits,
-  type ResourceRef,
-  type TrustedRequestContext,
+import { POLICY_LIMIT_DEFAULTS } from "@authorization/constants";
+import { policyLimitsSchema } from "@authorization/helpers/validation";
+import type {
+  AuthorityRevisionStamp,
+  ExecutorRevision,
+  PolicyLimits,
+  ResourceRef,
+  TrustedRequestContext,
 } from "@authorization";
 import type { ToolExecutionBinding } from "@toolPolicy";
 

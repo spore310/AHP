@@ -199,5 +199,7 @@ export interface ReferenceAuthorizer {
   /** Callback-free local mutation fence. Neither permission nor an expiry check. */
   captureFence(): () => boolean;
   validateAssignments(authorization: AssignmentAuthorization, actor: TrustedRequestContext): boolean;
+  /** One final clock sample across issued assignment proofs for distinct actual callers. */
+  validateAssignmentCohort(cohort: readonly { readonly authorization: AssignmentAuthorization; readonly actor: TrustedRequestContext }[]): boolean;
   getContract(id: string): ToolContractDefinition | undefined;
 }

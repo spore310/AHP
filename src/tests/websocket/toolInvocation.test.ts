@@ -30,6 +30,35 @@ const clients: Array<{ shutdown(): Promise<void> }> = [];
 const channel = "ahp-session:/capacity";
 const ref = { key: definition.key, version: definition.version };
 
+it("preserves all 64 tools supported by the canonical session type and rejects 129 without replacing them", async () => {
+  const count = 64;
+  const definitions = Array.from({ length: count }, (_, index) => defineToolContract({ ...definition,
+    id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, key: `test.capacity${String(index)}`, name: `capacity${String(index)}` }));
+  const { host, url, caller } = await fixture(definitions);
+  const executor = await openToolClient(url, "executor");
+  const handlers = definitions.map((definition) => ({ definition, execute: vi.fn(() => ({ result: definition.key })) }));
+  await executor.joinSession(channel, handlers);
+  const last = definitions.at(-1);
+  if (last === undefined) throw new Error("Missing boundary contract");
+  await expect(caller.callTool(channel, last, { text: "boundary" })).resolves.toEqual({ result: last.key });
+  expect(handlers.at(-1)?.execute).toHaveBeenCalledOnce();
+  for (const handler of handlers.slice(0, -1)) expect(handler.execute).not.toHaveBeenCalled();
+  const before = host.sessions.getSessionSnapshot(channel);
+  if (before === undefined) throw new Error("Missing canonical session");
+  executor.client.dispatch(channel, { type: ACTION_TYPE_SESSION_ACTIVE_CLIENT_SET,
+    activeClient: { clientId: "executor", tools: Array.from({ length: 129 }, (_, index) => toAhpToolDefinition(definitions[index % count] ?? last)) } });
+  await executor.client.ping();
+  expect(host.sessions.getSessionSnapshot(channel)?.state.activeClients).toEqual(before.state.activeClients);
+  await expect(caller.callTool(channel, last, { text: "retained" })).resolves.toEqual({ result: last.key });
+  expect(handlers.at(-1)?.execute).toHaveBeenCalledTimes(2);
+}, 10_000);
+
+it.each([65, 128])("preserves the existing session-type rejection of %i tools", async (count) => {
+  const definitions = Array.from({ length: count }, (_, index) => defineToolContract({ ...definition,
+    id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, key: `test.capacity${String(index)}`, name: `capacity${String(index)}` }));
+  await expect(createToolPolicyHost(definitions)).rejects.toThrow("Session type has too many tools");
+});
+
 async function fixture(definitions = [definition]) {
   const { host, recreate } = await createToolPolicyHost(definitions);
   hosts.push(host);

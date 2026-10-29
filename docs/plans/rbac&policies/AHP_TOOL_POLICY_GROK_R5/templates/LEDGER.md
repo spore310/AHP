@@ -15,7 +15,7 @@
 | P08 | ACCEPTED | [11-file manifest](../execution/P08-final-candidate.sha256) | [acceptance](../execution/P08-handoff.md) | Independent source/docs PASS; full DB-safe77files/941tests/179mappings; local lifecycle only, P09 eligible |
 | P09 | ACCEPTED | [27-file manifest](../execution/P09-final-candidate.sha256) | [acceptance](../execution/P09-handoff.md) | Independent source/docs PASS; DB-safe80files/991tests/182mappings; internal canonical broker only, P10 eligible |
 | P10 | ACCEPTED | [22-file manifest](../execution/P10-final-candidate.sha256) | [acceptance](../execution/P10-handoff.md) | Independent source/docs PASS; DB-safe83files/1025tests/187mappings; protected native views with actual SDK reducers/transport; P11 eligible |
-| P11 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
+| P11 | IN PROGRESS | [25-file foundations manifest](../execution/P11-foundations-final-candidate.sha256) | [checkpoint](../execution/P11-foundations-checkpoint.md) | Foundations only: DB-safe85files/1047tests/196mappings, independent review PASS; public v2 protocol/client migration and packet acceptance remain pending |
 | P12 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
 | P13 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
 | P14 | NOT STARTED | — | — | Await dependencies; authorized by active goal |

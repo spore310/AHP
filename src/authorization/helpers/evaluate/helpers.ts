@@ -2,7 +2,7 @@ import { defineToolContract, type ToolContractDefinition } from "@tools";
 import { toolExecutionBindingSchema } from "@toolPolicy/helpers/validation";
 
 import { MAX_POLICY_REVISION, POLICY_LIMIT_ABSOLUTE, POLICY_LIMIT_DEFAULTS } from "../../constants";
-import { executorRevisionSchema, identifierSchema, policyActorRefSchema, resourceRefSchema, scopedPolicyBindingSchema, securitySubjectRefSchema } from "../validation";
+import { executorRevisionSchema, identifierSchema, policyActorRefSchema, resourceRefSchema, scopedPolicyBindingSchema, securitySubjectRefSchema, trustedRequestContextSchema } from "../validation";
 import type {
   ExecutorRevision,
   PolicyActorRef,
@@ -25,6 +25,7 @@ import type { RegisteredResource } from "../resources";
 import { DEFAULT_DECISION_TTL_MS, DEFAULT_REFERENCE_CAPS, DEFAULT_REFERENCE_INPUT_LIMITS, MAX_REFERENCE_CAP, MAX_REFERENCE_INPUT_LIMIT } from "./constants";
 import type {
   AdmittedAssignment,
+  AssignmentAuthorization,
   CapturedExternalProof,
   EvaluateSelector,
   LocalDecisionStamp,
@@ -939,6 +940,39 @@ export const createReferenceAuthorizer = (options: ReferenceAuthorizerOptions): 
     }
     return actorCount < limits.maxBindingsPerActor && childCount < limits.maxChildrenPerParent;
   };
+  const validateAssignmentCohort: ReferenceAuthorizer["validateAssignmentCohort"] = (cohort) => {
+    try {
+      const candidate: unknown = cohort;
+      if (!Array.isArray(candidate)) return false;
+      const count = cohort.length;
+      if (!Number.isSafeInteger(count) || count < 1 || count > 512) return false;
+      let stampCount = 0;
+      const captured: Array<{ readonly authorization: AssignmentAuthorization; readonly actor: TrustedRequestContext }> = [];
+      for (let index = 0; index < count; index += 1) {
+        const member = cohort[index];
+        if (member === undefined) return false;
+        const authorization = member.authorization;
+        if (!issued.has(authorization) || !Array.isArray(authorization.stamps)) return false;
+        stampCount += authorization.stamps.length;
+        if (stampCount > 1024) throw new TypeError("Too many authorization stamps.");
+        captured.push({ authorization, actor: trustedRequestContextSchema.parse(copy(member.actor)) });
+      }
+      const currentTime = now();
+      pruneBindings(currentTime);
+      return finite(currentTime) && captured.every(({ authorization, actor }) =>
+        authorization.stamps.every((stamp) => liveMatchesAt(stamp, actor, currentTime))
+        && authorization.admitted.every((item) => {
+          const installed = item.tuple.operation === "execute" ? executorAssignments : assignments;
+          const current = installed.get(assignmentKey(item.tuple));
+          return current !== undefined && JSON.stringify(current) === JSON.stringify(item.tuple)
+            && (item.tuple.operation !== "execute"
+              || (current.implementation !== undefined
+                && sameExecutor(current.executor, item.decision.stamp.authority.executor)));
+        }));
+    } catch {
+      return false;
+    }
+  };
   const registry: ReferenceAuthorizer = {
     onInvalidate(listener) {
       if (typeof listener !== "function" || listeners.size >= maxListeners) throw new Error("Invalidation listener limit exceeded.");
@@ -1364,19 +1398,9 @@ export const createReferenceAuthorizer = (options: ReferenceAuthorizerOptions): 
       return () => captured === epoch;
     },
     validateAssignments(authorization, actor) {
-      if (!issued.has(authorization)) {
-        return false;
-      }
-      return authorization.stamps.every((stamp) => liveMatches(stamp, actor))
-        && authorization.admitted.every((item) => {
-          const registry = item.tuple.operation === "execute" ? executorAssignments : assignments;
-          const current = registry.get(assignmentKey(item.tuple));
-          return current !== undefined && JSON.stringify(current) === JSON.stringify(item.tuple)
-            && (item.tuple.operation !== "execute"
-              || (current.implementation !== undefined
-                && sameExecutor(current.executor, item.decision.stamp.authority.executor)));
-        });
+      return validateAssignmentCohort([{ authorization, actor }]);
     },
+    validateAssignmentCohort,
     getContract(id) {
       return tools.get(id);
     },

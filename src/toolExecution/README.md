@@ -17,8 +17,8 @@ The existing `ToolAction` class and presentation schemas remain the contract. Op
 | `helpers/client/helpers/transport/types.ts` | Internal extension invocation shape. |
 | `helpers/client/helpers/transport/helpers.ts` | Sole local invocation router, staged handlers, UUID request correlation and endpoint cleanup. |
 | `helpers/action/index.ts` | Action registration exports and the existing ToolAction class. |
-| `helpers/action/types.ts` | Trusted schema/action registration and internal JSON capture contracts. |
-| `helpers/action/helpers.ts` | Captured schema/implementation registration and bounded immutable JSON copying. |
+| `helpers/action/types.ts` | Trusted schema/action registration and compatibility JSON capture type exports. |
+| `helpers/action/helpers.ts` | Captured schema/implementation registration and compatibility bounded JSON capture export. |
 | `helpers/dispatcher/index.ts` | Local dispatcher public boundary. |
 | `helpers/dispatcher/types.ts` | Ports, limits, safe outcomes, lifecycle handles and runtime context schemas. |
 | `helpers/dispatcher/helpers.ts` | Ordered gates, draining ownership, output budgets, cleanup and bounded shutdown. |
@@ -28,6 +28,15 @@ The existing `ToolAction` class and presentation schemas remain the contract. Op
 | `helpers/views/index.ts` | Neutral resource-view exports. |
 | `helpers/views/types.ts` | Explicit resource-read policy consent, trusted source and recipient fences, issued view proofs. |
 | `helpers/views/helpers.ts` | Canonical read decisions, structured metadata projection, aggregate freshness and bounded opaque pagination. |
+| `helpers/value/index.ts` | Browser-safe bounded JSON capture exports. |
+| `helpers/value/types.ts` | Bounded JSON capture limits and result contracts. |
+| `helpers/value/helpers.ts` | Shared immutable plain-JSON copier, independent of schema compilation. |
+| `helpers/client/helpers/protocol/index.ts` | Project v2 wire schema/type and parsing exports. |
+| `helpers/client/helpers/protocol/types.ts` | Strict versioned selectors, private assignment/advertisement, dispatch/status and correlated invocation DTOs. |
+| `helpers/client/helpers/protocol/helpers.ts` | Bounded capture before and after wire schema validation. |
+| `helpers/calls/index.ts` | Host private call-retention exports. |
+| `helpers/calls/types.ts` | Connection-lease ownership, receipts, status proofs and retention budgets. |
+| `helpers/calls/helpers.ts` | Bounded TTL/count/byte retention independent of dispatcher draining capacity. |
 
 ## Public names
 
@@ -42,6 +51,36 @@ Registration/dispatcher types: `ToolActionRegistration`, `ToolActionRegistration
 ## Omissions
 
 No challenge store, artifact transport, public wire dispatcher integration or server executor adapter. The separate client entry below remains transitional. Root imports do not load a transport or session factory; resource-view cursors use Node crypto.
+
+## Private protocol foundations (P11 in progress)
+
+The browser-safe `helpers/client/helpers/protocol` boundary validates strict v2
+DTOs after a bounded immutable plain-JSON capture (2 MiB, depth 64, 131072 keys).
+Requests contain selectors rather than authority. Required payload fields reject
+undefined; unknown versions/fields reject. Schemas describe private assignment,
+advertisement, dispatch, status and exact execution correlation. Capabilities
+currently declares continuation unsupported. These DTOs are not yet connected to
+the public host/client runtime; public tool routes remain closed.
+
+`helpers/calls` owns private result retention for an exact trusted connection lease.
+It does not authorize policy access. A host adapter must freshly authorize reads and
+apply both currentness and trailing pure fences before send. Limits default to
+256 records, 1 MiB per output, 16 MiB retained and 60 seconds from start; maximums
+are 1024 records, 16 MiB per output, 256 MiB retained and 120 seconds. Expiry runs
+on access and bounded timers. Immutable status proofs invalidate when their status
+or record changes. Foreign leases and absent/expired records have the same absence.
+Cancel/expiry/disposal request cancellation without pretending remote work settled;
+only the dispatcher owns and releases draining execution capacity. No retries occur.
+
+The existing client proxy dispatcher now exposes admission before remote completion
+and an internal `refresh(signal)` operation for retained-result authorization.
+Refresh rechecks the captured input, original full route and selected executor with
+isolated proofs; it neither executes again nor replaces execution proofs. The
+embedding caller owns refresh concurrency/deadlines until the private adapter is
+integrated. Invoke/advertise/execute freshness uses the canonical actor-aware cohort
+check at a shared time, followed by the owned connection/resource fence. Discovery
+requires a genuine discover assignment with reveal. Source approval remains distinct
+from remote code attestation.
 
 ## Protected resource views
 

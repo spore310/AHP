@@ -51,6 +51,11 @@ Defaults include include depth 16, 32 namespace includes, 256 expanded policies,
 
 Decisions retain the original caller context separately from the executor. `matches` checks caller currentness, all captured route-resource revisions, contributing binding/proof expiry and local invalidation without awaiting external work. Call it at the final local admission point; evaluation does not make a remote transaction atomic.
 
+`validateAssignmentCohort` checks up to 512 genuine assignment authorizations and
+1024 total stamps for their respective actual callers at one final canonical time,
+then checks exact installed tuples. Single `validateAssignments` uses this same
+check. Copied/foreign authorizations fail; no permission is created by freshness.
+
 `matchesAll` checks up to 1024 genuine issued stamps against one final canonical
 clock sample, avoiding expiry between individual proof checks. `captureFence`
 returns a callback-free local mutation check; it is neither permission nor an

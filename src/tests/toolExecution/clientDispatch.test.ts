@@ -3,6 +3,92 @@ import { createClientToolDispatcher, createClientToolPolicy } from "@toolExecuti
 import { clientPolicyFixture } from "./clientPolicyFixture";
 
 describe("client tool canonical policy", () => {
+  it("supports bounded multi-purpose proof sets without reducing advertised tool capacity", async () => {
+    const f = clientPolicyFixture();
+    const proof = await f.policyService.authorize({ ...f.request, operation: "invoke" });
+    for (const count of [Number.NaN, undefined, 0.5, -1, 0, 513]) {
+      const members = [{ authorization: proof.authorization, actor: f.caller }];
+      const cohort = new Proxy(members, { get: (target, key, receiver): unknown => key === "length" ? count : Reflect.get(target, key, receiver) });
+      const proofs = new Proxy([proof], { get: (target, key, receiver): unknown => key === "length" ? count : Reflect.get(target, key, receiver) });
+      expect(f.registry.validateAssignmentCohort(cohort)).toBe(false);
+      expect(f.policyService.current(proofs)).toBe(false);
+    }
+    for (const count of [128, 130, 256, 512]) {
+      const proofs = Array.from({ length: count }, () => proof);
+      expect(f.policyService.current(proofs)).toBe(true);
+      expect(f.registry.validateAssignmentCohort(proofs.map((entry) => ({ authorization: entry.authorization, actor: f.caller })))).toBe(true);
+    }
+    const oversized = Array.from({ length: 513 }, () => proof);
+    expect(f.policyService.current(oversized)).toBe(false);
+    expect(f.registry.validateAssignmentCohort(oversized.map((entry) => ({ authorization: entry.authorization, actor: f.caller })))).toBe(false);
+  });
+
+  it("captures cohort provenance once without trusting caller array methods", async () => {
+    const f = clientPolicyFixture();
+    const proof = await f.policyService.authorize({ ...f.request, operation: "invoke" });
+    const forged = [{ authorization: structuredClone(proof.authorization), actor: f.caller }];
+    Object.defineProperty(forged, "map", { value: () => [] });
+    expect(f.registry.validateAssignmentCohort(forged)).toBe(false);
+    const copied = [{ ...proof }];
+    Object.defineProperty(copied, "map", { value: () => [{ authorization: proof.authorization, actor: f.caller, signal: f.request.signal }] });
+    expect(f.policyService.current(copied)).toBe(false);
+    f.registry.removeBinding({ bindingId: `grant-${f.caller.connectionId}`, scope: f.origin, revision: 1 });
+    let reads = 0;
+    const switching = { get authorization() {
+      reads += 1;
+      return reads === 1 ? proof.authorization : { stamps: [], admitted: [], decisions: [] };
+    }, actor: f.caller };
+    expect(f.registry.validateAssignmentCohort([switching])).toBe(false);
+    expect(reads).toBe(1);
+  });
+
+  it("checks caller and executor proof cohorts at one final time instead of trailing clocks", async () => {
+    let time = 0;
+    let onClock = () => undefined;
+    const f = clientPolicyFixture({ now: () => {
+      onClock();
+      return time;
+    }, decisionTtlMs: 10 });
+    const invoke = await f.policyService.authorize({ ...f.request, operation: "invoke" });
+    time = 9;
+    const advertisement = await f.policyService.authorize({ ...f.request, caller: f.executorContext, operation: "advertise" });
+    const execute = await f.policyService.authorize({ ...f.request, operation: "execute", executor: f.executor, executorContext: f.executorContext });
+    expect(invoke.current()).toBe(true);
+    onClock = () => {
+      time = 11;
+      return undefined;
+    };
+    expect(advertisement.current()).toBe(true);
+    expect(execute.current()).toBe(true);
+    expect(f.policyService.current([invoke, advertisement, execute])).toBe(false);
+    expect(f.policyService.current([advertisement, execute])).toBe(true);
+    expect(f.registry.validateAssignmentCohort([
+      { authorization: advertisement.authorization, actor: f.executorContext },
+      { authorization: execute.authorization, actor: f.caller },
+    ])).toBe(true);
+  });
+
+  it("rejects copied proof objects, foreign policy-service proofs, swapped actors and reentrant cohort revocation", async () => {
+    let onClock = () => undefined;
+    const f = clientPolicyFixture({ now: () => {
+      onClock();
+      return 0;
+    } });
+    const proof = await f.policyService.authorize({ ...f.request, operation: "invoke" });
+    expect(f.policyService.current([{ ...proof }])).toBe(false);
+    const other = createClientToolPolicy(f.brokerOptions);
+    expect(other.current([proof])).toBe(false);
+    expect(f.registry.validateAssignmentCohort([{ authorization: proof.authorization, actor: f.executorContext }])).toBe(false);
+    expect(f.registry.validateAssignmentCohort([{ authorization: structuredClone(proof.authorization), actor: f.caller }])).toBe(false);
+    const fence = f.registry.captureFence();
+    onClock = () => {
+      f.registry.teardown(f.origin);
+      return undefined;
+    };
+    expect(f.policyService.current([proof])).toBe(false);
+    expect(fence()).toBe(false);
+  });
+
   it("requires separate exact invoke and execute assignments and stamps the actual caller", async () => {
     const f = clientPolicyFixture();
     const invoke = await f.policyService.authorize({ ...f.request, operation: "invoke" });
@@ -120,6 +206,69 @@ describe("client host proxy dispatcher", () => {
     expect(send).toHaveBeenCalledOnce();
     expect(send.mock.calls[0]?.[0]).toEqual({ path: "private-canary" });
     expect(f.dispatcher.stats().active).toBe(0);
+    await f.dispatcher.shutdown();
+  });
+
+  it("returns admission while remote execution is pending and denies unadmitted receipts", async () => {
+    const f = setup();
+    const remote = deferred<unknown>();
+    const handle = f.dispatcher.dispatch({ ...f.request, send: () => remote.promise });
+    expect(await handle.admitted).toBe(true);
+    expect(f.dispatcher.stats().active).toBe(1);
+    const denied = f.dispatcher.dispatch({ ...f.request, callId: "over-capacity", send: () => Promise.resolve({ value: "forbidden" }) });
+    expect(await denied.admitted).toBe(false);
+    handle.cancel();
+    expect(f.dispatcher.stats().draining).toBe(1);
+    remote.resolve({ value: "late" });
+    await handle.settled;
+    await f.dispatcher.shutdown();
+  });
+
+  it("refreshes successfully retained result authority after original expiry without changing execution proofs", async () => {
+    let time = 0;
+    const f = setup({ now: () => time, decisionTtlMs: 10 });
+    const input = { path: "original" };
+    const send = vi.fn(() => Promise.resolve({ value: "retained-output" }));
+    const handle = f.dispatcher.dispatch({ ...f.request, input, send });
+    input.path = "changed-after-dispatch";
+    await expect(handle.result).resolves.toMatchObject({ status: "succeeded" });
+    time = 11;
+    expect(handle.current()).toBe(false);
+    const refreshed = await handle.refresh();
+    expect(refreshed?.()).toBe(true);
+    expect(handle.current()).toBe(false);
+    expect(send).toHaveBeenCalledExactlyOnceWith({ path: "original" }, expect.anything());
+    f.registry.removeBinding({ bindingId: `grant-${f.caller.connectionId}`, scope: f.origin, revision: 1 });
+    expect(refreshed?.()).toBe(false);
+    expect(await handle.refresh()).toBeUndefined();
+    await f.dispatcher.shutdown();
+  });
+
+  it("fresh result access rejects a changed full route even if the new route independently permits execution", async () => {
+    let narrow = false;
+    const f = setup({ resolve: (request) => ({ route: { origin: request.origin, targets: narrow ? [] : [request.origin] } }) });
+    for (const context of [f.caller, f.executorContext]) f.registry.installBinding({
+      id: `grant-${context.connectionId}-alternate`, actor: context.actor, scope: f.origin, roles: [], policies: [f.policy],
+      authority: { kind: "host-policy", policy: f.policy }, revision: 1,
+    });
+    for (const tuple of f.tuples) {
+      const alternate = { ...tuple, bindingId: tuple.bindingId + "-alternate", route: { origin: f.origin, targets: [] } };
+      if (tuple.operation === "execute") f.registry.installExecutorAssignment(alternate);
+      else f.registry.installToolAssignment(alternate);
+    }
+    const handle = f.dispatcher.dispatch({ ...f.request, send: () => Promise.resolve({ value: "original-route-result" }) });
+    await expect(handle.result).resolves.toMatchObject({ status: "succeeded" });
+    narrow = true;
+    // Canonical scope routes are fixed until a trusted relationship update.
+    f.registry.installResource({ resource: f.origin, route: { origin: f.origin, targets: [] },
+      owner: f.caller.actor.principal, externalAuthority: "none",
+      admission: { sessionType: f.request.sessionType, providerId: f.request.providerId } });
+    const resolution = await f.dispatcher.policy.resolve(f.request);
+    const caller = await f.dispatcher.policy.authorize({ ...f.request, resolution, operation: "invoke", executor: undefined, executorContext: undefined });
+    const executor = await f.dispatcher.policy.authorize({ ...f.request, resolution, operation: "execute" });
+    expect(f.dispatcher.policy.current([caller, executor])).toBe(true);
+    expect(await handle.refresh()).toBeUndefined();
+    expect(handle.current()).toBe(false);
     await f.dispatcher.shutdown();
   });
 

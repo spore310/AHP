@@ -8,6 +8,7 @@ import { createToolDispatcher } from "@toolExecution/helpers/dispatcher";
 import { createToolActionRegistration } from "@toolExecution/helpers/action";
 import { ToolAction } from "@toolExecution/types";
 import type { ToolActionContext } from "@toolExecution/types";
+import type { AssignmentAuthorization, ResourceRoute, TrustedRequestContext } from "@authorization";
 import type { ClientToolBrokerOptions, ClientToolDispatchRequest, ClientToolPolicyRequest, ClientToolProof, ClientToolRegistration, ClientToolResolutionRequest, ClientToolRoute } from "./types";
 
 const schemas = createAuthorizationSchemas(POLICY_LIMIT_ABSOLUTE);
@@ -26,6 +27,7 @@ export function createClientToolPolicy(options: ClientToolBrokerOptions) {
   const select = policies.select.bind(policies);
   const project = registry.projectAssignments.bind(registry);
   const validate = registry.validateAssignments.bind(registry);
+  const validateCohort = registry.validateAssignmentCohort.bind(registry);
   const readBindings = registry.readBindings.bind(registry);
   const getContract = registry.getContract.bind(registry);
   const registrations = options.registrations.map((raw): ClientToolRegistration => {
@@ -43,6 +45,7 @@ export function createClientToolPolicy(options: ClientToolBrokerOptions) {
     identities.add(key);
   }
   const issued = new Set(registrations);
+  const issuedProofs = new WeakMap<ClientToolProof, { readonly authorization: AssignmentAuthorization; readonly actor: TrustedRequestContext; readonly signal: AbortSignal }>();
   const captureRequest = (request: ClientToolResolutionRequest): ClientToolResolutionRequest => {
     if (!issued.has(request.registration) || request.signal.aborted) return deny();
     return Object.freeze({
@@ -57,6 +60,20 @@ export function createClientToolPolicy(options: ClientToolBrokerOptions) {
 
   return Object.freeze({
     registrations: Object.freeze(registrations),
+    current(proofs: readonly ClientToolProof[]): boolean {
+      const candidate: unknown = proofs;
+      if (!Array.isArray(candidate)) return false;
+      const count = proofs.length;
+      if (!Number.isSafeInteger(count) || count < 1 || count > 512) return false;
+      const captured = [];
+      for (let index = 0; index < count; index += 1) {
+        const proof = proofs[index];
+        const member = proof === undefined ? undefined : issuedProofs.get(proof);
+        if (member === undefined || member.signal.aborted) return false;
+        captured.push(member);
+      }
+      return validateCohort(captured) && captured.every((member) => !member.signal.aborted);
+    },
     async resolve(request: ClientToolResolutionRequest): Promise<ClientToolRoute> {
       const captured = captureRequest(request);
       const rawResolution = captureToolValue(await resolve(captured), limits).value;
@@ -100,6 +117,7 @@ export function createClientToolPolicy(options: ClientToolBrokerOptions) {
           ...(resolution.mandatoryBindings === undefined ? {} : { mandatoryBindings: resolution.mandatoryBindings }),
         });
         const admitted = authorization.admitted.find((entry) => entry.allowed && !entry.challengeRequired
+          && (operation !== "discover" || entry.reveal)
           && entry.tuple.operation === operation && entry.tuple.contract.id === registered.id
           && entry.tuple.contract.key === registered.key && entry.tuple.contract.version === registered.version
           && sameActor(entry.tuple.recipient, recipient) && sameResource(entry.tuple.resource, request.origin)
@@ -107,8 +125,10 @@ export function createClientToolPolicy(options: ClientToolBrokerOptions) {
           && (operation !== "execute" || canonicalJsonEqual(entry.tuple.implementation, request.registration.implementation)));
         if (aborted()) return deny();
         if (admitted === undefined || !validate(authorization, request.caller)) continue;
-        return Object.freeze({ authorization, authority: admitted.decision.stamp.authority,
+        const proof = Object.freeze({ authorization, authority: admitted.decision.stamp.authority,
           current: () => !request.signal.aborted && validate(authorization, request.caller) });
+        issuedProofs.set(proof, { authorization, actor: request.caller, signal: request.signal });
+        return proof;
       }
       return deny();
     },
@@ -127,39 +147,51 @@ export function createClientToolDispatcher(options: ClientToolBrokerOptions) {
       const current = raw.current.bind(raw);
       const fence = raw.fence.bind(raw);
       const send = raw.send.bind(raw);
-      const request = { ...raw, caller: schemas.trustedRequestContextSchema.parse(captureToolValue(raw.caller, limits).value),
+      const request = { ...raw, input: captureToolValue(raw.input, limits).value,
+        caller: schemas.trustedRequestContextSchema.parse(captureToolValue(raw.caller, limits).value),
         executor: schemas.executorRevisionSchema.parse(captureToolValue(raw.executor, limits).value),
         executorContext: schemas.trustedRequestContextSchema.parse(captureToolValue(raw.executorContext, limits).value) };
       let proofs: readonly ClientToolProof[] = [];
-      const isCurrent = (): boolean => {
+      const admission = Promise.withResolvers<boolean>();
+      let executedRoute: ResourceRoute | undefined;
+      const proofsCurrent = (cohort: readonly ClientToolProof[]): boolean => {
         try {
           const live: unknown = current();
           if (live !== true) {
             void Promise.resolve(live).catch(() => undefined);
             return false;
           }
-          const owned: unknown = proofs.every((proof) => proof.current()) && fence();
+          const owned: unknown = policy.current(cohort) && fence();
           if (owned !== true) void Promise.resolve(owned).catch(() => undefined);
           return owned === true;
         } catch {
           return false;
         }
       };
-      const authorize = async (input: unknown, signal: AbortSignal) => {
+      const isCurrent = (): boolean => proofsCurrent(proofs);
+      const resolveAuthorization = async (input: unknown, signal: AbortSignal) => {
         const base = { ...request, input, signal };
         const resolution = await policy.resolve(base);
         const invoke = await policy.authorize({ ...base, resolution, operation: "invoke", executor: undefined, executorContext: undefined });
         const advertisement = await policy.authorize({ ...base, caller: request.executorContext, resolution, operation: "advertise", executor: undefined, executorContext: undefined });
         const execute = await policy.authorize({ ...base, resolution, operation: "execute" });
-        proofs = [invoke, advertisement, execute];
-        if (!isCurrent()) throw new ToolDispatchFailure("stale");
-        return { caller: request.caller, executor: request.executor, resources: resolution.route,
+        const cohort = [invoke, advertisement, execute];
+        if (!proofsCurrent(cohort)) throw new ToolDispatchFailure("stale");
+        const facts = { caller: request.caller, executor: request.executor, resources: resolution.route,
           contract: { id: request.registration.definition.id, revision: request.registration.definition.version },
           implementation: request.registration.implementation, callId: request.callId, authority: execute.authority };
+        return { cohort, facts };
+      };
+      const authorize = async (input: unknown, signal: AbortSignal) => {
+        const authorized = await resolveAuthorization(input, signal);
+        proofs = authorized.cohort;
+        return authorized.facts;
       };
       class RemoteAction extends ToolAction<unknown, unknown> {
         override execute(input: unknown, context: ToolActionContext): Promise<unknown> {
           if (!isCurrent()) throw new ToolDispatchFailure("stale");
+          executedRoute = context.resources;
+          admission.resolve(true);
           return send(input, context);
         }
       }
@@ -176,7 +208,20 @@ export function createClientToolDispatcher(options: ClientToolBrokerOptions) {
           current: isCurrent,
         },
       });
-      return Object.freeze({ ...handle, current: isCurrent });
+      void handle.result.then(() => {
+        admission.resolve(false);
+      });
+      return Object.freeze({ ...handle, current: isCurrent, admitted: admission.promise,
+        async refresh(signal: AbortSignal = request.signal): Promise<(() => boolean) | undefined> {
+          if (executedRoute === undefined || signal.aborted) return undefined;
+          try {
+            const authorized = await resolveAuthorization(request.input, signal);
+            if (!sameRoute(authorized.facts.resources, executedRoute)) return undefined;
+            return () => !signal.aborted && proofsCurrent(authorized.cohort);
+          } catch {
+            return undefined;
+          }
+        } });
     },
   });
 }

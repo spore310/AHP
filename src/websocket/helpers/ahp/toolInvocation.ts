@@ -158,7 +158,8 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
               const execute = await dispatcher.policy.authorize({ ...base, resolution, operation: "execute", executor, executorContext: setup.context });
               allowed.push({ registration, executor });
               proofs.push(advertise, execute);
-            } catch { /* This exact implementation is not admitted. */ }
+            } catch {
+              /* This exact implementation is not admitted. */ }
           }
           if (allowed.length !== 1 || allowed[0] === undefined) return denied;
           entries.push(allowed[0]);
@@ -169,7 +170,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
         if (controller.signal.aborted) return denied;
         stagedAdvertisements.add(staged);
         const current = (): boolean => !controller.signal.aborted && livePeer(peer, setup) && liveSession(facts.origin)
-          && proofs.every((proof) => proof.current()) && ownsClientId() && ownedPeer(peer, setup)
+          && dispatcher.policy.current(proofs) && ownsClientId() && ownedPeer(peer, setup)
           && sessionTokens.get(channel) === facts.origin && stagedAdvertisements.has(staged);
         return { current, release: () => {
           stagedAdvertisements.delete(staged);

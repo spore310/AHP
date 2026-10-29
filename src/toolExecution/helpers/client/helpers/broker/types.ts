@@ -39,7 +39,7 @@ export interface ClientToolBrokerOptions {
 }
 
 export interface ClientToolPolicyRequest extends ClientToolResolutionRequest {
-  readonly operation: Extract<ToolOperation, "invoke" | "advertise" | "execute">;
+  readonly operation: Extract<ToolOperation, "discover" | "invoke" | "advertise" | "execute">;
   readonly resolution: ClientToolRoute;
   readonly executor?: ExecutorRevision;
   readonly executorContext?: TrustedRequestContext;

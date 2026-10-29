@@ -17,13 +17,4 @@ export interface ToolActionRegistrationOptions<TInput, TOutput, TPrepared = void
   create(): ToolAction<TInput, TOutput, TPrepared>;
 }
 
-export interface ToolValueLimits {
-  readonly maxBytes: number;
-  readonly maxDepth: number;
-  readonly maxKeys: number;
-}
-
-export interface CapturedToolValue {
-  readonly value: unknown;
-  readonly bytes: number;
-}
+export type { ToolValueLimits, CapturedToolValue } from "../value";
