@@ -29,7 +29,7 @@ const mayReadGlobalSequence = (context: WebSocketConnectionContext): boolean => 
   }
 };
 
-/** Safe supported facade. P10 must supply authorized projections before native protected routes reopen. */
+/** Safe supported facade. Native reads require explicit canonical resource-view configuration. */
 export const createAHPBinding = (
   factory: SessionsFactory,
   reportDiagnostic: (diagnostic: AHPDiagnostic) => void = () => undefined,
@@ -72,14 +72,19 @@ export const createAHPBinding = (
           throw new RpcError(JsonRpcErrorCodes.InvalidParams, "Too many initial subscriptions");
         }
         const parsed = initializeParamsSchema.parse(params);
-        if ((parsed.initialSubscriptions?.length ?? 0) !== 0) {
+        if (options?.protectedViews === undefined && (parsed.initialSubscriptions?.length ?? 0) !== 0) {
           return unavailable();
         }
+      } else if (options?.protectedViews !== undefined && (method === "subscribe" || method === "listSessions")) {
+        if (!mayReadGlobalSequence(context)) return unavailable();
       } else if (method !== "ping" && method !== "unsubscribe" && !AGENT_WORK_REQUEST_METHODS.has(method)) {
         return unavailable();
       }
       if (AGENT_WORK_REQUEST_METHODS.has(method) && context.security !== undefined && context.isSecurityCurrent?.() !== true) {
         return unavailable();
+      }
+      if (options?.protectedViews !== undefined && (method === "initialize" || method === "subscribe" || method === "listSessions")) {
+        return Promise.resolve().then(() => handler(params, context, invocation)).catch(() => unavailable());
       }
       return handler(params, context, invocation);
     };

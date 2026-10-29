@@ -9,10 +9,11 @@ The supported AHP binding/host is a safe facade over one private canonical
 kernel. Native initialize requires verified live setup with explicit permission to
 observe the host-wide global activity cursor; it is denied by default. Authorized
 minimal initialize returns the genuine current sequence and empty snapshots, and
-then ping works. P05 opens only contextual native create with separate explicit
-registered creation approval and a `null` reply. Raw protected native views,
-subscriptions, disposal/actions and legacy tool delivery remain unavailable until
-later authorization/projection integration. Authentication/setup is not disclosure
+then ping works. Contextual native create requires separate explicit
+registered creation approval and a `null` reply. Explicit `protectedViews` opens
+projected initial/repeated subscriptions, root counts and lists through canonical
+resource-read policy. Native disposal/actions and legacy tool delivery remain
+unavailable. Authentication/setup is not disclosure
 permission. The generic transport still accepts arbitrary trusted application
 handlers; it does not sandbox application JavaScript.
 
@@ -29,7 +30,7 @@ supply any of this. Cursor permission is metadata-only; exact registered type/pr
 creation and whole bootstrap-template approval remain separate requirements.
 
 Success returns native `null` only. There is no legacy factory-create fallback,
-no new snapshot/subscription/count/tool route and no raw kernel export. Protected
+no implicit snapshot/subscription/count/tool permission and no raw kernel export. Protected
 binding rejects a competing mutable owner registry. Work consumes a read-only lookup
 of current full resource ref -> canonical owner -> subject in the configured domain;
 private kernel mutable hooks remain legacy/internal only. Exact-instance disposal
@@ -48,6 +49,8 @@ host fences prevent reuse even though standalone factories may be reused.
 | `helpers/ahp/index.ts` | Public AHP binding exports. |
 | `helpers/ahp/helpers.ts` | Safe public facade: cursor-authorized ready initialize, separate contextual create/null, per-connection cancellation, protected-route deferral and work delegation. |
 | `helpers/ahp/helpers/kernel/helpers.ts` | Private canonical AHP mechanics: sequencing, subscriptions, reply commit, broker correlation, owner attach and cleanup. Not exported by any supported barrel. |
+| `helpers/ahp/helpers/views/types.ts` | Bounded delivery intent and per-peer view ownership. |
+| `helpers/ahp/helpers/views/helpers.ts` | Canonical view-source adapter, final delivery guards, ordered queues and invalidation cleanup. |
 | `helpers/security/types.ts` | P04-local setup options, scoped seeds, immutable connection fences/snapshots and adapter contracts. |
 | `helpers/security/constants.ts` | Independent initial setup count defaults/absolute ceilings. |
 | `helpers/security/helpers.ts` | Captured limits, scoped read preparation, identity/actor/resource/binding validation, bounded snapshot freshness and release. |
@@ -194,10 +197,11 @@ const server = createWebSocketServer({
   alone cannot supply it. No constant zero or missing native serverSeq substitutes
   for the genuine canonical cursor. Permission explicitly permits observing
   **host-wide activity**, not scoped counts, session/root data or tools.
-- **Native setup is not resource permission.** No-config and configured
-  hosts both reject nonempty initialSubscriptions, subscribe/repeat subscribe,
-  list/root/session views, native dispose/actions and legacy tools before
-  protected getters/effects. Empty initialize/ping remain supported only after
+- **Native setup is not resource permission.** Hosts without `protectedViews`
+  reject nonempty initialSubscriptions, subscribe/repeat subscribe and lists.
+  Explicit resource-view configuration uses canonical read grants and projects
+  all native reads. Native dispose/actions and legacy tools remain closed.
+  Empty initialize/ping remain supported only after
   the explicit live global-sequence permission gate. The
   explicit agent/work extension still requires its own principal/owner/presence
   checks; configured security additionally requires current setup.
@@ -244,8 +248,8 @@ identity/actor resolution may explicitly permit this shared-cursor disclosure.
 Its synchronous guard, expiry and release cover this permission as well as scope
 facts; revocation must make that guard false. Consumers needing only scoped views
 cannot use native initialize without permitting that host-wide cursor, because
-the pinned protocol requires the real current serverSeq. P10/P12 still own safe
-recipient-view interoperability; no native version or allocator semantics changed.
+the pinned protocol requires the real current serverSeq. Protected native views
+preserve this sequence; private tool interoperability remains separate work.
 Legacy agentWork authentication by itself does not establish this metadata permission.
 The application selects existing full resource incarnations and grant revisions; setup calls
 `resources.resolve` and `bindings.read({actor,scope,grantRevision})` exactly. It
@@ -317,7 +321,7 @@ remain. The new public tests below use the real unmocked facade/host alongside t
 ## Private canonical compatibility kernel (not a public tool route)
 
 The supported facade denies legacy `x-ahp/tools/call`/completion. Private assignment,
-projection and public SDK integration must be completed before delivery opens.
+and public tool SDK integration must be completed before tool delivery opens.
 Internal compatibility tests use the same private kernel directly (or a file-local
 isolated binding-factory substitution), without changing their canonical assertions.
 They do not prove public multi-user privacy or authorized SDK interoperability.
@@ -368,6 +372,39 @@ active/draining counts after bounded shutdown; no retry or reroute is implied.
 revocation/disconnect/rebind, final-send revocation, private raw-frame canaries,
 draining and reentrant reducer vetoes. Its explicit credential/canonical-authority
 fixtures still select the internal kernel and are not P12 public privacy proof.
+
+## Protected native resource views
+
+`protectedViews` is an explicit host opt-in with the same canonical registry and
+compiler as creation. Its admitted policy refs authorize resource content reads
+through selected discover/reveal, actual scoped bindings, mandatory route rules
+and no challenge. Authentication, creator identity and tool assignments do not
+substitute for these grants. Global-sequence consent remains independently required.
+
+Initial batches are atomic. Repeated subscriptions and listings use the same
+neutral `createResourceViews` service. Root agents are empty; counts and pages
+include permitted sessions only. Opaque cursors bind recipient, catalogue basis,
+authority and expiry. Only a proof's `value` leaves the host; private stamps and
+canonical basis refs include facts that must never become a wire payload.
+
+Pending and active delivery share 256-record/2-MiB per-peer bounds; at most 128
+native views are admitted per peer. Queued intents reauthorize at delivery, then
+check aggregate proof freshness and the exact subscription generation/sequence at
+the final transport guard. Unsubscribe invalidates in-flight delivery/refresh and
+releases retained channel state. Revoked views close.
+Failed replacement snapshots also close the existing view, including a final
+reply veto: events suppressed while replacement was pending cannot leave an old
+subscription silently out of sync. Root membership comparisons
+use full incarnation sets: observed canonical additions retain native catalogue
+and count events; permission-only membership changes require a fresh connection.
+No synthetic native sequence or upstream removal action is emitted.
+
+`policyEgress.test.ts` exercises the supported public binding (an observation-only
+test wrapper retains actual transport contexts), real SDK transport/reducers,
+raw canaries, initial/repeated reads, final-send revocation, queue bounds and
+unsubscribe/resnapshot/refresh races. `policyProjection.test.ts` additionally
+checks server-tool/meta action projection with the installed reducer; there is
+still no canonical server-tool producer until its later execution packet.
 
 ## Related Documentation
 

@@ -88,19 +88,43 @@ assertion; do not widen it.
 
 ## Application tool extension
 
-Typed session snapshots carry the server-authored visible contract manifest
+Trusted canonical typed session snapshots carry the server-authored contract manifest
 under `_meta["x-ahp-application"]`. This does not extend AHP's top-level state or
 claim the host implements `serverTools`. Client advertisements use the standard
 `session/activeClientSet` action with exact revision metadata under each tool's
 `_meta["x-ahp-tool-contract"]`; full schemas survive parsing for comparison.
 
-Actual client execution uses explicitly non-standard namespaced methods:
+The private compatibility kernel uses explicitly non-standard namespaced methods:
 `x-ahp/tools/call` is a request, `x-ahp/tools/invoke` is a private server
 notification, and `x-ahp/tools/complete` is a client notification. Ordinary
 `AhpClient` users need the [tool client adapter](../../src/toolClient/README.md)
 for this extension. The server validates and routes; a registered local client
-implementation executes. These operations add no persistence or server-side
+implementation executes. The supported public host keeps this legacy tool wire
+closed pending private assignment/dispatch negotiation. These operations add no persistence or server-side
 filesystem/model runtime.
+
+## Protected native read projection
+
+Explicit host `protectedViews` configuration admits resource-read policies from
+the canonical registry/compiler. Selected discover/reveal plus actual bindings
+and mandatory constraints grants resource content, including authored text; it
+does not grant tool execution. The transport separately requires global-sequence
+consent. Initial subscription batches are atomic, and final reply/send guards
+recheck current authority, resource incarnation and subscription ownership.
+
+Protected snapshots/actions empty structured active-client/server tools and
+application metadata. Root provider catalogue is empty without separate authority;
+session counts and list pages are filtered before pagination. List cursors are
+opaque, recipient/basis-bound and short lived. Private proof stamps and canonical
+basis refs never appear in the response. Canonical state remains unchanged.
+
+Projected native actions retain actual serverSeq/fromSeq semantics. The pinned SDK
+reducers are exercised for session metadata, active clients, server tools and root
+counts. Unsupported transitions and permission-only membership changes close the
+view; canonical additions use genuine catalogue/count events. No new native version,
+replacement sequence or guessed resnapshot action is introduced. Advertisers do
+not receive raw descriptor broadcasts; exact private acknowledgement remains part
+of the later negotiated tool API.
 
 ## Authenticated agent/work extension
 
@@ -129,8 +153,9 @@ size checks. See the [persistence contract](../../src/persistence/README.md#port
 When configured, the upgrade may carry `Authorization: Bearer <token>`; the
 resolved subject is attached to the connection before AHP dispatch. Missing or
 unknown credentials leave the connection unauthenticated, so agent/work methods
-fail closed while baseline AHP methods remain available under the host's
-deployment policy. `initialize.clientId` is never identity. See
+fail closed. Supported native initialization independently requires trusted
+global-sequence consent, and protected reads require resource-view configuration.
+`initialize.clientId` is never identity. See
 [`../architecture/agent-task-lifecycle.md`](../architecture/agent-task-lifecycle.md).
 
 ## Gotchas

@@ -13,6 +13,8 @@ export type {
 } from "./types";
 
 export { ToolAction, challengePresentationSchema, createChallengePresentationSchema } from "./types";
+export { createResourceViews } from "./helpers/views";
+export type { ResourceViewOptions, ResourceViewSource, ResourceViewRecord, ResourceViewRow, ResourceViewCatalogue, ResourceViewRecipient, ResourceViewProof } from "./helpers/views";
 export { createToolActionRegistration } from "./helpers/action";
 export type { ToolActionRegistration, ToolActionRegistrationOptions } from "./helpers/action";
 export { createToolDispatcher } from "./helpers/dispatcher";

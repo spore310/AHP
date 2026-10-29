@@ -25,12 +25,15 @@ The existing `ToolAction` class and presentation schemas remain the contract. Op
 | `helpers/client/helpers/broker/index.ts` | Neutral client policy/proxy dispatcher exports. |
 | `helpers/client/helpers/broker/types.ts` | Trusted client registration, resource resolution and transport proxy ports. |
 | `helpers/client/helpers/broker/helpers.ts` | Canonical assignment authorization and remote proxy action lifecycle. |
+| `helpers/views/index.ts` | Neutral resource-view exports. |
+| `helpers/views/types.ts` | Explicit resource-read policy consent, trusted source and recipient fences, issued view proofs. |
+| `helpers/views/helpers.ts` | Canonical read decisions, structured metadata projection, aggregate freshness and bounded opaque pagination. |
 
 ## Public names
 
 Types: `Awaitable`, `ValidationResult`, `ToolPreparationHooks`, `ToolActionContext`, `ToolAction`, `ChallengePresentation`, `ChallengeContinuation`, `ChallengeProof`, `ChallengeVerification`, `ChallengeStatus`, `ChallengeAdapter`, `ArtifactDescriptor`.
 
-Values: `ToolAction`, `challengePresentationSchema`, `createChallengePresentationSchema`, `createToolActionRegistration`, `createToolDispatcher`.
+Values: `ToolAction`, `challengePresentationSchema`, `createChallengePresentationSchema`, `createToolActionRegistration`, `createToolDispatcher`, `createResourceViews`.
 
 Registration/dispatcher types: `ToolActionRegistration`, `ToolActionRegistrationOptions`, `ToolDispatchFacts`, `ToolDispatchPorts`, `ToolDispatchLimits`, `ToolDispatchPhase`, `ToolDispatchFailureCode`, `ToolDispatchOutcome`, `ToolDispatchHandle`, `ToolDispatchRequest`, `ToolDispatcherOptions`, `ToolDispatcher`.
 
@@ -38,7 +41,35 @@ Registration/dispatcher types: `ToolActionRegistration`, `ToolActionRegistration
 
 ## Omissions
 
-No challenge store, artifact transport, public wire dispatcher integration or server executor adapter. The separate client entry below remains transitional. Root imports remain free of server and framework imports.
+No challenge store, artifact transport, public wire dispatcher integration or server executor adapter. The separate client entry below remains transitional. Root imports do not load a transport or session factory; resource-view cursors use Node crypto.
+
+## Protected resource views
+
+`createResourceViews` is the policy-aware embedding service. `ResourceViewOptions`
+requires the canonical registry/compiler, explicit admitted resource-read policy
+refs and trusted full-route resolution. Selected discover/reveal with an actual
+binding and no challenge authorizes resource content, including authored text.
+Tool assignments alone do not authorize this seam. Mandatory route constraints
+remain canonical. All native metadata requires separate global-sequence consent
+from the transport recipient adapter.
+
+`ResourceViewSource` supplies canonical records, snapshots and catalogue rows.
+Its captured resource/catalogue fences and the recipient's final fence are pure
+owned-state checks: no clocks, resolvers or user hooks may run inside them. Ordinary
+source and setup callbacks run before the final aggregate canonical clock check.
+Proofs retain issued stamps, exact incarnation and local mutation fences.
+
+Shared application metadata is empty; active-client/server tool arrays and
+customizations are empty. Supported native action projections match the pinned
+SDK reducer; unsupported transitions close the transport view. This is structured
+metadata privacy, not text redaction. Root agents are empty without independent
+provider-catalogue authority. Lists filter before paging, retain at most 128 opaque
+30-second cursors, and reject foreign/stale cursors. Views cap 128 catalogue rows,
+64 active preparations, 2 MiB captured values, and a 5-second caller deadline;
+unsettled preparations keep their admission slot. Dispose/forget release retained
+cursor ownership; already transmitted data cannot be recalled.
+List publication rechecks liveness and proof freshness after awaits; disposed or
+timed-out work cannot recreate cursor ownership when its resolver settles later.
 
 ## Host client-executor proxy
 

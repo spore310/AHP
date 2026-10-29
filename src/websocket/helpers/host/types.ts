@@ -4,6 +4,7 @@ import type { ConnectionAuthenticator } from "@agents";
 import type { AgentRegistrationRepository, WorkRepository } from "@persistence/types";
 import type { SessionsFactory, SessionsFactoryOptions } from "@sessions/types";
 import type { ClientToolBrokerOptions } from "@toolExecution/helpers/client/helpers/broker";
+import type { ResourceViewOptions } from "@toolExecution/helpers/views";
 import type { AHPServerSecurityOptions } from "../security/types";
 
 /**
@@ -30,6 +31,7 @@ export interface AHPServerAgentWorkOptions {
 
 /** Options for a composed Agent Hosting Protocol host. */
 export interface AHPServerOptions {
+  readonly protectedViews?: ResourceViewOptions;
   readonly toolExecution?: ClientToolBrokerOptions;
   readonly host: string;
   readonly port: number;

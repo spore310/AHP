@@ -194,6 +194,10 @@ export interface ReferenceAuthorizer {
   evaluate(input: EvaluateSelector): Promise<StampedDecision>;
   projectAssignments(input: ProjectAssignmentsInput): Promise<AssignmentAuthorization>;
   matches(stamp: LocalDecisionStamp, actor: TrustedRequestContext): boolean;
+  /** One canonical clock sample for a bounded set of genuine issued stamps. */
+  matchesAll(stamps: readonly LocalDecisionStamp[], actor: TrustedRequestContext): boolean;
+  /** Callback-free local mutation fence. Neither permission nor an expiry check. */
+  captureFence(): () => boolean;
   validateAssignments(authorization: AssignmentAuthorization, actor: TrustedRequestContext): boolean;
   getContract(id: string): ToolContractDefinition | undefined;
 }

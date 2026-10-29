@@ -76,6 +76,10 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     || options.toolExecution.registry !== creationConfig.registry || options.toolExecution.policies !== creationConfig.policies)) {
     throw new Error("Tool execution requires coherent protected host authority.");
   }
+  if (options.protectedViews !== undefined && (creationConfig === undefined || security === undefined
+    || options.protectedViews.registry !== creationConfig.registry || options.protectedViews.policies !== creationConfig.policies)) {
+    throw new Error("Resource views require coherent protected host authority.");
+  }
   const canonicalOwner = creationConfig?.registry.owner.bind(creationConfig.registry);
   const workDomain = security?.workDomainId;
   if (security !== undefined && options.agentWork !== undefined) {
@@ -143,9 +147,11 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     sessions,
     () => undefined,
     options.agentWork === undefined || agents === undefined || work === undefined
-      ? { maxInitialSubscriptions, ...(options.toolExecution === undefined ? {} : { toolExecution: options.toolExecution }) }
+      ? { maxInitialSubscriptions, ...(options.toolExecution === undefined ? {} : { toolExecution: options.toolExecution }),
+          ...(options.protectedViews === undefined ? {} : { protectedViews: options.protectedViews }) }
       : {
           maxInitialSubscriptions,
+          ...(options.protectedViews === undefined ? {} : { protectedViews: options.protectedViews }),
           ...(options.toolExecution === undefined ? {} : { toolExecution: options.toolExecution }),
           agents,
           work,

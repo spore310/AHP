@@ -51,6 +51,12 @@ Defaults include include depth 16, 32 namespace includes, 256 expanded policies,
 
 Decisions retain the original caller context separately from the executor. `matches` checks caller currentness, all captured route-resource revisions, contributing binding/proof expiry and local invalidation without awaiting external work. Call it at the final local admission point; evaluation does not make a remote transaction atomic.
 
+`matchesAll` checks up to 1024 genuine issued stamps against one final canonical
+clock sample, avoiding expiry between individual proof checks. `captureFence`
+returns a callback-free local mutation check; it is neither permission nor an
+expiry check. Aggregate consumers run ordinary callbacks first, then aggregate
+freshness, then pure registry/connection/resource ownership fences.
+
 Identical admission/resource/assignment installations preserve currentness and capacity. Once a resource has an admission association, reinstalling it must retain that exact association; omitting or replacing it rejects atomically rather than dropping the ceiling. Explicitly unlinked direct-grant resources remain supported. Conflicting immutable admissions, bindings, contracts, implementations or assignment tuples do not silently replace approved state. Resource relationship updates invalidate prior decisions. Teardown removes bindings and assignments tied to the exact resource incarnation or its route; it does not operate on a bare instance-id string.
 
 ## Atomic admission cohorts

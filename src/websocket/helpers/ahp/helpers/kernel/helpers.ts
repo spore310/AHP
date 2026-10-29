@@ -38,6 +38,8 @@ import {
 } from "@websocket/helpers/ahp/constants";
 import { createAgentWorkExtension, mapWorkError } from "@websocket/helpers/ahp/agentWork";
 import { createToolInvocationBroker } from "@websocket/helpers/ahp/toolInvocation";
+import { createProtectedViewDelivery } from "@websocket/helpers/ahp/helpers/views/helpers";
+import type { ResourceViewProof } from "@toolExecution/helpers/views";
 import { isSettlingSession } from "@websocket/helpers/settling";
 import {
   channelParamsSchema,
@@ -66,6 +68,7 @@ const catalogueNotification = (method: string, params: unknown): JsonRpcMessage 
 });
 
 const uniqueUris = (uris: readonly string[]): string[] => [...new Set(uris)];
+const isInitializing = (peer: AHPPeer): boolean => peer.phase === "initializing";
 
 const assertBaselinePayload = (action: Record<string, unknown>): void => {
   if (action.type === "session/titleChanged" && typeof action.title !== "string") {
@@ -139,6 +142,10 @@ export const createAHPKernel = (
       return;
     }
     try {
+      if (protectedDelivery !== undefined) {
+        protectedDelivery.enqueue(peer, message);
+        return;
+      }
       if (!peer.context.send(message)) {
         failPeer(peer);
       }
@@ -152,12 +159,19 @@ export const createAHPKernel = (
     message: JsonRpcMessage,
     originClientId?: string,
   ): void => {
+    try {
+      protectedDelivery?.capture(channel, message);
+    } catch {
+      for (const peer of peers.values()) if (peer.subscriptions.has(channel) || peer.pending.has(channel)) failPeer(peer);
+      return;
+    }
     for (const peer of peers.values()) {
       if (originClientId !== undefined && peer.clientId !== originClientId) {
         continue;
       }
       const buffer = peer.pending.get(channel);
       if (buffer !== undefined) {
+        if (protectedDelivery !== undefined && !protectedDelivery.buffer(peer, message)) continue;
         if (buffer.length >= PENDING_DELIVERY_LIMIT) {
           failPeer(peer);
           continue;
@@ -214,6 +228,7 @@ export const createAHPKernel = (
   };
 
   const toolInvocations = createToolInvocationBroker(factory, peers, requirePeer, options?.toolExecution);
+  const protectedDelivery = options?.protectedViews === undefined ? undefined : createProtectedViewDelivery(factory, options.protectedViews, failPeer);
 
   const beginPending = (peer: AHPPeer, uri: string): void => {
     if (!peer.pending.has(uri)) {
@@ -239,6 +254,7 @@ export const createAHPKernel = (
   };
 
   const unsubscribeCatalogue = factory.onCatalogueNotification((notification) => {
+    protectedDelivery?.changed();
     const message = catalogueNotification(notification.method, notification.params);
     publish(ROOT_SCHEME, message);
     if (notification.method !== "root/sessionRemoved") {
@@ -248,6 +264,9 @@ export const createAHPKernel = (
     toolInvocations.removeSession(session);
     for (const peer of peers.values()) {
       const subscribedToSession = peer.subscriptions.has(session) || peer.pending.has(session);
+      if (protectedDelivery !== undefined && subscribedToSession) {
+        failPeer(peer);
+      }
       if (subscribedToSession && !peer.subscriptions.has(ROOT_SCHEME)) {
         sendToPeer(peer, message);
       }
@@ -259,6 +278,7 @@ export const createAHPKernel = (
     if (envelope.rejectionReason !== undefined) {
       return;
     }
+    protectedDelivery?.changed();
     toolInvocations.observeEnvelope(envelope);
     publish(envelope.channel, actionNotification(envelope));
   });
@@ -369,6 +389,7 @@ export const createAHPKernel = (
       const parsed = channelParamsSchema.parse(params);
       peer.subscriptions.delete(parsed.channel);
       peer.pending.delete(parsed.channel);
+      protectedDelivery?.unsubscribe(peer, parsed.channel);
       toolInvocations.unsubscribe(peer, parsed.channel);
       return null;
     },
@@ -498,6 +519,77 @@ export const createAHPKernel = (
   };
 
   const handlers: Record<string, JsonRpcHandler> = { ...baselineHandlers };
+  if (protectedDelivery !== undefined) {
+    handlers.initialize = async (params, context, invocation): Promise<InitializeResult> => {
+      const peer = requirePeer(context);
+      if (peer.phase !== "new" || invocation.guardReply === undefined) throw new RpcError(JsonRpcErrorCodes.InvalidRequest, "Protected view unavailable");
+      peer.phase = "initializing";
+      const uris: string[] = [];
+      try {
+        const parsed = initializeParamsSchema.parse(params);
+        const negotiated = negotiateProtocolVersion(parsed.protocolVersions);
+        if (negotiated === undefined) throw new Error("Unsupported protocol");
+        uris.push(...uniqueUris(parsed.initialSubscriptions ?? []));
+        if (uris.length > 128) throw new Error("View subscription limit");
+        for (const uri of uris) beginPending(peer, uri);
+        const proofs: ResourceViewProof<Snapshot>[] = [];
+        for (const uri of uris) proofs.push(await protectedDelivery.snapshot(peer, uri));
+        invocation.guardReply(() => peer.phase === "initializing" && protectedDelivery.current(peer, proofs));
+        invocation.onReplySettled((settlement) => {
+          if (settlement.outcome === "success" && settlement.responseSent && peer.phase === "initializing") {
+            peer.clientId = parsed.clientId;
+            peer.protocolVersion = negotiated;
+            peer.phase = "ready";
+            protectedDelivery.committed(peer, proofs);
+            commitPending(peer, uris);
+          } else {
+            discardPending(peer, uris);
+            if (isInitializing(peer)) peer.phase = "new";
+          }
+        });
+        return { protocolVersion: negotiated, serverSeq: factory.getCurrentServerSeq(), snapshots: proofs.map((proof) => proof.value) };
+      } catch {
+        discardPending(peer, uris);
+        if (isInitializing(peer)) peer.phase = "new";
+        throw new RpcError(JsonRpcErrorCodes.InvalidRequest, "Protected view unavailable");
+      }
+    };
+    handlers.subscribe = async (params, context, invocation) => {
+      const peer = requirePeer(context);
+      const parsed = channelParamsSchema.parse(params);
+      if (!peer.subscriptions.has(parsed.channel) && peer.subscriptions.size >= 128) throw new RpcError(JsonRpcErrorCodes.InvalidRequest, "Protected view unavailable");
+      if (invocation.guardReply === undefined) throw new RpcError(JsonRpcErrorCodes.InvalidRequest, "Protected view unavailable");
+      const replacing = peer.subscriptions.has(parsed.channel);
+      beginPending(peer, parsed.channel);
+      try {
+        const proof = await protectedDelivery.snapshot(peer, parsed.channel);
+        invocation.guardReply(() => peer.phase === "ready" && peer.pending.has(parsed.channel) && protectedDelivery.current(peer, [proof]));
+        invocation.onReplySettled((settlement) => {
+          if (settlement.outcome === "success" && settlement.responseSent && peer.phase === "ready") {
+            protectedDelivery.committed(peer, [proof]);
+            commitPending(peer, [parsed.channel]);
+          } else {
+            discardPending(peer, [parsed.channel]);
+            if (replacing) failPeer(peer);
+          }
+        });
+        return { snapshot: proof.value };
+      } catch {
+        discardPending(peer, [parsed.channel]);
+        if (replacing) invocation.onReplySettled(() => {
+          failPeer(peer);
+        });
+        throw new RpcError(JsonRpcErrorCodes.InvalidRequest, "Protected view unavailable");
+      }
+    };
+    handlers.listSessions = async (params, context, invocation) => {
+      const peer = requirePeer(context);
+      if (invocation.guardReply === undefined) throw new RpcError(JsonRpcErrorCodes.InvalidRequest, "Protected view unavailable");
+      const proof = await protectedDelivery.list(peer, params);
+      invocation.guardReply(() => peer.phase === "ready" && protectedDelivery.current(peer, [proof]));
+      return proof.value;
+    };
+  }
   for (const [method, handler] of Object.entries(extension?.handlers ?? {})) {
     // Baseline methods are authoritative and cannot be overridden by the
     // optional authenticated extension.
@@ -532,6 +624,7 @@ export const createAHPKernel = (
         }
         peer.closeNotified = true;
         peer.phase = "closed";
+        protectedDelivery?.remove(peer);
         toolInvocations.removeConnection(context.connectionId);
         extension?.onConnectionClose(context.connectionId);
         peer.pending.clear();
@@ -566,13 +659,16 @@ export const createAHPKernel = (
         unsubscribeCatalogue();
       } catch {
         // Continue releasing the other binding resources.
+
       }
       try {
         unsubscribeEnvelopes();
       } catch {
         // Continue releasing peers even if one unsubscribe fails.
+
       }
       toolInvocations.dispose();
+      protectedDelivery?.dispose();
       for (const peer of [...peers.values()]) {
         extension?.onConnectionClose(peer.context.connectionId);
         peer.phase = "closed";

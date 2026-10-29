@@ -18,13 +18,15 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
   readonly challenge?: boolean;
   readonly onSecurityCheck?: (context: TrustedRequestContext) => void;
   readonly registryNow?: () => number;
+  readonly protectedViews?: boolean;
+  readonly creatorView?: boolean;
 } = {}) {
   const roles = options.roles ?? { fixture: ["invoke", "advertise", "execute"] };
   const policy = { id: "fixture.tools", revision: 1 };
   const sessionType = { key: "test.echo-session", version: 1 };
   const rules = { admitted: { policies: [policy], namespaces: [] }, mandatory: [] };
-  const policies = createToolPolicyFactory({ policies: [{ ...policy, operations: Object.fromEntries(["invoke", "advertise", "execute"].map((operation) => [operation,
-    { actor: { mode: "roles", actors: { user: { anyOf: [operation] } } }, ...(options.permission === undefined ? {} : { requiredPermissions: ["fixture-check"] }) }])),
+  const policies = createToolPolicyFactory({ policies: [{ ...policy, operations: Object.fromEntries(["discover", "invoke", "advertise", "execute"].map((operation) => [operation,
+    { actor: { mode: "roles", actors: { user: { anyOf: [operation] } } }, ...(operation === "discover" ? { reveal: true } : {}), ...(options.permission === undefined ? {} : { requiredPermissions: ["fixture-check"] }) }])),
   challenge: { required: options.challenge ?? false } }], bindings: [{ sessionType, providerId: "mock", ...rules }] });
   const registry = createReferenceAuthorizer({ policies, now: options.registryNow ?? Date.now,
     ...(options.permission === undefined ? {} : { permissionEvaluators: { "fixture-check": options.permission } }) });
@@ -34,12 +36,19 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
   const schema = { type: "object" as const, properties: {} };
   const type = defineApplicationSession({ id: "22222222-2222-4222-8222-222222222222", ...sessionType, providerId: "mock", configSchema: schema,
     config: createSessionConfig({ schema, parser: z.object({}).strict() }), tools: definitions.map((ref) => ({ ref, access: ToolAccessLevel.Standard })),
-    policy: { rules, creation: { capability: { key: "fixture.create", revision: 1 }, prepare: ({ request }) => Promise.resolve(
-      request.caller.actor.principal.subject !== "creator"
-        ? { effect: "deny", release: () => undefined }
-        : {
-            effect: "allow", request, bootstrap: { kind: "none" }, validUntil: Date.now() + 30000, isCurrent: () => true, release: () => undefined,
-          }) } } });
+    policy: { rules,
+      ...(options.creatorView === true
+        ? { creatorBootstrap: { id: "fixture-view-bootstrap", revision: 1, bindings: [{ key: "read", purpose: "admitted" as const,
+            roles: ["discover"], policies: [policy], authority: { kind: "host-policy" as const, policy }, maxLifetimeMs: 60000 }] } }
+        : {}),
+      creation: { capability: { key: "fixture.create", revision: 1 }, prepare: ({ request }) => Promise.resolve(
+        request.caller.actor.principal.subject !== "creator"
+          ? { effect: "deny", release: () => undefined }
+          : {
+              effect: "allow", request, bootstrap: options.creatorView === true
+                ? { kind: "template", id: "fixture-view-bootstrap", revision: 1, bindings: [{ key: "read", lifetimeMs: 60000 }] }
+                : { kind: "none" }, validUntil: Date.now() + 30000, isCurrent: () => true, release: () => undefined,
+            }) } } });
   const contexts = new Map<string, { readonly context: TrustedRequestContext; readonly fence: ConnectionFence; readonly tuples: ToolAssignmentRecord[]; readonly released: Promise<void> }>();
   const installConnection = (context: TrustedRequestContext, fence: ConnectionFence): ToolAssignmentRecord[] => {
     const scope = host.sessions.authorization?.getResource(toolPolicyChannel);
@@ -72,6 +81,10 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
     }, rollback: () => undefined, revoke: () => Promise.resolve() },
   };
   const host = createAHPServer({ host: "127.0.0.1", port: 0, path: "/capacity",
+    ...(options.protectedViews === true
+      ? { protectedViews: { registry, policies, admitted: [policy],
+          resolve: ({ resource }: { resource: import("@authorization").ResourceRef }) => ({ route: { origin: resource, targets: [resource] } }) } }
+      : {}),
     sessions: { providers: [createMockProvider()], application: { catalogue: createSessionTypeCatalogue({ tools: createToolCatalogue({ definitions }), types: [type.registration] }), defaultType: sessionType }, creationSecurity: { registry, policies } },
     toolExecution: { registry, policies, registrations, resolve: ({ origin }) => ({ route: { origin, targets: [origin] } }), dispatcher: { limits: { shutdownWaitMs: 20 } } },
     security: { composition, initialAuthority: { prepare: ({ context, fence }) => {
@@ -109,5 +122,5 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
     }
   };
   await recreate();
-  return { host, registry, policies, contexts, registrations, recreate, policy };
+  return { host, registry, policies, contexts, registrations, recreate, policy, sessionHeader: type.header };
 }

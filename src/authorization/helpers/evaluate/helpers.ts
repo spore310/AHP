@@ -385,6 +385,9 @@ export const createReferenceAuthorizer = (options: ReferenceAuthorizerOptions): 
   const liveMatches = (stamp: LocalDecisionStamp, actor: TrustedRequestContext): boolean => {
     const currentTime = now();
     pruneBindings(currentTime);
+    return liveMatchesAt(stamp, actor, currentTime);
+  };
+  const liveMatchesAt = (stamp: LocalDecisionStamp, actor: TrustedRequestContext, currentTime: number): boolean => {
     if (!issued.has(stamp) || !finite(currentTime) || !finite(stamp.validUntil) || currentTime >= stamp.validUntil || stamp.epoch !== epoch || stamp.grantRevision !== grantRevision) {
       return false;
     }
@@ -1349,6 +1352,16 @@ export const createReferenceAuthorizer = (options: ReferenceAuthorizerOptions): 
     },
     matches(stamp, actor) {
       return liveMatches(stamp, actor);
+    },
+    matchesAll(stamps, actor) {
+      if (!Array.isArray(stamps) || stamps.length > 1024) return false;
+      const currentTime = now();
+      pruneBindings(currentTime);
+      return finite(currentTime) && stamps.every((stamp: LocalDecisionStamp) => liveMatchesAt(stamp, actor, currentTime));
+    },
+    captureFence() {
+      const captured = epoch;
+      return () => captured === epoch;
     },
     validateAssignments(authorization, actor) {
       if (!issued.has(authorization)) {
