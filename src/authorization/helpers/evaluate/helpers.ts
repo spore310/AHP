@@ -110,9 +110,14 @@ const ruleAdmits = (
   return false;
 };
 
-const assignmentKey = (record: ToolAssignmentRecord): string => (
-  `${resourceKey(record.resource)}\u0000${record.contract.id}\u0000${record.operation}\u0000${record.bindingId}\u0000${record.policyRef.id}`
-);
+const assignmentKey = (record: ToolAssignmentRecord): string => {
+  const base = `${resourceKey(record.resource)}\u0000${record.contract.id}\u0000${record.operation}\u0000${record.bindingId}\u0000${record.policyRef.id}`;
+  const executor = record.executor;
+  if (record.operation !== "execute" || executor === undefined) return base;
+  const actor = executor.actor;
+  return `${base}\u0000${JSON.stringify([actor.kind, actor.principal.domainId, actor.principal.subject,
+    actor.kind === "agent" ? actor.agentId : null, executor.connectionId, executor.generation, executor.registrationRevision])}`;
+};
 
 const inputLimitValue = (value: number | undefined, fallback: number): number => {
   const resolved = value ?? fallback;
@@ -1239,6 +1244,14 @@ export const createReferenceAuthorizer = (options: ReferenceAuthorizerOptions): 
       }
       executorAssignments.set(key, stored);
       bump();
+    },
+    removeExecutorAssignment(expected) {
+      const key = assignmentKey(expected);
+      const current = executorAssignments.get(key);
+      if (current === undefined || JSON.stringify(current) !== JSON.stringify(expected)) return false;
+      executorAssignments.delete(key);
+      bump();
+      return true;
     },
     installPolicyExtensionEvaluator(policyRef, evaluator) {
       const key = `${policyRef.id}\u0000${String(policyRef.revision)}`;

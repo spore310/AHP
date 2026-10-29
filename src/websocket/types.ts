@@ -13,6 +13,8 @@ export interface WebSocketConnectionContext {
   readonly security?: ConnectionSecuritySnapshot;
   /** Absent means no protected authority. Never invokes an asynchronous port. */
   isSecurityCurrent?(): boolean;
+  /** Actual transport's callback-free local socket/lifetime fence. */
+  isOpen?(): boolean;
   /**
    * Server-authenticated principal for the upgrade request.
    *
@@ -30,7 +32,7 @@ export interface WebSocketConnectionContext {
    * Returns whether the frame was accepted by the open socket. A `false`
    * result is local enqueue failure, not proof a peer received nothing.
    */
-  send(message: JsonRpcMessage): boolean;
+  send(message: JsonRpcMessage, admission?: () => boolean): boolean;
   /** Registers a handler to run when the socket closes. */
   onClose(handler: () => void): void;
   /** Begins socket closure. Buffered text frames are still flushed by the socket. */
@@ -52,6 +54,8 @@ export interface ReplySettlement {
  */
 export interface JsonRpcInvocation {
   readonly kind: "request" | "notification";
+  /** Actual transport supplies one final result veto, after setup callbacks; legacy fixtures may omit it. */
+  guardReply?(admission: () => boolean): void;
   onReplySettled(listener: (settlement: ReplySettlement) => void): void;
 }
 

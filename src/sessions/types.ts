@@ -295,6 +295,8 @@ export interface SessionsFactory {
     readonly clientSeq: unknown;
     readonly action: unknown;
     readonly clientId: string;
+    /** Trusted synchronous veto after structural validation; never supplies authority. */
+    readonly admission?: () => boolean;
   }): ActionEnvelope;
   /** Subscribes to root catalogue events. Returns an unsubscribe function. */
   onCatalogueNotification(listener: (notification: CatalogueNotification) => void): () => void;

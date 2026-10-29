@@ -73,7 +73,11 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
     : options.registryFactory();
   const now = options.now ?? ((): Date => new Date());
   const sequence = resolveActionSequence(options);
-  const nextServerSeq = (): number => sequence.next();
+  let allocationRevision = 0;
+  const nextServerSeq = (): number => {
+    allocationRevision += 1;
+    return sequence.next();
+  };
 
   const catalogueListeners = new Set<(notification: CatalogueNotification) => void>();
   const envelopeListeners = new Set<(envelope: ActionEnvelope) => void>();
@@ -142,7 +146,7 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
         type: ACTION_TYPE_ROOT_ACTIVE_SESSIONS_CHANGED,
         activeSessions: sessions.size,
       },
-      serverSeq: sequence.next(),
+      serverSeq: nextServerSeq(),
       origin: undefined,
     };
     deliver(envelopeListeners, envelope);
@@ -152,7 +156,9 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
     ? undefined
     : createSessionAuthorization(dependencies, creationSecurity, {
         prepare: (params) => prepareCreateSession(dependencies, params),
-        publish: (record) => { publishCreatedSession(dependencies, record); },
+        publish: (record) => {
+          publishCreatedSession(dependencies, record);
+        },
         start: (prepared, beforeFailure) => startSessionBackend(dependencies, prepared.record, prepared.workingDirectories, prepared.config, beforeFailure),
         changed: emitActiveSessionsChanged,
         isStopping: () => disposing,
@@ -278,7 +284,7 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
     listAgents: () => [...providers.values()].map((provider) => structuredClone(provider.agentInfo)),
     onCatalogueNotification: (listener) => subscribe(catalogueListeners, listener),
     onSessionEnvelope: (listener) => subscribe(envelopeListeners, listener),
-    dispatchAction: ({ channel, clientSeq, action, clientId }) => {
+    dispatchAction: ({ channel, clientSeq, action, clientId, admission }) => {
       if (typeof channel !== "string" || channel.length === 0) {
         throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid dispatchAction channel");
       }
@@ -301,7 +307,7 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
         return {
           channel,
           action: toClientSessionAction(parsedAction),
-          serverSeq: sequence.next(),
+          serverSeq: nextServerSeq(),
           origin: { clientId, clientSeq: parsedClientSeq },
           rejectionReason: BASELINE_UNSUPPORTED_ACTION_REASON,
         } satisfies ActionEnvelope;
@@ -317,7 +323,7 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
         return {
           channel,
           action: toClientSessionAction(parsedAction),
-          serverSeq: sequence.next(),
+          serverSeq: nextServerSeq(),
           origin: { clientId, clientSeq: parsedClientSeq },
           rejectionReason: admitted.rejectionReason,
         } satisfies ActionEnvelope;
@@ -326,18 +332,35 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
         return {
           channel,
           action: toClientSessionAction(parsedAction),
-          serverSeq: sequence.next(),
+          serverSeq: nextServerSeq(),
           origin: { clientId, clientSeq: parsedClientSeq },
           rejectionReason: BASELINE_UNSUPPORTED_ACTION_REASON,
         } satisfies ActionEnvelope;
       }
 
       const before = buildSessionSummary(record);
+      const priorSequence = record.serverSeq;
+      const priorAllocation = allocationRevision;
+      const modifiedAt = now().toISOString();
+      // Resolve injected callbacks before the last synchronous admission check.
+      const serverSeq = nextServerSeq();
+      let allowed: unknown = true;
+      try {
+        if (admission !== undefined) allowed = admission();
+      } catch {
+        allowed = false;
+      }
+      if (allowed !== true) void Promise.resolve(allowed).catch(() => undefined);
+      if (allowed !== true || disposing || sessions.get(channel) !== record || record.serverSeq !== priorSequence
+        || allocationRevision !== priorAllocation + 1) {
+        return { channel, action: toClientSessionAction(parsedAction), serverSeq: nextServerSeq(),
+          origin: { clientId, clientSeq: parsedClientSeq }, rejectionReason: "Action admission is no longer current." } satisfies ActionEnvelope;
+      }
       const envelope = applySessionAction(
         record,
         toSupportedSessionAction(admitted.accepted),
-        now().toISOString(),
-        nextServerSeq,
+        modifiedAt,
+        () => serverSeq,
       );
       const stamped = {
         ...envelope,

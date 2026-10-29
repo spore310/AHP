@@ -315,7 +315,7 @@ describe("P03 assignment completion review", () => {
         }).toThrow(/conflict/i);
         expect(() => {
           install({ ...installed, executor: { ...executor, generation: 9 } });
-        }).toThrow(/conflict/i);
+        }).toThrow(/limit/i);
       }
       expect(() => {
         install({ ...installed, contract: { id: secondId, key: secondContract.key, version: 1 } });

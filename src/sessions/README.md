@@ -349,6 +349,15 @@ than publishing a stale `session/ready`.
 
 ## Testing
 
+`dispatchAction` accepts an optional trusted synchronous `admission` veto. It runs
+after existing structural/schema checks and injected clock/sequence callbacks.
+Only exact `true` permits reduction; exceptions and Promise values reject. The
+factory then checks record ownership, disposal and host-wide allocation changes,
+so callback reentrancy cannot commit an obsolete action or regress its sequence.
+This is a final veto, not an authorization service. Protected transport callers
+must supply their canonical policy/currentness check. Rejections remain privately
+returned canonical envelopes and do not reduce state.
+
 | Test | Pins |
 | ---- | ---- |
 | [`src/tests/sessions/configuration.test.ts`](../tests/sessions/configuration.test.ts) | `createSessionConfig` descriptor protection, parser defaults, required/type/enum/unknown-key rejection, and sanitized unexpected parser failures. |

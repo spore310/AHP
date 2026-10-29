@@ -86,6 +86,8 @@ export const createAHPBinding = (
   }
   return {
     handlers,
+    drainTools: kernel.drainTools.bind(kernel),
+    toolStats: kernel.toolStats.bind(kernel),
     onConnection: (context) => {
       const lifetime = new AbortController();
       lifetimes.set(context, lifetime);

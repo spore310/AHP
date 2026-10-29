@@ -22,6 +22,9 @@ The existing `ToolAction` class and presentation schemas remain the contract. Op
 | `helpers/dispatcher/index.ts` | Local dispatcher public boundary. |
 | `helpers/dispatcher/types.ts` | Ports, limits, safe outcomes, lifecycle handles and runtime context schemas. |
 | `helpers/dispatcher/helpers.ts` | Ordered gates, draining ownership, output budgets, cleanup and bounded shutdown. |
+| `helpers/client/helpers/broker/index.ts` | Neutral client policy/proxy dispatcher exports. |
+| `helpers/client/helpers/broker/types.ts` | Trusted client registration, resource resolution and transport proxy ports. |
+| `helpers/client/helpers/broker/helpers.ts` | Canonical assignment authorization and remote proxy action lifecycle. |
 
 ## Public names
 
@@ -36,6 +39,26 @@ Registration/dispatcher types: `ToolActionRegistration`, `ToolActionRegistration
 ## Omissions
 
 No challenge store, artifact transport, public wire dispatcher integration or server executor adapter. The separate client entry below remains transitional. Root imports remain free of server and framework imports.
+
+## Host client-executor proxy
+
+The neutral broker helper captures host-approved client registrations separately from
+tool contracts: exact implementation, registration revision and approved source
+id/revision. These are registry facts, not remote code attestation. Its trusted
+resource resolver supplies the full route and optional external/mandatory selectors;
+it cannot grant permission. Factory selection is intersected with canonical bindings
+and exact assignments. One complete positive path suffices; mandatory restrictions
+remain required. Unknown registrations, challenge requirements and stale proofs deny.
+
+`createClientToolDispatcher` runs a fresh host proxy through the local dispatcher.
+It independently checks caller invoke, executor advertisement and executor receive
+permission, retaining genuine authorization objects and complete freshness stamps.
+The final owned-fence port runs after authority callbacks. `send` settles only on
+remote protocol completion; cancellation settles the caller wait but retains bounded
+draining capacity until that completion. A lost connection can leave unresolved work
+through shutdown. The host cannot prove remote cleanup or undo admitted side effects.
+The WebSocket adapter supplies final enqueue/reply admission checks. Its public facade
+still denies tool routes pending private assignment/projection integration.
 
 ## Client entry and ownership
 

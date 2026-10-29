@@ -284,7 +284,8 @@ reconnect, not in-place credential reassignment, establishes a new fence.
 
 Agent kind comes from the trusted ActorResolver/registered-agent facts, not missing
 presence. An agent without its required generation fails setup. Directory presence
-and transport generation are separate; P09 still owns actual executor admission.
+and transport generation are separate. The guarded client broker uses both when
+admitting an exact executor registration.
 A ready setup snapshot alone neither authorizes an operation nor reveals tools.
 
 ## Testing
@@ -315,16 +316,34 @@ remain. The new public tests below use the real unmocked facade/host alongside t
 
 ## Private canonical compatibility kernel (not a public tool route)
 
-The supported facade denies legacy `x-ahp/tools/call`/completion. P09/P10/P12 must
-provide actual authorized dispatch/projection/SDK evidence before delivery opens.
+The supported facade denies legacy `x-ahp/tools/call`/completion. Private assignment,
+projection and public SDK integration must be completed before delivery opens.
 Internal compatibility tests use the same private kernel directly (or a file-local
 isolated binding-factory substitution), without changing their canonical assertions.
 They do not prove public multi-user privacy or authorized SDK interoperability.
 No raw kernel, unsafe option, or no-config fallback is exported.
+The internal kernel preserves inert untyped metadata reduction only when neither
+canonical authorization nor a tool manifest exists. Those metadata rows never enter
+the executable broker registry; attempted calls still fail closed. The raw metadata
+compatibility test asserts both reducer/origin behavior and zero tool invocation.
+Accepted canonical tool-row changes synchronously invalidate conflicting broker
+advertisements before fanout. A different connection claiming the same client ID
+cannot clear or replace another connection's admitted row, including with an empty list.
+Pending advertisement tickets also observe canonical row sequences. Activation after
+fanout requires that its exact accepted row is still current, so a nested removal
+cannot activate an obsolete executor. Pending tickets share the bounded admission
+budget and are released after reduction/rejection. Descriptor equality checks each
+field under its existing budget rather than applying one definition's byte cap to
+an entire multi-tool list.
 
-Within that internal kernel, `x-ahp/tools/call` validates against the session's issued
-manifest and routes work only to the unique connected peer that both submitted
-an accepted advertisement and is still subscribed to that session. Duplicate
+Within that internal kernel, `toolExecution` wiring requires the same canonical
+registry/compiler as protected creation and authenticated connection setup. Missing
+wiring permits no tools. Advertisements require separate advertise and execute
+assignments, exact descriptors and fresh checks before synchronous reduction and
+activation. Calls use the neutral P08 proxy dispatcher, separate caller invoke and
+executor execute grants, full resource routes and immutable registration revisions.
+The issued manifest remains the schema authority. Work routes only to the unique
+connected peer with an accepted advertisement and a current subscription. Duplicate
 claimed client IDs are ambiguous and rejected; a stale advertisement never
 routes to a replacement connection. The server never executes tool code.
 Invocation and completion are namespaced extensions, not standard AHP methods;
@@ -336,6 +355,19 @@ notification through that pending request; other frames remain serialized. This
 allows self-calls without changing ordinary AHP request ordering. See
 [`src/toolClient/README.md`](../toolClient/README.md) for the client adapter and
 its trust limitations.
+
+Private sends serialize first, check connection setup, then apply the invocation's
+canonical policy veto and callback-free local socket fences immediately before
+enqueue. Each actual invocation supports one captured final result guard; denied
+results produce a safe error without the previous output. `send` returning false
+is not proof of remote termination. Disconnect, timeout and shutdown cancel caller
+waits while retaining unresolved remote ownership. `toolExecutionStats()` reports
+active/draining counts after bounded shutdown; no retry or reroute is implied.
+
+`toolPolicyAdmission.test.ts` covers canonical grant separation, post-await ad
+revocation/disconnect/rebind, final-send revocation, private raw-frame canaries,
+draining and reentrant reducer vetoes. Its explicit credential/canonical-authority
+fixtures still select the internal kernel and are not P12 public privacy proof.
 
 ## Related Documentation
 

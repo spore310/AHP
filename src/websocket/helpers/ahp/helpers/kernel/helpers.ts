@@ -88,6 +88,8 @@ export interface AHPBinding {
   onConnection(context: WebSocketConnectionContext): void;
   beforeDispatch(dispatch: WebSocketDispatchContext): void;
   dispose(): void;
+  drainTools(): Promise<{ readonly draining: number }>;
+  toolStats(): { readonly active: number; readonly draining: number; readonly retainedOutputBytes: number };
 }
 
 const NOOP_SESSION_OWNERS: SessionOwnerRegistry = {
@@ -211,7 +213,7 @@ export const createAHPKernel = (
     return peer;
   };
 
-  const toolInvocations = createToolInvocationBroker(factory, peers, requirePeer);
+  const toolInvocations = createToolInvocationBroker(factory, peers, requirePeer, options?.toolExecution);
 
   const beginPending = (peer: AHPPeer, uri: string): void => {
     if (!peer.pending.has(uri)) {
@@ -257,6 +259,7 @@ export const createAHPKernel = (
     if (envelope.rejectionReason !== undefined) {
       return;
     }
+    toolInvocations.observeEnvelope(envelope);
     publish(envelope.channel, actionNotification(envelope));
   });
 
@@ -456,11 +459,11 @@ export const createAHPKernel = (
       return factory.listSessions(params);
     },
 
-    [TOOL_CALL_METHOD]: (params: unknown, context: WebSocketConnectionContext): Promise<unknown> => toolInvocations.call(params, context),
+    [TOOL_CALL_METHOD]: (params: unknown, context: WebSocketConnectionContext, invocation: JsonRpcInvocation): Promise<unknown> => toolInvocations.call(params, context, invocation),
 
     [TOOL_COMPLETE_METHOD]: (params: unknown, context: WebSocketConnectionContext): null => toolInvocations.complete(params, context),
 
-    dispatchAction: (params: unknown, context: WebSocketConnectionContext): null => {
+    dispatchAction: async (params: unknown, context: WebSocketConnectionContext): Promise<null> => {
       const peer = requirePeer(context);
       let parsed: ReturnType<typeof dispatchActionParamsSchema.parse>;
       try {
@@ -473,18 +476,24 @@ export const createAHPKernel = (
       if (peer.clientId === undefined) {
         throw new RpcError(JsonRpcErrorCodes.InvalidRequest, "Connection not initialized");
       }
-      const envelope = factory.dispatchAction({
-        channel: parsed.channel,
-        clientSeq: parsed.clientSeq,
-        action: parsed.action,
-        clientId: peer.clientId,
-      });
-      if (envelope.rejectionReason !== undefined) {
-        sendToPeer(peer, actionNotification(envelope));
-      } else {
-        toolInvocations.rememberAdvertisement(peer, parsed.channel, envelope.action);
+      const advertisement = await toolInvocations.prepareAdvertisement(peer, parsed.channel, parsed.action);
+      try {
+        const envelope = factory.dispatchAction({
+          channel: parsed.channel,
+          clientSeq: parsed.clientSeq,
+          action: parsed.action,
+          clientId: peer.clientId,
+          ...(advertisement === undefined ? {} : { admission: advertisement.current.bind(advertisement) }),
+        });
+        if (envelope.rejectionReason !== undefined) {
+          sendToPeer(peer, actionNotification(envelope));
+        } else {
+          advertisement?.activate(envelope.serverSeq);
+        }
+        return null;
+      } finally {
+        advertisement?.release();
       }
-      return null;
     },
   };
 
@@ -499,6 +508,8 @@ export const createAHPKernel = (
 
   return {
     handlers,
+    drainTools: toolInvocations.drain,
+    toolStats: toolInvocations.stats,
     isToolCompletion: (params: unknown, context: WebSocketConnectionContext): boolean => (
       toolInvocations.isCompletion(params, context)
     ),

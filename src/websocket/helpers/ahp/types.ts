@@ -2,6 +2,7 @@ import type { Snapshot } from "@microsoft/agent-host-protocol";
 import { z } from "zod";
 
 import type { AgentDirectory } from "@agents";
+import type { ClientToolBrokerOptions } from "@toolExecution/helpers/client/helpers/broker";
 import type { JsonRpcMessage } from "@jsonrpc";
 import type { SessionOwnerLookup, SessionOwnerRegistry, WorkService } from "@work";
 import type { WebSocketConnectionContext } from "../../types";
@@ -67,6 +68,7 @@ export interface AHPConnectionModuleOptions {
 
 /** Optional authenticated agent/work extension wiring for an AHP binding. */
 export interface AHPBindingOptions {
+  readonly toolExecution?: ClientToolBrokerOptions;
   readonly maxInitialSubscriptions?: number;
   readonly agents?: AgentDirectory;
   readonly work?: WorkService;

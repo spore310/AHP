@@ -172,6 +172,13 @@ promised. Neither source binding nor a snapshot attests remote code execution.
 
 ## Omissions
 
+Executor assignments include the complete executor actor, connection, generation and
+registration revision in their canonical identity. Distinct connections can share an
+unchanged grant. `removeExecutorAssignment(expected)` removes only the exact installed
+tuple and invalidates decision proofs; stale cleanup cannot remove a successor's
+generation. It does not revoke the underlying grant. Changing an implementation on
+an existing executor registration is rejected; install a new registration revision.
+
 Installing a resource, binding, or assignment is trusted host administration, not
 policy-aware issuance. A compiler `select()` result is not a grant. Requests do not
 supply mandatory rules. External proofs are trusted in-process adapter facts, copied

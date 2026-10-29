@@ -1,6 +1,6 @@
 # Execution ledger
 
-**Execution state:** P00?P05 retain historical candidate acceptance; P06 is accepted at its final 112-file manifest with independent review and DB-safe full gate (74 files / 854 tests / 167 mappings). Continue to P07, then P08?P19 under their dependencies. Tested normal pushes to origin/agentIdentity are explicitly approved in chat. Later public execution/privacy proofs remain NOT RUN.
+**Execution state:** P00-P05 retain historical candidate acceptance; P06-P09 are accepted with final manifests, independent source/docs reviews and DB-safe full gates. P09 final gate: 80 files / 991 tests / 182 mappings. Continue P10-P19 under their dependencies. Tested normal pushes to origin/agentIdentity are explicitly approved in chat. Later public execution/privacy proofs remain NOT RUN.
 
 | Packet | Status | Candidate | Evidence path | Blocker / next step |
 | --- | --- | --- | --- | --- |
@@ -13,17 +13,17 @@
 | P06 | ACCEPTED | [112-file final manifest](../execution/P06-final-candidate.sha256) | [acceptance](../execution/P06-handoff.md) | Independent review PASS; full DB-safe gate PASS; P07 eligible |
 | P07 | ACCEPTED | [13-file manifest](../execution/P07-final-candidate.sha256) | [acceptance](../execution/P07-handoff.md) | Independent review PASS; DB-safe75files/886tests/173mappings; one runtime and explicit endpoint ownership; P08 eligible |
 | P08 | ACCEPTED | [11-file manifest](../execution/P08-final-candidate.sha256) | [acceptance](../execution/P08-handoff.md) | Independent source/docs PASS; full DB-safe77files/941tests/179mappings; local lifecycle only, P09 eligible |
-| P09 | NOT STARTED | — | — | Await assignment and dependencies |
-| P10 | NOT STARTED | — | — | Await assignment and dependencies |
-| P11 | NOT STARTED | — | — | Await assignment and dependencies |
-| P12 | NOT STARTED | — | — | Await assignment and dependencies |
-| P13 | NOT STARTED | — | — | Await assignment and dependencies |
-| P14 | NOT STARTED | — | — | Await assignment and dependencies |
-| P15 | NOT STARTED | — | — | Await assignment and dependencies |
-| P16 | NOT STARTED | — | — | Await assignment and dependencies |
-| P17 | NOT STARTED | — | — | Await assignment and dependencies |
-| P18 | NOT STARTED | — | — | Await assignment and dependencies |
-| P19 | NOT STARTED | — | — | Await assignment and dependencies |
+| P09 | ACCEPTED | [27-file manifest](../execution/P09-final-candidate.sha256) | [acceptance](../execution/P09-handoff.md) | Independent source/docs PASS; DB-safe80files/991tests/182mappings; internal canonical broker only, P10 eligible |
+| P10 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
+| P11 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
+| P12 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
+| P13 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
+| P14 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
+| P15 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
+| P16 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
+| P17 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
+| P18 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
+| P19 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
 
 ## Contract amendments
 

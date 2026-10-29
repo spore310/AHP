@@ -72,6 +72,10 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
   if (creationConfig !== undefined && (security === undefined || coherent !== true)) {
     throw new Error("Protected host creation requires security and coherent compiler identity.");
   }
+  if (options.toolExecution !== undefined && (creationConfig === undefined || security === undefined
+    || options.toolExecution.registry !== creationConfig.registry || options.toolExecution.policies !== creationConfig.policies)) {
+    throw new Error("Tool execution requires coherent protected host authority.");
+  }
   const canonicalOwner = creationConfig?.registry.owner.bind(creationConfig.registry);
   const workDomain = security?.workDomainId;
   if (security !== undefined && options.agentWork !== undefined) {
@@ -139,9 +143,10 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     sessions,
     () => undefined,
     options.agentWork === undefined || agents === undefined || work === undefined
-      ? { maxInitialSubscriptions }
+      ? { maxInitialSubscriptions, ...(options.toolExecution === undefined ? {} : { toolExecution: options.toolExecution }) }
       : {
           maxInitialSubscriptions,
+          ...(options.toolExecution === undefined ? {} : { toolExecution: options.toolExecution }),
           agents,
           work,
           ...(sessionOwners === undefined ? { ownerLookup } : { sessionOwners }),
@@ -298,6 +303,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     }
     try {
       binding.dispose();
+      await binding.drainTools();
     } catch (error) {
       collectFailure(failures, error);
     }
@@ -317,6 +323,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
   };
 
   return {
+    toolExecutionStats: binding.toolStats.bind(binding),
     sessions: hostedSessions,
     start: async (): Promise<AddressInfo> => {
       if (stopped) {

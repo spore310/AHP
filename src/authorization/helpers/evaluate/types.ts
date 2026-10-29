@@ -185,6 +185,8 @@ export interface ReferenceAuthorizer {
   installTool(contract: ToolContractDefinition): void;
   installToolAssignment(input: ToolAssignmentRecord): void;
   installExecutorAssignment(input: ToolAssignmentRecord): void;
+  /** Removes only this exact host-installed tuple; never revokes its underlying grant. */
+  removeExecutorAssignment(expected: ToolAssignmentRecord): boolean;
   installPolicyExtensionEvaluator(policyRef: PolicyRef, evaluator: ExtensionEvaluator): void;
   invalidateExternal(revision: string): void;
   teardown(resource: ResourceRef): void;

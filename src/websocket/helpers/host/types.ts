@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import type { ConnectionAuthenticator } from "@agents";
 import type { AgentRegistrationRepository, WorkRepository } from "@persistence/types";
 import type { SessionsFactory, SessionsFactoryOptions } from "@sessions/types";
+import type { ClientToolBrokerOptions } from "@toolExecution/helpers/client/helpers/broker";
 import type { AHPServerSecurityOptions } from "../security/types";
 
 /**
@@ -29,6 +30,7 @@ export interface AHPServerAgentWorkOptions {
 
 /** Options for a composed Agent Hosting Protocol host. */
 export interface AHPServerOptions {
+  readonly toolExecution?: ClientToolBrokerOptions;
   readonly host: string;
   readonly port: number;
   readonly path?: string;
@@ -45,6 +47,8 @@ export interface AHPServerOptions {
  * `sessions` is not usable to revive the host after `stop()`.
  */
 export interface AHPServerHandle {
+  /** Includes unresolved remote work after bounded shutdown; not a termination guarantee. */
+  toolExecutionStats(): { readonly active: number; readonly draining: number; readonly retainedOutputBytes: number };
   start(): Promise<AddressInfo>;
   stop(): Promise<void>;
   readonly sessions: SessionsFactory;
