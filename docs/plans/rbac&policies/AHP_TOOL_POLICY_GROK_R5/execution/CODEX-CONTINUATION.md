@@ -2,10 +2,10 @@
 
 Execute mode. P06-P11 accepted. Full P06-P19 goal ACTIVE; P12 next.
 P06 pushed bd46480bed27477b6262b0e8b63179aec74c05fa; P07 pushed
- e3dafe4b215d42a5c8223316b209389ae3f52747; P08 pushed
- c378c92d16b9e317a80c175b434d3e16da643ca1; P09 pushed
- b7a059da12b23c57a6b9b379946e862a651aaa40. P10 pushed
- 941fe855b312e1102f67d75cd63c15f9f8e66b97. All remote identities verified.
+e3dafe4b215d42a5c8223316b209389ae3f52747; P08 pushed
+c378c92d16b9e317a80c175b434d3e16da643ca1; P09 pushed
+b7a059da12b23c57a6b9b379946e862a651aaa40. P10 pushed
+941fe855b312e1102f67d75cd63c15f9f8e66b97. All remote identities verified.
 
 P10 accepted: P10-handoff.md maps V01-V07 and complete P00/D1 egress inventory.
 P10-final-candidate.sha256 has 22 paths, SHA256
@@ -39,15 +39,30 @@ P11 integrated candidate accepted after independent final review PASS on all53
 raw hashes, no material blockers. Final manifest P11-final-candidate.sha256 SHA
 c37717c72a5884a55ca987c77687031a47e0001268188459b82b6107d6d315c0. Full DB-safe gate reviewed-integration-validate-2 PASS87files/
 1074tests/199mappings plus lint/typecheck/build; final packet-focused PASS3files20tests.
-Final acceptance P11-final-validate.log PASS87files/1074tests/199mappings, lint/typecheck/build CHECK_EXIT0. Commit/push pending. Production public
+Final acceptance P11-final-validate.log PASS87files/1074tests/199mappings, lint/typecheck/build CHECK_EXIT0. P11 committed/pushed 8189e1da3d4abb64594aa01dc271d8f27b24f2e4; exact remote SHA verified. Production public
 v2 SDK execution/cancellation/revocation, final TTL fence, exact private correlation
 and all bounded retention/send/poll/join gates implemented. P11-handoff.md maps
 W01-W06 and every preserved RED/GREEN review regression. Historical P09 assertions
 use only tests/websocket/legacyToolClient; production has no fallback. Source binding
 is not remote code attestation. Lead sole writer; p06_review read-only.
-Next verify final gate, stage scoped files excluding nul, commit/push/verify SHA,
-then plan/review/implement P12 X01-X06 with full matrices. P12 packet, SCENARIOS,
-CONTRACT_CARD, TEST_RUNBOOK section9 and broker contracts read; no P12 edits yet.
+P12-plan.md independent plan PASS. Typed triage-chat session origin plus distinct
+chat/workspace targets is approved fixture representation; still must add distinct
+broader parent session and omitted/substituted-route negatives. No production changes.
+Current uncommitted P12 source: toolPolicyFixture opt-in actors/delegation parent,
+registrations, assignment selector, extra policies/permissions, route/resolver and
+resource setup. Defaults preserved: P12-fixture-defaults.log PASS3files47tests.
+Shared codingHarnessContracts/createCodingHarness added to toolExecution/fixtures.ts.
+New policyIntegrationFixture.ts uses real public host, exact credential-classified
+agents with canonical parentGrantId lineage, registered chat mandatory policy and
+workspace required external authority/provider policy. Source path/export/digest
+is trusted fixture evidence, not remote attestation. New policyIntegration.test.ts
+has first self/cross positive roundtrips PASS2 in P12-public-positive-second.log;
+first.log preserves a fixed fixture syntax error. Both actual handler/source/route/
+identity tuples and observer raw canaries asserted. These are incomplete X05/X06:
+negative matrices, meaningful competing/A-handler selection controls, distinct
+broader parent route, X01/X02/X03 scenarios, races, docs/fullgate/review remain.
+Current new files not layout-formatted/full-linted; run typecheck then continue
+thin negative slices. No P12 acceptance/commit. Reviewer p06_review idle after planPASS.
 
 User approved all tested R5 checkpoint pushes to origin/agentIdentity in chat.
 No dependency installs/live persistence/reset/stash/force push/model changes.

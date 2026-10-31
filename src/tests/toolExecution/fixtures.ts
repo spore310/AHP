@@ -4,6 +4,7 @@ import type { ToolActionContext } from "@toolExecution";
 import { createToolActionRegistration } from "@toolExecution/helpers/action";
 import type { ToolDispatchFacts, ToolDispatchPorts } from "@toolExecution/helpers/dispatcher";
 import type { ToolContractDefinition } from "@tools/types";
+import type { ToolInvocationContext } from "@toolExecution/client";
 
 export interface Input { readonly path: string }
 export interface Output { readonly value: string }
@@ -47,4 +48,21 @@ export class EchoAction extends ToolAction<Input, Output> {
   override execute(input: Input): Output {
     return { value: input.path };
   }
+}
+
+/** One fixture harness export shared by independently authenticated client identities. */
+export const codingHarnessContracts: readonly ToolContractDefinition[] = ["read", "summary", "write", "terminal"].map((name, index) => ({
+  ...contract, id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+  key: "coding." + name, version: 3, name,
+  description: "P12-DESCRIPTOR-" + name,
+  inputSchema: { ...contract.inputSchema, description: "P12-SCHEMA-" + name },
+}));
+
+export function createCodingHarness() {
+  return codingHarnessContracts.map((definition) => ({ definition,
+    execute: vi.fn((input: unknown, context: ToolInvocationContext) => {
+      if (typeof input !== "object" || input === null || !("path" in input) || typeof input.path !== "string") throw new Error("Invalid fixture input");
+      return { value: "P12-HANDLER-RESULT:" + definition.key + ":" + input.path + ":" + context.execution.source.revision.toString() };
+    }),
+  }));
 }
