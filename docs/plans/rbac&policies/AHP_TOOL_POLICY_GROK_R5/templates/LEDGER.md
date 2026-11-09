@@ -19,7 +19,7 @@
 | P12 | ACCEPTED | [Final candidate](../execution/P12-final-candidate.sha256) | [Accepted handoff](../execution/P12-handoff.md) | 37 public route tests; full gate88files/1111tests/199mappings; independent final PASS. P13 eligible. |
 | P13 | ACCEPTED | [Final candidate](../execution/P13-final-candidate.sha256) | [Accepted handoff](../execution/P13-handoff.md) | C01-C07 independent final PASS; DB-safe90files1156tests202mappings; packet44tests; P14 eligible |
 | P14 | ACCEPTED | [Final candidate](../execution/P14-final-candidate.sha256) | [Accepted handoff](../execution/P14-handoff.md) | R01-R05 independent PASS; DB-safe92files1199tests205mappings; packet43tests; P15 eligible |
-| P15 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
+| P15 | ACCEPTED | [Final candidate](../execution/P15-final-candidate.sha256) | [Accepted handoff](../execution/P15-handoff.md) | E01-E05 independent PASS; DB-safe94files1242tests211mappings; packet43tests; P16 eligible |
 | P16 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
 | P17 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
 | P18 | NOT STARTED | — | — | Await dependencies; authorized by active goal |

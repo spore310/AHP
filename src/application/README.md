@@ -7,7 +7,7 @@ Inert example session policy for the default host. It lists allowed tool contrac
 | File | Responsibility |
 | ---- | -------------- |
 | `constants.ts` | Stable revision ids and session-type keys. |
-| `helpers.ts` | `createBaselineSessionApplication`. |
+| `helpers.ts` | Baseline session catalogue and bounded in-memory host action registration. |
 | `index.ts` | Public exports. |
 
 ## API
@@ -53,3 +53,30 @@ For registering a local implementation and calling it from another client, use t
 ## Testing
 
 [`src/tests/application.test.ts`](../tests/application.test.ts) covers fresh catalogues, separate application/provider config, two running hosts with different defaults and the same session URI, and terminal stop behavior.
+
+## In-memory host action
+
+`createInMemoryEchoRegistration()` returns an inert `ServerToolRegistration` for
+`example.echo@1`. It accepts `{ text: string }` (at most 4096 characters) and returns
+`{ value: text }`, with strict object schemas, registration/source revision 1 and
+server/host implementation `application.echo.v1`. It has no optional preparation
+or external effects. The baseline application does not install this registration.
+
+```ts
+import { createInMemoryEchoRegistration } from "@application";
+import type { ServerToolBrokerOptions } from "@toolExecution/server";
+
+// These ports are application-owned canonical authority, never request data.
+const registration = createInMemoryEchoRegistration();
+const serverTools: ServerToolBrokerOptions = {
+  registry, policies, executor, resolve, registrations: [registration],
+};
+// Add registration.definition to the authorized session catalogue, install
+// caller invoke and exact host execute grants, then pass serverTools as
+// createAHPServer({ ...hostOptions, serverToolExecution: serverTools }).
+```
+
+The embedding application supplies `registry`, `policies`, `executor`, `resolve`
+and `hostOptions`. Registration alone creates no permissions or network listeners.
+The executor requires an explicit trusted identity, generation and current/pure
+fence callbacks. See [tool execution](../toolExecution/README.md#host-controlled-actions).

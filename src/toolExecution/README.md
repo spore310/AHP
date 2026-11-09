@@ -28,6 +28,12 @@ The existing `ToolAction` class and presentation schemas remain the contract. Op
 | `helpers/dispatcher/index.ts` | Local dispatcher public boundary. |
 | `helpers/dispatcher/types.ts` | Ports, limits, safe outcomes, lifecycle handles and runtime context schemas. |
 | `helpers/dispatcher/helpers.ts` | Ordered gates, draining ownership, output budgets, cleanup and bounded shutdown. |
+| `helpers/policy/index.ts` | Shared canonical executor-policy exports. |
+| `helpers/policy/types.ts` | Location-bound registration, trusted resolution and issued proof contracts. |
+| `helpers/policy/helpers.ts` | Exact registration capture, route validation and canonical assignment cohorts. |
+| `helpers/server/index.ts` | Separate public server executor entrypoint. |
+| `helpers/server/types.ts` | Explicit host identity, local action registration and dispatch contracts. |
+| `helpers/server/helpers.ts` | Captured host actions, independent caller/executor authorization and shared dispatcher integration. |
 | `helpers/client/helpers/broker/index.ts` | Neutral client policy/proxy dispatcher exports. |
 | `helpers/client/helpers/broker/types.ts` | Trusted client registration, resource resolution and transport proxy ports. |
 | `helpers/client/helpers/broker/helpers.ts` | Canonical assignment authorization and remote proxy action lifecycle. |
@@ -56,7 +62,7 @@ Registration/dispatcher types: `ToolActionRegistration`, `ToolActionRegistration
 
 ## Omissions
 
-No artifact transport or server executor adapter. The separate client entry uses the private v2 protocol. Root imports do not load a transport or session factory; resource-view cursors use Node crypto.
+No artifact transport. The separate `@toolExecution/server` entrypoint provides host-controlled action registration and dispatch. The separate client entry uses the private v2 protocol. Root imports do not load a transport or session factory; resource-view cursors use Node crypto.
 
 ## Private protocol
 
@@ -322,3 +328,40 @@ job/output ownership until pending projector/authorization work actually settles
 using the resource handle's separate `settled` promise even after ticket timeout. Native
 mutation uses the owner's existing action schema, reducer and sequence allocation;
 asynchronous external commits are outside this contract.
+
+## Host-controlled actions
+
+Import `createServerToolRegistration` and `createServerToolDispatcher` from
+`@toolExecution/server`. Registration compiles exact input/output schemas and
+captures a server/host implementation, positive registration revision and source
+id/revision. Supply a local `ToolAction` factory; no grants are created.
+
+`ServerToolBrokerOptions` requires the canonical registry/compiler, registrations,
+a trusted full-route resolver and explicit executor `{ context, generation,
+current, fence }`. The host-owned identity is independent of the caller and is
+not a client credential or an administrative default. Install exact execute
+assignments for that identity separately from caller invoke assignments. The
+resolver and mandatory provider constraints apply to both.
+
+Both adapters use the existing lifecycle. Initial target resolution is provisional;
+trusted action validation may normalize input. Full authorization pins canonical
+input and route for execution, continuation, projection and retained-status refresh.
+Every later check must keep those values and the captured host identity. Callback
+checks precede one canonical proof cohort; pure owned fences follow it.
+
+Use `AHPServerOptions.serverToolExecution` for public protocol composition. It
+shares one dispatcher with optional `toolExecution`; overlapping contract IDs
+reject, and two supplied dispatcher option objects must be the same instance.
+No client advertisement can select a host action. Private host rows offer
+discover/invoke only; no local result can be completed by a client notification.
+Server-only hosts are supported. The same call retention, challenge resume,
+cleanup, cancellation/draining and projection rules apply. A host handle reports
+ready at local full admission; a client proxy waits for actual remote enqueue.
+
+The server adapter supplies joint invoke/execute plus resource-operation authority
+for projection. Validated output alone never changes state. Source metadata binds
+the trusted local registration; it is not remote code attestation. Importing the
+root or client entrypoint does not eagerly import the server entrypoint.
+
+See [the inert application example](../application/README.md#in-memory-host-action)
+for a bounded local action that installs no runtime or permissions.

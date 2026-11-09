@@ -1,6 +1,6 @@
 # R5 execution continuation
 
-Execute mode. P06-P14 accepted. Full P06-P19 goal ACTIVE; P14 checkpoint then P15 next.
+Execute mode. P06-P15 accepted. Full P06-P19 goal ACTIVE; P15 checkpoint finalization then P16.
 P06 pushed bd46480bed27477b6262b0e8b63179aec74c05fa; P07 pushed
 e3dafe4b215d42a5c8223316b209389ae3f52747; P08 pushed
 c378c92d16b9e317a80c175b434d3e16da643ca1; P09 pushed
@@ -82,8 +82,12 @@ Revised API exposes ticket and actual settled promises; closes late admission;
 bounds cohort capture/route preflight; pins preparation epoch. Added challenge
 denial control brings packet total43tests. Revised full gate PASS92files1199tests205mappings; independent20path
 source/docs re-review PASS, no remaining material findings.
-Next: final acceptance-record gate/recheck, scoped commit/push and remote verification;
-then P15-P19. Full goal ACTIVE. P14-handoff maps evidence and review fixes.
+P14 final manifest27paths SHA5761ba8d6bfc73ad9dbcedc3a95beb6876c489c0352f3d78edc4b02f18550d85.
+P14-final-records-validate.log PASS92files1199tests205mappings all stages; packet43tests.
+Committed/pushed23a4fd23247f2c2e6ff5d1819064e9880c485f9a; exact remote verified.
+P15 source-grounded plan written, independent review pending; no P15 source edits.
+Next: P15 server executor/shared dispatcher/public route implementation, then P16-P19.
+Full goal ACTIVE. P14-handoff maps evidence and review fixes.
 Untracked src/tests/websocket/p12-debug.mts is an earlier diagnostic; exclude it.
 Lead sole writer/runtime; p06_review read-only independent reviewer. Full goal ACTIVE.
 
@@ -93,3 +97,30 @@ Every check uses Invoke-DbSafeCheck.ps1 child environment. Preserve unrelated ar
 X05/X06 pass at P12. E05 server execution and P19's final rerun remain NOT RUN:
 P15 owns server execution, P19 all three routes and full
 negative matrices on the final integrated candidate. Do not stop at a checkpoint.
+
+
+Historical P15 implementation checkpoint (superseded by acceptance below): neutral canonical policy extraction, separate
+server action registration/dispatcher, host/binding/kernel injection, shared
+lifecycle and private host assignment/dispatch/status. No client fallback.
+Plan PASS, diagnostic source review no concrete blockers; final review outstanding.
+P15-native-focused.log PASS2files41tests. Public matrix includes mixed/server-only,
+configuration ambiguity, source/schema/route substitutions, independent grants,
+challenge resume, raw-wire canaries, forged completion, draining, generation and
+session-incarnation races. Unit tests cover normalized targets/status, shared actual
+capacity/output budgets and joint resource projection. Last successful typecheck
+P15-union-fixture-typecheck.log; later tests/docs/example require fresh validation.
+Typecheck failures retained: generic union variance corrected in shared test
+fixture using union of concrete request/registration instances. Cancellation test
+expectation corrected to existing draining status (production unchanged).
+Next: scoped formatting/lint, full DB-safe gate, exact-candidate independent review,
+repair/evidence/acceptance manifest then approved normal push. P15 NOT accepted.
+
+P15 E01-E05 source/docs independent PASS. Reviewed28path manifest SHA
+be9fe26ddb9d02b95e1ce98b0de1755216bd9f436b4593375058ad5f6bc4ca44.
+P15-reviewed-validate.log allstagePASS94files1242tests211mappings,CHECK_EXIT0.
+Final packet43tests=14core+29public, including additional invoke-only provider
+denial and initial buffered snapshot revocation. P15-handoff maps everycriterion.
+Final acceptance-record manifest/gate/review precede approved normal push.
+No production/source edits after the revised reviewed candidate.
+P16-P19 remainunimplemented. Next afterpush: readP16 and linkedcontracts, source
+brief/plan, independentplanreview thenboundedimplementation.

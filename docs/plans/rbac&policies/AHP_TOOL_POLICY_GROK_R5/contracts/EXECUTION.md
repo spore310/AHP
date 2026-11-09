@@ -248,3 +248,30 @@ resource settlement even after ticket timeout, retaining dispatcher output capac
 Safe projection-failed phase/code distinguishes this failure from execution; no
 retry, unrestricted state patch, asynchronous external commit or rollback is supplied.
 P15 host execution must supply the equivalent original-proof admission port.
+
+
+### P15 host adapter amendment (implemented; acceptance recorded separately)
+
+The public `@toolExecution/server` boundary captures local ToolAction factories
+with exact server/host bindings and registration/source revisions. An embedding
+application provides explicit host executor context/generation/current/pure fence;
+there is no implicit admin or inferred caller identity. Caller invoke and host
+execute are distinct canonical assignments, including mandatory full-route policy.
+
+`AHPServerOptions.serverToolExecution` composes this adapter with the existing
+private protocol. It requires canonical registry/compiler identity. Optional client
+and server routes share one core lifecycle owner; overlapping contract IDs reject
+and two dispatcher options must be identical objects. No denied host route falls
+back to a client. Host assignment rows permit discover/invoke, not advertisement.
+
+Trusted action validation may normalize initial input/targets before full
+authorization. Full authorization pins canonical input and full route. Continuation,
+projection and retained status refresh use that pair and exact host executor.
+Host ready means local admission; client ready still means actual remote enqueue.
+Host work retains capacity/output ownership through actual settlement and cleanup.
+The server projection port joins original invoke/execute proofs and resource
+decisions at one canonical authority cohort, followed by pure ownership fences.
+
+The inert application echo factory has strict bounded schemas and no external
+effects or automatic installation. Source identity describes trusted registration,
+not remote attestation. P16-P19 requirements are unchanged.

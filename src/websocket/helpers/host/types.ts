@@ -1,3 +1,4 @@
+import type { ServerToolBrokerOptions } from "@toolExecution/server";
 import type { AddressInfo } from "node:net";
 
 import type { ConnectionAuthenticator } from "@agents";
@@ -33,6 +34,7 @@ export interface AHPServerAgentWorkOptions {
 export interface AHPServerOptions {
   readonly protectedViews?: ResourceViewOptions;
   readonly toolExecution?: ClientToolBrokerOptions;
+  readonly serverToolExecution?: ServerToolBrokerOptions;
   readonly host: string;
   readonly port: number;
   readonly path?: string;

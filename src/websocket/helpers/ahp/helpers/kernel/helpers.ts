@@ -227,7 +227,7 @@ export const createAHPKernel = (
     return peer;
   };
 
-  const toolInvocations = createToolInvocationBroker(factory, peers, requirePeer, options?.toolExecution);
+  const toolInvocations = createToolInvocationBroker(factory, peers, requirePeer, options?.toolExecution, options?.serverToolExecution);
   const protectedDelivery = options?.protectedViews === undefined ? undefined : createProtectedViewDelivery(factory, options.protectedViews, failPeer);
 
   const beginPending = (peer: AHPPeer, uri: string): void => {

@@ -25,14 +25,15 @@ const parentChannel = "ahp-session:/broader-parent";
 
 /** Extends the one real host harness; all policy/resource/identity ports below are explicit fixture authority. */
 export async function createPolicyIntegrationFixture(options: {
-  readonly mode: "self" | "cross";
+  readonly mode: "self" | "cross" | "server";
+  readonly server?: NonNullable<Parameters<typeof createToolPolicyHost>[1]>["server"];
   readonly host?: Parameters<typeof createToolPolicyHost>[1];
   readonly providerVerdict?: () => Promise<"allow" | "deny">;
   readonly challengeRequired?: boolean;
   readonly providerBarrier?: { readonly armed: { value: boolean }; readonly reached: (pending: number) => void; readonly decide: () => Promise<"allow" | "deny"> };
 }) {
   const caller = options.mode === "self" ? "senior-agent" : "junior-agent";
-  const executor = "senior-agent";
+  const executor = options.mode === "server" ? "host-service" : "senior-agent";
   const subjects = ["senior", "junior", "pm", "senior-agent", "junior-agent", "pm-agent", "observer"];
   const roles = Object.fromEntries(subjects.map((subject) => [subject, subject === "observer" ? ["discover"] as const : [...operations]]));
   const actors = Object.fromEntries(subjects.map((subject) => [subject, { actor: actor(subject),
@@ -40,9 +41,11 @@ export async function createPolicyIntegrationFixture(options: {
       ? { agentGeneration: 2, delegationRef: "verified-delegation-" + subject,
           parentSubject: subject.slice(0, -6) }
       : {}) }]));
-  const registrations: readonly ClientToolRegistration[] = codingHarnessContracts.map((definition) => ({ definition,
-    revision: 5, source: { id: "p12-source-" + definition.name + "-" + sourceEvidence.candidate, revision: sourceEvidence.revision },
-    implementation: { location: "client", suppliedBy: "client", implementation: "client-owned", implementationId: "p12-approved-" + definition.name } }));
+  const registrations: readonly ClientToolRegistration[] = options.mode === "server"
+    ? []
+    : codingHarnessContracts.map((definition) => ({ definition,
+        revision: 5, source: { id: "p12-source-" + definition.name + "-" + sourceEvidence.candidate, revision: sourceEvidence.revision },
+        implementation: { location: "client", suppliedBy: "client", implementation: "client-owned", implementationId: "p12-approved-" + definition.name } }));
   const route = (origin: ResourceRef): ClientToolRoute => origin.id === parentChannel
     ? { route: { origin, targets: [origin] } }
     : ({ route: { origin, targets: [chat, workspace] },
@@ -58,7 +61,7 @@ export async function createPolicyIntegrationFixture(options: {
     options.providerBarrier.reached(1);
     return pending;
   };
-  const f = await createToolPolicyHost(codingHarnessContracts, { protectedViews: true, roles, actors, registrations,
+  const f = await createToolPolicyHost(codingHarnessContracts, { protectedViews: true, roles, actors, registrations, server: options.server,
     sessionType: { key: "test.triage-session", version: 1 }, parentChannel,
     toolDiscovery: subjects.filter((subject) => subject !== "observer"), additionalPolicies, route,
     permissionEvaluators: { "p12-provider": () => options.providerVerdict?.() ?? Promise.resolve("allow"),
@@ -82,11 +85,19 @@ export async function createPolicyIntegrationFixture(options: {
         grantParent: parent, mandatory: [{ ref: chatPolicy, applicable: true }], externalAuthority: "none" });
       registry.installResource({ resource: workspace, route: resolved, owner: { domainId: "local", subject: "workspace-owner" },
         mandatory: [{ ref: provider, applicable: true }], externalAuthority: "required" });
-      for (const subject of subjects) for (const [resource, policy] of [[chat, chatPolicy], [workspace, provider]] as const) {
+      for (const subject of [...subjects, ...(options.server === undefined ? [] : [options.server.executor.context.actor.principal.subject])]) for (const [resource, policy] of [[chat, chatPolicy], [workspace, provider]] as const) {
         registry.installBinding({ id: "p12-" + policy.id + "-" + subject, actor: actor(subject), scope: resource,
           roles: ["inspect"], policies: [policy], revision: 1, authority: { kind: "host-policy", policy } });
       }
       const parentPolicy = { id: "fixture.tools", revision: 1 };
+      if (options.server !== undefined) {
+        const hostExecutor = options.server.executor;
+        const bindingId = "p15-host-execute";
+        registry.installBinding({ id: bindingId, actor: hostExecutor.context.actor, scope: origin, roles: ["execute"], policies: [parentPolicy], revision: 1, authority: { kind: "host-policy", policy: parentPolicy } });
+        for (const registration of options.server.registrations) registry.installExecutorAssignment({ resource: origin, route: resolved, recipient: hostExecutor.context.actor,
+          contract: { id: registration.definition.id, key: registration.definition.key, version: registration.definition.version }, operation: "execute", bindingId, policyRef: parentPolicy,
+          executor: { actor: hostExecutor.context.actor, connectionId: hostExecutor.context.connectionId, generation: hostExecutor.generation, registrationRevision: registration.revision }, implementation: registration.implementation });
+      }
       for (const subject of subjects.filter((value) => value !== "observer")) {
         const bindingId = "p12-parent-" + subject;
         registry.installBinding({ id: bindingId, actor: actor(subject), scope: parent, roles: [...operations], policies: [parentPolicy],

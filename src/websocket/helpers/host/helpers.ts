@@ -76,6 +76,10 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     || options.toolExecution.registry !== creationConfig.registry || options.toolExecution.policies !== creationConfig.policies)) {
     throw new Error("Tool execution requires coherent protected host authority.");
   }
+  if (options.serverToolExecution !== undefined && (creationConfig === undefined || security === undefined
+    || options.serverToolExecution.registry !== creationConfig.registry || options.serverToolExecution.policies !== creationConfig.policies)) {
+    throw new Error("Server tool execution requires coherent protected host authority.");
+  }
   if (options.protectedViews !== undefined && (creationConfig === undefined || security === undefined
     || options.protectedViews.registry !== creationConfig.registry || options.protectedViews.policies !== creationConfig.policies)) {
     throw new Error("Resource views require coherent protected host authority.");
@@ -148,11 +152,13 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     () => undefined,
     options.agentWork === undefined || agents === undefined || work === undefined
       ? { maxInitialSubscriptions, ...(options.toolExecution === undefined ? {} : { toolExecution: options.toolExecution }),
+          ...(options.serverToolExecution === undefined ? {} : { serverToolExecution: options.serverToolExecution }),
           ...(options.protectedViews === undefined ? {} : { protectedViews: options.protectedViews }) }
       : {
           maxInitialSubscriptions,
           ...(options.protectedViews === undefined ? {} : { protectedViews: options.protectedViews }),
           ...(options.toolExecution === undefined ? {} : { toolExecution: options.toolExecution }),
+          ...(options.serverToolExecution === undefined ? {} : { serverToolExecution: options.serverToolExecution }),
           agents,
           work,
           ...(sessionOwners === undefined ? { ownerLookup } : { sessionOwners }),

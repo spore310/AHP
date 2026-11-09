@@ -129,8 +129,8 @@ implementation and exact test-name mapping are in
 and post-initialization strict delegation lifecycle added after independent review.
 Full DB-safe P12-reviewed-validate passes 88 files / 1111 tests and all other gate
 stages; independent final review passed and P12 X01-X06 are accepted. Historical
-P11 or aggregate test results do not substitute for this matrix. P15 server
-execution and P19 final integrated proof remain outstanding.
+P11 or aggregate test results do not substitute for this matrix. P15 server execution is mapped in [P15-handoff](execution/P15-handoff.md).
+P19 final integrated proof remains outstanding.
 P12 owns X05 (a client invokes its own supplied tool) and X06 (client A invokes
 distinct client B's supplied tool). P15 owns E05 (client invokes server-provided
 tool). P19 must execute all three complete matrices on the final integrated
@@ -186,3 +186,13 @@ P13's EXECUTION E7 migration replaces the temporary P12 view-level challenge den
 with reveal-authorized discovery plus a safe condition and zero unsatisfied effects.
 Missing disclosure permission, evaluator, grants or mandatory constraints still deny.
 [Candidate evidence](execution/P13-handoff.md) records current gates/review status.
+
+
+## P15 server execution reproduction
+
+Run the DB-safe wrapper with vitest run src/tests/toolExecution/serverExecutor.test.ts
+src/tests/websocket/serverTools.integration.test.ts. The 43 tests include 14 core and
+29 public checks. [P15-handoff](execution/P15-handoff.md) maps E01-E05 and every
+section 9 negative/disclosure requirement to actual tests. The final reviewed gate
+passes 94 files / 1242 tests / 211 mappings. P19 must rerun all three full public matrices
+after P16-P18; historical P12/P15 counts alone never establish final acceptance.

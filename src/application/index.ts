@@ -7,4 +7,4 @@ export {
   SEARCH_ID,
   WRITE_FILE_ID,
 } from "./constants";
-export { createBaselineSessionApplication } from "./helpers";
+export { createBaselineSessionApplication, createInMemoryEchoRegistration } from "./helpers";

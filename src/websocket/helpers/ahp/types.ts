@@ -1,3 +1,4 @@
+import type { ServerToolBrokerOptions } from "@toolExecution/server";
 import type { Snapshot } from "@microsoft/agent-host-protocol";
 import { z } from "zod";
 
@@ -71,6 +72,7 @@ export interface AHPConnectionModuleOptions {
 export interface AHPBindingOptions {
   readonly protectedViews?: ResourceViewOptions;
   readonly toolExecution?: ClientToolBrokerOptions;
+  readonly serverToolExecution?: ServerToolBrokerOptions;
   readonly maxInitialSubscriptions?: number;
   readonly agents?: AgentDirectory;
   readonly work?: WorkService;

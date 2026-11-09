@@ -8,6 +8,8 @@ import { createMockProvider } from "@sessions/mock";
 import { createToolCatalogue, type ToolContractDefinition } from "@tools";
 import { createAHPServer, type ConnectionFence } from "@websocket";
 import type { ClientToolBrokerOptions, ClientToolRegistration, ClientToolRoute } from "@toolExecution/helpers/client/helpers/broker";
+import type { ToolPolicyRegistration, ToolPolicyResolutionRequest } from "@toolExecution/helpers/policy";
+import type { ServerToolBrokerOptions } from "@toolExecution/server";
 import type { CompiledToolPolicy } from "@toolPolicy/helpers/factory";
 
 export const toolPolicyChannel = "ahp-session:/capacity";
@@ -32,11 +34,13 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
   /** Trusted fixture classification, independent of public clientId and request data. */
   readonly actors?: Readonly<Record<string, { readonly actor: PolicyActorRef; readonly agentGeneration?: number; readonly delegationRef?: string; readonly parentSubject?: string }>>;
   readonly registrations?: readonly ClientToolRegistration[];
+  readonly server?: Pick<ServerToolBrokerOptions, "registrations" | "executor" | "dispatcher">;
+  readonly clientExecution?: boolean;
   readonly additionalPolicies?: readonly CompiledToolPolicy[];
   readonly permissionEvaluators?: Parameters<typeof createReferenceAuthorizer>[0]["permissionEvaluators"];
-  readonly assignment?: (subject: string, registration: ClientToolRegistration, operation: ToolOperation) => boolean;
+  readonly assignment?: (subject: string, registration: ToolPolicyRegistration<"client"> | ToolPolicyRegistration<"server">, operation: ToolOperation) => boolean;
   readonly route?: (origin: ResourceRef) => ClientToolRoute;
-  readonly resolve?: ClientToolBrokerOptions["resolve"];
+  readonly resolve?: (request: ToolPolicyResolutionRequest<"client"> | ToolPolicyResolutionRequest<"server">) => ClientToolRoute | Promise<ClientToolRoute>;
   readonly configureResources?: (registry: ReferenceAuthorizer, scope: ResourceRef, sessionType: { readonly key: string; readonly version: number }, parent?: ResourceRef) => void;
 } = {}) {
   const roles = options.roles ?? { fixture: ["invoke", "advertise", "execute"] };
@@ -111,13 +115,16 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
       throw new Error("No grant issuance");
     }, rollback: () => undefined, revoke: () => Promise.resolve() },
   };
+  const dispatcher = { limits: { shutdownWaitMs: 20 }, ...options.dispatcher };
+  const resolve = options.resolve ?? (({ origin }: { readonly origin: ResourceRef }) => options.route?.(origin) ?? ({ route: { origin, targets: [origin] } }));
   const host = createAHPServer({ host: "127.0.0.1", port: 0, path: "/capacity",
     ...(options.protectedViews === true
       ? { protectedViews: { registry, policies, admitted: [policy],
           resolve: ({ resource }: { resource: import("@authorization").ResourceRef }) => options.route?.(resource) ?? ({ route: { origin: resource, targets: [resource] } }) } }
       : {}),
     sessions: { providers: [createMockProvider()], application: { catalogue: createSessionTypeCatalogue({ tools: createToolCatalogue({ definitions }), types: [type.registration] }), defaultType: sessionType }, creationSecurity: { registry, policies } },
-    toolExecution: { registry, policies, registrations, resolve: options.resolve ?? (({ origin }) => options.route?.(origin) ?? ({ route: { origin, targets: [origin] } })), dispatcher: { limits: { shutdownWaitMs: 20 }, ...options.dispatcher } },
+    ...(options.clientExecution === false ? {} : { toolExecution: { registry, policies, registrations, resolve, dispatcher } }),
+    ...(options.server === undefined ? {} : { serverToolExecution: { ...options.server, registry, policies, resolve, dispatcher: options.server.dispatcher ?? dispatcher } }),
     security: { composition, ...(options.securityNow === undefined ? {} : { now: options.securityNow }), initialAuthority: { prepare: ({ context, fence }) => {
       const releaseSignal = Promise.withResolvers<undefined>();
       const record = { context, fence, tuples: installConnection(context, fence), released: releaseSignal.promise };
@@ -154,7 +161,8 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
       registry.installBinding({ id: bindingId, actor, scope, roles: actorRoles, policies: admitted, revision: 1,
         authority: parent === undefined || issuer === undefined ? { kind: "host-policy", policy } : { kind: "delegation", issuer, parentGrantId: "fixture-grant-" + parent } });
       const operations: readonly ToolOperation[] = options.toolDiscovery?.includes(subject) === true ? ["discover", "invoke", "advertise"] : ["invoke", "advertise"];
-      for (const registration of registrations) for (const operation of operations) {
+      for (const registration of [...registrations, ...options.server?.registrations ?? []]) for (const operation of operations) {
+        if (registration.implementation.location === "server" && operation === "advertise") continue;
         if (options.assignment?.(subject, registration, operation) === false) continue;
         const definition = registration.definition;
         registry.installToolAssignment({ resource: scope, route, recipient: actor,

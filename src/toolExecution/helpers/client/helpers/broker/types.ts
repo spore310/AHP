@@ -1,57 +1,16 @@
-import type { AssignmentAuthorization, AuthorityRevisionStamp, ExecutorRevision, ReferenceAuthorizer, ResourceRef, ResourceRoute, TrustedRequestContext } from "@authorization";
-import type { MandatoryBindingSelector, PresentedExternalProof } from "@authorization/helpers/evaluate/types";
-import type { ToolExecutionBinding, ToolOperation, ToolPolicyFactory } from "@toolPolicy";
-import type { ToolContractDefinition } from "@tools";
-import type { Awaitable, ToolActionContext } from "@toolExecution/types";
+import type { ExecutorRevision, TrustedRequestContext } from "@authorization";
+import type { ToolActionContext } from "@toolExecution/types";
 import type { ToolDispatcherOptions } from "@toolExecution/helpers/dispatcher";
+import type { ToolPolicyRegistration, ToolPolicyRoute, ToolPolicyResolutionRequest, ToolExecutorPolicyOptions, ToolExecutorPolicyRequest, ToolExecutorProof } from "@toolExecution/helpers/policy";
 
-/** Host approval metadata; it is not evidence of the remote process's actual code. */
-export interface ClientToolRegistration {
-  readonly definition: ToolContractDefinition;
-  readonly implementation: Extract<ToolExecutionBinding, { location: "client" }>;
-  readonly revision: number;
-  readonly source: { readonly id: string; readonly revision: number };
-}
-
-export interface ClientToolRoute {
-  readonly route: ResourceRoute;
-  readonly externalProofs?: readonly PresentedExternalProof[];
-  readonly mandatoryBindings?: readonly MandatoryBindingSelector[];
-}
-
-export interface ClientToolResolutionRequest {
-  readonly caller: TrustedRequestContext;
-  readonly origin: ResourceRef;
-  readonly sessionType: { readonly key: string; readonly version: number };
-  readonly providerId: string;
-  readonly registration: ClientToolRegistration;
-  readonly input: unknown;
-  readonly signal: AbortSignal;
-}
-
-export interface ClientToolBrokerOptions {
-  readonly registry: ReferenceAuthorizer;
-  readonly policies: ToolPolicyFactory;
-  readonly registrations: readonly ClientToolRegistration[];
-  /** Trusted resource resolution. It cannot grant permission or replace the origin. */
-  resolve(request: ClientToolResolutionRequest): Awaitable<ClientToolRoute>;
+export type ClientToolRegistration = ToolPolicyRegistration<"client">;
+export type ClientToolRoute = ToolPolicyRoute;
+export type ClientToolResolutionRequest = ToolPolicyResolutionRequest<"client">;
+export interface ClientToolBrokerOptions extends ToolExecutorPolicyOptions<"client"> {
   readonly dispatcher?: ToolDispatcherOptions;
 }
-
-export interface ClientToolPolicyRequest extends ClientToolResolutionRequest {
-  readonly operation: Extract<ToolOperation, "discover" | "invoke" | "advertise" | "execute">;
-  readonly resolution: ClientToolRoute;
-  readonly executor?: ExecutorRevision;
-  readonly executorContext?: TrustedRequestContext;
-}
-
-export interface ClientToolProof {
-  readonly challengeRequired: boolean;
-  readonly authorization: AssignmentAuthorization;
-  readonly authority: AuthorityRevisionStamp;
-  /** Freshness only. Construction has already required the exact allowed tuple. */
-  current(): boolean;
-}
+export type ClientToolPolicyRequest = ToolExecutorPolicyRequest<"client">;
+export type ClientToolProof = ToolExecutorProof;
 
 export interface ClientToolDispatchRequest extends ClientToolResolutionRequest {
   readonly callId: string;

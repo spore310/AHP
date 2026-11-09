@@ -1,3 +1,5 @@
+import { createServerToolDispatcher, type ServerToolBrokerOptions } from "@toolExecution/server";
+import { createToolDispatcher } from "@toolExecution/helpers/dispatcher";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { JsonRpcErrorCodes, type ActionEnvelope, type ToolDefinition } from "@microsoft/agent-host-protocol";
@@ -69,12 +71,20 @@ interface PendingCompletion {
 
 /** Sole transport correlation adapter. Missing canonical policy wiring fails closed. */
 export function createToolInvocationBroker(factory: SessionsFactory, peers: ReadonlyMap<string, AHPPeer>,
-  requirePeer: (context: WebSocketConnectionContext) => AHPPeer, options?: ClientToolBrokerOptions) {
+  requirePeer: (context: WebSocketConnectionContext) => AHPPeer, options?: ClientToolBrokerOptions, serverOptions?: ServerToolBrokerOptions) {
   const authorization = factory.authorization;
   if (options !== undefined && (authorization === undefined || !authorization.usesRegistry(options.registry))) {
     throw new Error("Tool broker requires the canonical session registry.");
   }
-  const dispatcher = options === undefined ? undefined : createClientToolDispatcher(options);
+  if (serverOptions !== undefined && (authorization === undefined || !authorization.usesRegistry(serverOptions.registry)
+    || (options !== undefined && (serverOptions.registry !== options.registry || serverOptions.policies !== options.policies)))) throw new Error("Server tools require the canonical session registry.");
+  if (options?.dispatcher !== undefined && serverOptions?.dispatcher !== undefined && options.dispatcher !== serverOptions.dispatcher) throw new Error("Tool routes require one shared dispatcher configuration.");
+  const configuration = options ?? serverOptions;
+  const dispatcherOptions = options?.dispatcher ?? serverOptions?.dispatcher;
+  const lifecycle = configuration === undefined ? undefined : createToolDispatcher(dispatcherOptions);
+  const dispatcher = options === undefined ? undefined : createClientToolDispatcher(options, lifecycle);
+  const serverDispatcher = serverOptions === undefined ? undefined : createServerToolDispatcher(serverOptions, lifecycle);
+  if (dispatcher !== undefined && serverDispatcher !== undefined && dispatcher.policy.registrations.some((client) => serverDispatcher.policy.registrations.some((server) => server.definition.id === client.definition.id))) throw new Error("Client and server tool contracts overlap.");
   const advertisements = new Map<string, Map<string, Advertisement>>();
   let privateAdvertisementEpoch: object = {};
   const privateAdvertisementEpochs = new WeakMap<Advertisement, object>();
@@ -84,7 +94,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
   const stagedAdvertisements = new Set<StagedAdvertisement>();
   const stagedPrivateAdvertisements = new Set<object>();
   const pending = new Map<string, PendingCompletion>();
-  const calls = new Map<string, { readonly caller: WebSocketConnectionContext; readonly executor: WebSocketConnectionContext;
+  const calls = new Map<string, { readonly caller: WebSocketConnectionContext; readonly executor?: WebSocketConnectionContext;
     readonly channel: string; readonly handle: ToolDispatchHandle<unknown>; }>();
   let disposed = false;
   let admissions = 0;
@@ -124,16 +134,44 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
   const assignment = async (context: WebSocketConnectionContext, channel: string, signal: AbortSignal): Promise<PrivateAssignmentTicket> => {
     const peer = requirePeer(context);
     const setup = context.security;
-    if (dispatcher === undefined || options === undefined || setup === undefined || !livePeer(peer, setup)
+    if (lifecycle === undefined || configuration === undefined || setup === undefined || !livePeer(peer, setup)
       || !peer.subscriptions.has(channel) || signal.aborted) return unavailable();
     const facts = session(channel);
-    const epoch = options.registry.captureFence();
+    const epoch = configuration.registry.captureFence();
+    let includesServer = false;
     const executor: ExecutorRevision = { actor: setup.context.actor, connectionId: context.connectionId,
       generation: setup.fence.connectionGeneration, registrationRevision: 1 };
     const tools: AssignedTool[] = [];
     const proofs: ClientToolProof[] = [];
     const entries: Array<{ readonly tool: AssignedTool; readonly registration: ClientToolRegistration; readonly executor: ExecutorRevision }> = [];
     for (const contract of facts.manifest.toolContracts) {
+      const serverRegistration = serverDispatcher?.policy.registrations.find((entry) => entry.definition.id === contract.id);
+      if (serverDispatcher !== undefined && serverRegistration !== undefined) {
+        const base = { caller: setup.context, origin: facts.origin, sessionType: facts.sessionType, providerId: facts.providerId, registration: serverRegistration, input: null, signal };
+        try {
+          if (!serverDispatcher.executorCurrent()) continue;
+          const resolution = await serverDispatcher.policy.resolve(base);
+          const discover = await serverDispatcher.policy.authorize({ ...base, resolution, operation: "discover" });
+          const currentProofs = [discover];
+          const purposes: AssignedTool["purposes"] = ["discover"];
+          let challengeRequired = false;
+          try {
+            const invoke = await serverDispatcher.policy.authorize({ ...base, resolution, operation: "invoke" });
+            const execute = await serverDispatcher.policy.authorize({ ...base, resolution, operation: "execute", executor: serverDispatcher.executorFor(serverRegistration), executorContext: serverDispatcher.executor.context });
+            purposes.push("invoke");
+            currentProofs.push(invoke, execute);
+            challengeRequired = invoke.challengeRequired || execute.challengeRequired;
+          } catch {
+            /* Discovery does not confer invocation or executor authority. */ }
+          tools.push(parseToolWire(assignedToolSchema, { contract: { id: contract.id, key: contract.key, version: contract.version }, descriptor: toAhpToolDefinition(serverRegistration.definition),
+            purposes, conditions: challengeRequired ? ["challenge-required"] : [], ...(purposes.includes("invoke") ? { execution: { binding: serverRegistration.implementation, registrationRevision: serverRegistration.revision, source: serverRegistration.source } } : {}) }));
+          proofs.push(...currentProofs);
+          includesServer = true;
+        } catch {
+          /* Host descriptors still require a complete private reveal path. */ }
+        continue;
+      }
+      if (dispatcher === undefined) continue;
       const permitted: Array<{ readonly tool: AssignedTool; readonly registration: ClientToolRegistration;
         readonly executor: ExecutorRevision; readonly proofs: ClientToolProof[]; }> = [];
       for (const registration of dispatcher.policy.registrations.filter((candidate) => candidate.definition.id === contract.id)) {
@@ -174,9 +212,11 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
     const value = parseToolWire(toolAssignedReplySchema.omit({ version: true, channel: true, viewRevision: true }), {
       resource: facts.origin, connection: { id: context.connectionId, generation: setup.fence.connectionGeneration }, tools });
     const fence = (): boolean => !signal.aborted && epoch() && ownedPeer(peer, setup)
-      && peer.subscriptions.has(channel) && sessionTokens.get(channel) === facts.origin;
+      && peer.subscriptions.has(channel) && sessionTokens.get(channel) === facts.origin
+      && (!includesServer || serverDispatcher?.executorFence() === true);
     const current = (): boolean => !signal.aborted && livePeer(peer, setup) && liveSession(facts.origin)
-      && (proofs.length === 0 || dispatcher.policy.current(proofs)) && fence();
+      && (!includesServer || serverDispatcher?.executorCurrent() === true)
+      && (proofs.length === 0 || configuration.registry.validateAssignmentCohort(proofs.map((proof) => ({ authorization: proof.authorization, actor: setup.context })))) && fence();
     if (!current()) return unavailable();
     return { value, current, fence,
       advertise(contracts, advertisementId) {
@@ -311,14 +351,28 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
   const startCall = (request: z.infer<typeof toolCallParamsSchema>, context: WebSocketConnectionContext, callId: string, expectedContractId?: string) => {
     const caller = requirePeer(context);
     const setup = context.security;
-    if (dispatcher === undefined || setup === undefined || !livePeer(caller, setup) || !caller.subscriptions.has(request.channel)
-      || admissions + dispatcher.stats().active >= 64) return unavailable();
+    if (lifecycle === undefined || setup === undefined || !livePeer(caller, setup) || !caller.subscriptions.has(request.channel)
+      || admissions + lifecycle.stats().active >= 64) return unavailable();
     admissions += 1;
     let admitting = true;
     try {
       const facts = session(request.channel);
       const contract = facts.manifest.toolContracts.find((entry) => entry.key === request.key && entry.version === request.version);
       if (contract === undefined || (expectedContractId !== undefined && contract.id !== expectedContractId)) return unavailable();
+      const serverRegistration = serverDispatcher?.policy.registrations.find((entry) => entry.definition.id === contract.id);
+      if (serverDispatcher !== undefined && serverRegistration !== undefined) {
+        const controller = new AbortController();
+        const current = () => livePeer(caller, setup) && caller.subscriptions.has(request.channel) && liveSession(facts.origin);
+        const fence = () => ownedPeer(caller, setup) && caller.subscriptions.has(request.channel) && sessionTokens.get(request.channel) === facts.origin;
+        const handle = serverDispatcher.dispatch({ caller: setup.context, origin: facts.origin, sessionType: facts.sessionType, providerId: facts.providerId,
+          registration: serverRegistration, input: request.input, signal: controller.signal, callId, current, fence });
+        calls.set(callId, { caller: context, channel: request.channel, handle });
+        void handle.settled.then(() => {
+          calls.delete(callId);
+        });
+        return handle;
+      }
+      if (dispatcher === undefined) return unavailable();
       const idCounts = new Map<string, number>();
       for (const peer of peers.values()) if (peer.phase === "ready" && peer.clientId !== undefined) idCounts.set(peer.clientId, (idCounts.get(peer.clientId) ?? 0) + 1);
       const candidates: { peer: AHPPeer; ad: Advertisement; registration: ClientToolRegistration; executor: ExecutorRevision }[] = [];
@@ -427,10 +481,10 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
     } else if (entry.invocation !== undefined || entry.key !== parsed.data.key || entry.version !== parsed.data.version) return undefined;
     return { entry, completion: parsed.data };
   };
-  const privateProtocol = options === undefined
+  const privateProtocol = configuration === undefined
     ? undefined
     : createPrivateToolProtocol({
-        continuation: options.dispatcher?.challenge !== undefined,
+        continuation: dispatcherOptions?.challenge !== undefined,
         ready: (context) => {
           const peer = peers.get(context.connectionId), setup = context.security;
           return peer !== undefined && setup !== undefined && livePeer(peer, setup);
@@ -442,9 +496,9 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
         assignment,
         dispatch: (context, request, callId) => startCall({ channel: request.channel,
           key: request.contract.key, version: request.contract.version, input: request.input }, context, callId, request.contract.id),
-        onInvalidate: (listener) => options.registry.onInvalidate(() => {
+        onInvalidate: (listener) => configuration.registry.onInvalidate(() => {
           privateAdvertisementEpoch = {};
-          dispatcher?.invalidateChallenges();
+          lifecycle?.invalidateChallenges();
           listener();
         }),
       });
@@ -499,7 +553,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
       const peer = peers.get(connectionId);
       if (peer !== undefined) privateProtocol?.forget(peer.context);
       advertisements.delete(connectionId);
-      for (const call of calls.values()) if (call.caller.connectionId === connectionId || call.executor.connectionId === connectionId) call.handle.cancel();
+      for (const call of calls.values()) if (call.caller.connectionId === connectionId || call.executor?.connectionId === connectionId) call.handle.cancel();
     },
     dispose(): void {
       disposed = true;
@@ -510,7 +564,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
       stagedPrivateAdvertisements.clear();
       for (const call of calls.values()) call.handle.cancel();
     },
-    drain: () => dispatcher?.shutdown() ?? Promise.resolve({ draining: 0 }),
-    stats: () => dispatcher?.stats() ?? { active: 0, draining: 0, retainedOutputBytes: 0 },
+    drain: () => lifecycle?.shutdown() ?? Promise.resolve({ draining: 0 }),
+    stats: () => lifecycle?.stats() ?? { active: 0, draining: 0, retainedOutputBytes: 0 },
   };
 }

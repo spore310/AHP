@@ -478,3 +478,26 @@ the safe challenge-required condition; absent verifiers still deny execution.
 Registry invalidation cancels pending continuations before assignment hints;
 private advertisement freshness and in-flight draining behavior remain enforced.
 See ../toolExecution/README.md for adapter approval, clock, bounds and ownership.
+
+
+### Host-controlled tool injection
+
+`AHPServerOptions.serverToolExecution` accepts static host action registrations,
+an explicit trusted executor identity and the same canonical registry/compiler
+as session creation. The option also flows through AHPBindingOptions. Client
+execution remains separately optional. One core dispatcher owns both routes and
+their budgets, challenges, cleanup and draining. Overlapping contract IDs and
+conflicting dispatcher option objects fail configuration.
+
+Private assignment views reveal authorized host descriptors and invoke affordances
+without client advertise/execute rights. Dispatch selects the registered local
+action through the same policy and lifecycle gates. Host calls use existing private
+retention/status/resume; they create no remote completion correlation. Status
+rechecks the fully normalized input/full route and captured host identity. There
+is no fallback to a client handler.
+
+`serverTools.integration.test.ts` exercises the public SDK server route, including
+server-only/mixed configurations, exact identities and revisions, mandatory route
+constraints, challenge resume, cancellation, forged metadata/completion, revocation,
+recipient raw-wire canaries and native sequencing. Packet acceptance and P19 final
+integrated validation are recorded separately in the R5 execution area.

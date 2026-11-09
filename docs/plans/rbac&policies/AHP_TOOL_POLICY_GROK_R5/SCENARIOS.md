@@ -178,3 +178,14 @@ identity step-up does not satisfy a separate human-consent permission. Disconnec
 executor replacement, session incarnation replacement and restart retire old IDs.
 The fixture's injected adapter is not a production MFA provider or remote attestation.
 Current executed evidence and review status: [P13 handoff](execution/P13-handoff.md).
+
+
+## P15 host execution evidence boundary
+
+The real public host and SDK client now exercise explicit host-owned actions with
+separate caller invoke and host execute grants. The shared host identity cannot
+borrow senior authority for a junior caller. Exact full route/provider constraints,
+challenge/normalization, draining, guarded projection and raw recipient privacy
+are covered by [P15 evidence](execution/P15-handoff.md). The inert host fixture
+performs no external IO; source binding remains distinct from remote attestation.
+P19 final integrated proof and P16-P18 remain outstanding.

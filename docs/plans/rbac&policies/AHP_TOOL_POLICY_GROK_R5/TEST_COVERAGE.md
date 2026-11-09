@@ -189,11 +189,11 @@ Use the exact packet test targets as the initial suite map. Record actual test n
 
 | ID | Requirement | Distinguishing assertion / evidence | Status |
 | --- | --- | --- | --- |
-| E01 | Server implementation does not bypass policy | Denied caller/provider/challenge conditions yield no execute; permitted caller gets exact validated result. | NOT RUN |
-| E02 | Provenance and executor revision are pinned | Client cannot replace host action or change location/implementation via metadata. | NOT RUN |
-| E03 | Host/client routes share mandatory lifecycle | Equivalent cases both enforce validation, preparation, challenge and sanitized cleanup. | NOT RUN |
-| E04 | Multi-user service account is not caller authority | Same server executor receives separate minimal authorized contexts; senior grants cannot leak to junior. | NOT RUN |
-| E05 | Client invokes server-provided implementation through public APIs | Public server/tool client and pinned SDK transport execute the exact approved server handler and validate its distinctive result; prove TEST_RUNBOOK §9 matrix with zero client/competing-handler calls. | NOT RUN |
+| E01 | Server implementation does not bypass policy | Denied caller/provider/challenge conditions yield no execute; permitted caller gets exact validated result. | PASS - [P15 evidence](execution/P15-handoff.md) |
+| E02 | Provenance and executor revision are pinned | Client cannot replace host action or change location/implementation via metadata. | PASS - [P15 evidence](execution/P15-handoff.md) |
+| E03 | Host/client routes share mandatory lifecycle | Equivalent cases both enforce validation, preparation, challenge and sanitized cleanup. | PASS - [P15 evidence](execution/P15-handoff.md) |
+| E04 | Multi-user service account is not caller authority | Same server executor receives separate minimal authorized contexts; senior grants cannot leak to junior. | PASS - [P15 evidence](execution/P15-handoff.md) |
+| E05 | Client invokes server-provided implementation through public APIs | Public server/tool client and pinned SDK transport execute the exact approved server handler and validate its distinctive result; prove TEST_RUNBOOK §9 matrix with zero client/competing-handler calls. | PASS - [P15 evidence](execution/P15-handoff.md) |
 
 ## P16 — Add bounded client proposals and explicit contract approval
 

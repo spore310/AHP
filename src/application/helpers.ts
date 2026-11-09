@@ -10,6 +10,8 @@ import {
   type SessionApplicationOptions,
 } from "@sessions";
 import { createToolCatalogue, defineToolContract } from "@tools";
+import { ToolAction } from "@toolExecution";
+import { createServerToolRegistration, type ServerToolRegistration } from "@toolExecution/server";
 
 import {
   CODE_REVIEW_ID,
@@ -32,6 +34,21 @@ const objectSchema = {
   properties: { path: { type: "string", minLength: 1 } },
   required: ["path"],
 } as const;
+
+/** Pure bounded example. Registration grants no authority and installs no runtime. */
+export function createInMemoryEchoRegistration(): ServerToolRegistration {
+  const definition = defineToolContract({ id: "11111111-1111-4111-8111-111111111114", key: "example.echo", version: 1,
+    name: "echo", schemaDialect: "draft-07", description: "Return a bounded in-memory text value.",
+    inputSchema: { type: "object", properties: { text: { type: "string", maxLength: 4096 } }, required: ["text"], additionalProperties: false },
+    outputSchema: { type: "object", properties: { value: { type: "string", maxLength: 4096 } }, required: ["value"], additionalProperties: false } });
+  class Echo extends ToolAction<{ readonly text: string }, { readonly value: string }> {
+    override execute(input: { readonly text: string }) {
+      return { value: input.text };
+    }
+  }
+  return createServerToolRegistration({ definition, revision: 1, source: { id: "application.in-memory-echo", revision: 1 },
+    implementation: { location: "server", suppliedBy: "server", implementation: "host", implementationId: "application.echo.v1" }, create: () => new Echo() });
+}
 
 /**
  * Builds a fresh typed-host policy for the example server.
