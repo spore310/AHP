@@ -1,6 +1,6 @@
 # Execution ledger
 
-**Execution state:** P00-P05 retain historical candidate acceptance; P06-P13 are accepted with final manifests, independent source/docs reviews and DB-safe full gates. P13 final gate: 90 files / 1156 tests / 202 mappings. Continue P14-P19 under their dependencies. Tested normal pushes to origin/agentIdentity are explicitly approved in chat. X05/X06 client execution proofs pass at P12; E05 server execution and P19's final integrated three-route rerun remain NOT RUN.
+**Execution state:** P00-P05 retain historical candidate acceptance; P06-P14 are accepted with final manifests, independent source/docs reviews and DB-safe full gates. P14 final candidate gate: 92 files / 1199 tests / 205 mappings. Continue P15-P19 under their dependencies. Tested normal pushes to origin/agentIdentity are explicitly approved in chat. X05/X06 client execution proofs pass at P12; E05 server execution and P19's final integrated three-route rerun remain NOT RUN.
 
 | Packet | Status | Candidate | Evidence path | Blocker / next step |
 | --- | --- | --- | --- | --- |
@@ -18,7 +18,7 @@
 | P11 | ACCEPTED | [53-file manifest](../execution/P11-final-candidate.sha256) | [acceptance](../execution/P11-handoff.md) | Independent source/docs PASS; DB-safe87files/1074tests/199mappings; real public v2 SDK execution/cancellation/revocation and bounded retention; P12 eligible |
 | P12 | ACCEPTED | [Final candidate](../execution/P12-final-candidate.sha256) | [Accepted handoff](../execution/P12-handoff.md) | 37 public route tests; full gate88files/1111tests/199mappings; independent final PASS. P13 eligible. |
 | P13 | ACCEPTED | [Final candidate](../execution/P13-final-candidate.sha256) | [Accepted handoff](../execution/P13-handoff.md) | C01-C07 independent final PASS; DB-safe90files1156tests202mappings; packet44tests; P14 eligible |
-| P14 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
+| P14 | ACCEPTED | [Final candidate](../execution/P14-final-candidate.sha256) | [Accepted handoff](../execution/P14-handoff.md) | R01-R05 independent PASS; DB-safe92files1199tests205mappings; packet43tests; P15 eligible |
 | P15 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
 | P16 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
 | P17 | NOT STARTED | — | — | Await dependencies; authorized by active goal |

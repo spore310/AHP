@@ -26,3 +26,6 @@ export type {
 } from "./helpers/dispatcher";
 
 export type { ToolChallengeOptions, ToolChallengeLimits } from "./helpers/challenge";
+
+export { createToolResultProjection } from "./helpers/projection";
+export type { ToolProjectionRequest, ToolProjectionOptions, ToolResultProjection } from "./helpers/projection";

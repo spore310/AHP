@@ -22,6 +22,9 @@ The existing `ToolAction` class and presentation schemas remain the contract. Op
 | `helpers/challenge/index.ts` | Internal challenge coordinator exports. |
 | `helpers/challenge/types.ts` | Bounded adapter options, ownership handles and strict result schemas. |
 | `helpers/challenge/helpers.ts` | Atomic one-attempt continuation, presentation approval, deadlines and adapter draining. |
+| `helpers/projection/index.ts` | Optional authorized result projection exports. |
+| `helpers/projection/types.ts` | Trusted mapping and final authority admission contracts. |
+| `helpers/projection/helpers.ts` | Captured output mapped to one registered owning-service action. |
 | `helpers/dispatcher/index.ts` | Local dispatcher public boundary. |
 | `helpers/dispatcher/types.ts` | Ports, limits, safe outcomes, lifecycle handles and runtime context schemas. |
 | `helpers/dispatcher/helpers.ts` | Ordered gates, draining ownership, output budgets, cleanup and bounded shutdown. |
@@ -293,3 +296,29 @@ Initial challenge replies also require continuationCurrent() after the final hos
 callbacks and retention fence. This pure check rejects expiry or cancellation
 before publication. Generic invocation challenge aggregation uses invoke and
 execute proofs; an advertise-only challenge does not run the invocation adapter.
+
+## Optional result projection
+
+`createToolResultProjection({ resources, project })` maps frozen validated output
+and captured action context to one bounded `{ target, operation, payload }`, or
+undefined for no action. Configure it as `ToolDispatcherOptions.projection`.
+Projection runs once after successful output validation and cleanup, before
+sensitive delivery. Target must belong to the original full route. The resource
+service independently authorizes the operation and delegates mutation to its owner.
+Executor output alone never becomes a trusted state action.
+
+A configured projector requires `ToolDispatchPorts.admitProjection(context,
+authority)`. This trusted port combines original invocation assignment proofs with
+the resource-operation decisions using the same registry's
+`validateAuthorityCohort`. Missing guard denies. The client broker supplies this
+joint check for its original invoke/advertise/execute cohort and pure host fences.
+The dispatcher checks cancellation and its pure deadline after admission callbacks;
+a custom clock with projection requires paired `fenceNow`.
+
+Rejected mapping, unsupported operation or stale authority produces safe
+`projection-failed` in phase `projection`, with `effectPossible: true` and no output.
+Execution is never retried or claimed rolled back. Cancellation/timeouts retain
+job/output ownership until pending projector/authorization work actually settles,
+using the resource handle's separate `settled` promise even after ticket timeout. Native
+mutation uses the owner's existing action schema, reducer and sequence allocation;
+asynchronous external commits are outside this contract.

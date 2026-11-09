@@ -76,3 +76,6 @@ export {
   securitySubjectRefSchema,
   trustedRequestContextSchema,
 } from "./helpers/validation";
+
+export { createResourceOperations } from "./helpers/resources";
+export type { RegisteredResource, ResourceOperation, ResourceKindAdapter, ResourceTypeRegistration, ResourceOperationRequest, ResourceOperationAuthority, ResourceOperationTicket, ResourceOperationHandle, ResourceOperationsOptions, ResourceOperations } from "./helpers/resources";

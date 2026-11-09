@@ -191,6 +191,7 @@ export interface ReferenceAuthorizer {
   invalidateExternal(revision: string): void;
   teardown(resource: ResourceRef): void;
   owner(resource: ResourceRef): SecuritySubjectRef | undefined;
+  readResource(resource: ResourceRef): import("../resources/types").RegisteredResource | undefined;
   evaluate(input: EvaluateSelector): Promise<StampedDecision>;
   projectAssignments(input: ProjectAssignmentsInput): Promise<AssignmentAuthorization>;
   matches(stamp: LocalDecisionStamp, actor: TrustedRequestContext): boolean;
@@ -201,5 +202,7 @@ export interface ReferenceAuthorizer {
   validateAssignments(authorization: AssignmentAuthorization, actor: TrustedRequestContext): boolean;
   /** One final clock sample across issued assignment proofs for distinct actual callers. */
   validateAssignmentCohort(cohort: readonly { readonly authorization: AssignmentAuthorization; readonly actor: TrustedRequestContext }[]): boolean;
+  /** One clock sample for genuine assignment and independent resource-operation proofs. */
+  validateAuthorityCohort(assignments: readonly { readonly authorization: AssignmentAuthorization; readonly actor: TrustedRequestContext }[], decisions: readonly { readonly stamp: LocalDecisionStamp; readonly actor: TrustedRequestContext }[]): boolean;
   getContract(id: string): ToolContractDefinition | undefined;
 }

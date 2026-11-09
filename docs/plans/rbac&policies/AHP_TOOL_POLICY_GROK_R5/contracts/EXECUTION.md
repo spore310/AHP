@@ -234,3 +234,17 @@ currentness and overall dispatch deadline govern later effects/results. Timeouts
 never free unsettled adapter or action work. Custom challenge clocks require a
 paired pure deadline reader. Redirect/message approval is explicit host policy;
 only bare wait is permitted by default. No connection rebind or retry is supplied.
+
+## P14 implementation amendment: optional authorized projection
+
+ToolDispatcherOptions may configure createToolResultProjection with a trusted
+output-to-resource-action mapper. It runs once after successful output validation
+and cleanup. ToolDispatchPorts.admitProjection combines the original private
+invocation proof cohort with operation proofs in the same canonical registry; the
+client broker supplies this port. Custom projection clocks require pure fenceNow.
+The owner action validates and passes a final admission veto to its existing state
+service; the veto closes on synchronous return/throw. Projection awaits actual
+resource settlement even after ticket timeout, retaining dispatcher output capacity.
+Safe projection-failed phase/code distinguishes this failure from execution; no
+retry, unrestricted state patch, asynchronous external commit or rollback is supplied.
+P15 host execution must supply the equivalent original-proof admission port.

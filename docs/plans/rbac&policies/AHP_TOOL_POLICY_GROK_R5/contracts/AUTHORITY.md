@@ -246,3 +246,15 @@ identity provider; the SDK never manufactures a user because credentials are abs
 The action authenticate hook remains optional. Truly anonymous tool execution would
 need a separately modeled actor/grant policy and is not enabled by omission in this
 milestone. This keeps the user/agent contract precise without adding default roles.
+
+## P14 implementation amendment: resource operations
+
+Resource types reuse the existing compiler type/provider binding and policy purposes;
+named application operations have explicit finite policy-ref ceilings. The canonical
+registry owns frozen resource facts and up to16 additional exact full routes. Every
+route resource must independently admit the operation. The resource service captures
+its preparation epoch before awaits and issues private single-use operation tickets.
+Its handle separates ticket response from actual settlement so cancellation never
+frees unsettled work. Final mutation uses one validateAuthorityCohort sample for
+original invocation assignments and independent operation decisions, followed only
+by pure owned fences. No second owner/grant store or new policy vocabulary exists.

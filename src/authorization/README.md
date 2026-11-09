@@ -15,8 +15,8 @@ Portable authority contracts, a per-host reference evaluator and bounded grant i
 | `helpers/validation/index.ts` | Public validation exports. |
 | `helpers/context/helpers.ts` | Full actor, resource and route comparison. |
 | `helpers/context/index.ts` | Context exports. |
-| `helpers/resources/types.ts` | Trusted resource registration and explicit applicability. |
-| `helpers/resources/helpers.ts` | Instance lookup. Owner identity is not a role. |
+| `helpers/resources/types.ts` | Resource registration, application operations and issued tickets. |
+| `helpers/resources/helpers.ts` | Canonical instance lookup and authorized owning-service operations. Owner identity is not a role. |
 | `helpers/resources/index.ts` | Resource exports. |
 | `helpers/bindings/types.ts` | Installation ownership, canonical lineage and scoped snapshot contracts. |
 | `helpers/bindings/helpers.ts` | Exact policy membership and expiry. |
@@ -197,3 +197,68 @@ before callbacks, and are not wire credentials. `matches` re-reads live registra
 without calling `FreshnessPort`. Descriptor materialization stays in `@toolPolicy`.
 No database restoration, private assignment transport, challenge continuation or
 remote execution attestation is implemented by this module's grant service.
+
+## Registered resource operations
+
+`createResourceOperations({ registry, policies, kinds, types })` accepts trusted
+kind resolvers and exact application type/version/provider registrations. The same
+policy factory must back the registry. Each named application operation (such as
+read, input or write) declares an existing policy purpose and a finite policy-ref
+ceiling. The compiler's `sessionType` binding key also identifies these application
+types; registration does not create a grant or bypass mandatory policies. Fake
+chat/terminal/workspace adapters prove this seam; no processes, filesystem mounts
+or new native reducer actions are supplied.
+
+`install` registers application resources in the canonical registry. Existing native
+session installation remains authoritative. `readResource` returns frozen facts
+without an installation capability. Optional `allowedRoutes` adds at most16 exact
+full routes to the primary route, for an explicitly shared resource. Relationship
+changes invalidate proofs; ownership and admission remain immutable. Selectors
+cannot substitute parents, omit chat context or invent routes.
+
+`authorize({ actor, route, target, operation, payload, signal })` resolves every
+unique route resource through its kind adapter, requires a registered type/provider
+and supported operation on each, and evaluates a complete positive grant plus all
+mandatory restrictions. It returns a handle: `ticket` settles with a private issued ticket or undefined,
+and `settled` waits for actual underlying work. Required external proofs come from providers. A new action challenge denies; an invocation
+challenge cannot approve a distinct resource action.
+
+`commit(ticket, admission)` consumes once and calls the registered owning operation.
+That operation validates payloads and must invoke the supplied synchronous admission
+callback immediately before mutation. Invocation admission must use
+`validateAuthorityCohort(originalAssignments, operationDecisions)` on the same
+registry. This extends assignment cohort validation with genuine independent
+decisions at one final canonical clock sample. Provider callbacks precede it; pure
+registry/instance fences follow it. Sequential callback-bearing checks are not a
+joint proof. Copied/foreign/replayed tickets deny. Retained admission callbacks
+close when the synchronous owner operation returns or throws. These are trusted adapters, not
+a sandbox or an atomic external transaction.
+
+Example for a fake workspace adapter's registered write operation:
+
+```ts
+const write = {
+  name: "write", purpose: "invoke" as const,
+  policies: [{ id: "workspace.write", revision: 1 }],
+  validate: (payload: unknown) => typeof payload === "string",
+  commit(payload: unknown, _context: ResourceOperationRequest, admit: () => boolean) {
+    if (typeof payload !== "string" || !admit()) return false;
+    fakeWorkspaceText = payload; // Adapter-owned state, never SessionState.
+    return true;
+  },
+};
+```
+
+The host installs exact type/provider policy bindings and scoped grants separately.
+For native sessions, an application adapter passes the final callback to existing
+`SessionsFactory.dispatchAction({ ..., admission })`; it maps only known validated
+actions, never arbitrary executor patches.
+
+Limits:32kinds,128types,64operations/type,64route resources,128policy refs/operation,
+and1MiB action data. Defaults and maxima are64pending operations and5seconds.
+Timeout/cancellation suppresses tickets but retains capacity until noncooperative
+resolver/provider/policy work actually settles. Preparation pins the canonical epoch before resolution; reinstalling even the same
+full ref during an await denies that preparation. Tickets expire; call `cancel` when
+unused and `dispose` at shutdown. Late work cannot install or commit. Adapter
+`fence` is a pure current-instance/provider-revision check without callbacks or
+changes to authority.

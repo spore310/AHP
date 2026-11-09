@@ -13,6 +13,12 @@ below through supported public session channels; it does not add a chat runtime.
 See `src/tests/websocket/policyIntegrationFixture.ts` and the accepted P12 acceptance
 record for implementation evidence, separate from these required target scenarios.
 
+P14 additionally proves registered fake terminal/chat/workspace operations and
+shared-resource route isolation in resourceScopes.test.ts. resultProjection.test.ts
+uses the existing session title reducer for authorized projection and late-boundary
+freshness/ownership races. See execution/P14-handoff.md; this is no real terminal,
+filesystem or chat runtime.
+
 ## 1. Senior and junior use the same coding harness
 
 Setup: one organization/security domain; senior subject S and junior subject J;

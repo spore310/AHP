@@ -1,3 +1,5 @@
+import type { ResourceOperationAuthority } from "@authorization";
+import type { ToolResultProjection } from "../projection";
 import type { ChallengeContinuation } from "@toolExecution/types";
 import type { ToolChallengeOptions } from "@toolExecution/helpers/challenge";
 import type { AuthorityRevisionStamp, PolicyDecision } from "@authorization/types";
@@ -21,6 +23,8 @@ export interface ToolDispatchPorts {
   }>;
   /** Must retain the complete invocation-specific freshness evidence privately. */
   current(context: ToolActionContext): boolean;
+  /** Final joint invocation/resource authority check, using the same canonical registry. */
+  admitProjection?(context: ToolActionContext, authority: ResourceOperationAuthority): boolean;
 }
 
 export interface ToolDispatchLimits {
@@ -48,11 +52,11 @@ export const TOOL_DISPATCH_ABSOLUTE: Readonly<ToolDispatchLimits> = Object.freez
 });
 
 export type ToolDispatchPhase = "admission" | "context" | "coarse" | "authenticate" | "validate"
-  | "authorize" | "prepare" | "execute" | "output" | "cleanup" | "delivery";
+  | "authorize" | "prepare" | "execute" | "output" | "cleanup" | "projection" | "delivery";
 export type ToolDispatchFailureCode = "closed" | "capacity" | "duplicate-call" | "invalid-input"
   | "invalid-context" | "denied" | "challenge-required" | "stale" | "invalid-clock"
   | "action-reused" | "action-failed" | "invalid-output" | "result-capacity" | "cleanup-failed"
-  | "cancelled" | "timeout";
+  | "projection-failed" | "cancelled" | "timeout";
 
 export type ToolDispatchOutcome<TOutput>
   = | { readonly status: "succeeded"; readonly output: TOutput; readonly cleanupFailures: 0 }
@@ -89,6 +93,7 @@ export interface ToolDispatcherOptions {
   /** Required with a custom clock when challenges are configured; same domain, no callbacks. */
   readonly fenceNow?: () => number;
   readonly challenge?: ToolChallengeOptions;
+  readonly projection?: ToolResultProjection;
 }
 
 export interface ToolDispatcher {

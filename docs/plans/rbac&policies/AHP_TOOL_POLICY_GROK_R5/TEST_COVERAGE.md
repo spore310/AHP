@@ -179,11 +179,11 @@ Use the exact packet test targets as the initial suite map. Record actual test n
 
 | ID | Requirement | Distinguishing assertion / evidence | Status |
 | --- | --- | --- | --- |
-| R01 | Resource operation permissions are independent | Terminal read cannot send input/terminate; workspace read cannot write; chat read cannot mutate. | NOT RUN |
-| R02 | Trusted relations prevent scope laundering | Shared terminal/workspace cannot use a caller-invented permissive parent; origin and target constraints both apply. | NOT RUN |
-| R03 | Unknown resource/provider fails closed | Missing adapter or mandatory evaluator never becomes unrestricted access. | NOT RUN |
-| R04 | Result is not an arbitrary state patch | Executor-returned action JSON is untrusted; approved projector uses registered owning service only. | NOT RUN |
-| R05 | State commit respects freshness and single settlement | Revoke/replace instance/duplicate result prevents unauthorized or repeated projection; completed effect is not retried. | NOT RUN |
+| R01 | Resource operation permissions are independent | Terminal read cannot send input/terminate; workspace read cannot write; chat read cannot mutate. | PASS - [P14 handoff](execution/P14-handoff.md); 43 focused tests, full92files1199tests205mappings, independent review |
+| R02 | Trusted relations prevent scope laundering | Shared terminal/workspace cannot use a caller-invented permissive parent; origin and target constraints both apply. | PASS - [P14 handoff](execution/P14-handoff.md); 43 focused tests, full92files1199tests205mappings, independent review |
+| R03 | Unknown resource/provider fails closed | Missing adapter or mandatory evaluator never becomes unrestricted access. | PASS - [P14 handoff](execution/P14-handoff.md); 43 focused tests, full92files1199tests205mappings, independent review |
+| R04 | Result is not an arbitrary state patch | Executor-returned action JSON is untrusted; approved projector uses registered owning service only. | PASS - [P14 handoff](execution/P14-handoff.md); 43 focused tests, full92files1199tests205mappings, independent review |
+| R05 | State commit respects freshness and single settlement | Revoke/replace instance/duplicate result prevents unauthorized or repeated projection; completed effect is not retried. | PASS - [P14 handoff](execution/P14-handoff.md); 43 focused tests, full92files1199tests205mappings, independent review |
 
 ## P15 — Add host-controlled executors behind the same dispatcher
 

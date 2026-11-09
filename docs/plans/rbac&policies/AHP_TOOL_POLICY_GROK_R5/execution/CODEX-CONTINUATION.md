@@ -1,6 +1,6 @@
 # R5 execution continuation
 
-Execute mode. P06-P13 accepted. Full P06-P19 goal ACTIVE; P14 next.
+Execute mode. P06-P14 accepted. Full P06-P19 goal ACTIVE; P14 checkpoint then P15 next.
 P06 pushed bd46480bed27477b6262b0e8b63179aec74c05fa; P07 pushed
 e3dafe4b215d42a5c8223316b209389ae3f52747; P08 pushed
 c378c92d16b9e317a80c175b434d3e16da643ca1; P09 pushed
@@ -68,8 +68,22 @@ Coordinator bounds/atomic proof/exact binding/draining, dispatcher suspension,
 structured receipts/actual enqueue, exact-owner resume/status and E7 discovery
 implemented. Three review findings repaired: first-effect deadline, initial reply
 pending deadline, advertise-only aggregation. Explicit policy/auth/origin tests.
-Final record candidate P13-final-candidate.sha256; final record gate and scoped
-commit/push next. P14 not started. Full goal ACTIVE through P19.
+Final P13 manifest36paths SHA8f8539424a6e92e34ecde384d8b6e2f152d9a4f9f09cb947da83f3ecd808c1c3.
+P13-final-reviewed-validate.log PASS90files1156tests202mappings all stages.
+Committed/pushed84bc468f14669ec56aeee42d0278c0669e979b8b; exact remote SHA verified.
+P14 accepted R01-R05 after independent revised candidate review.
+P14-plan PASS after joint authority cohort and pure dispatcher deadline refinements.
+Resource kind/type/provider service, explicit allowed routes, issued operation tickets,
+post-cleanup projection and broker joint proof admission implemented.
+P14-first-validate.log PASS92files1187tests205mappings lint/typecheck/build.
+Initial31tests and focused25files494tests PASS. Review required4fixes, and lead
+proved an additional stale installation race. RED8failures preserved; GREEN42tests.
+Revised API exposes ticket and actual settled promises; closes late admission;
+bounds cohort capture/route preflight; pins preparation epoch. Added challenge
+denial control brings packet total43tests. Revised full gate PASS92files1199tests205mappings; independent20path
+source/docs re-review PASS, no remaining material findings.
+Next: final acceptance-record gate/recheck, scoped commit/push and remote verification;
+then P15-P19. Full goal ACTIVE. P14-handoff maps evidence and review fixes.
 Untracked src/tests/websocket/p12-debug.mts is an earlier diagnostic; exclude it.
 Lead sole writer/runtime; p06_review read-only independent reviewer. Full goal ACTIVE.
 

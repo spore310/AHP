@@ -57,9 +57,10 @@ function captureLimits(input: Partial<ToolDispatchLimits> | undefined): ToolDisp
 export function createToolDispatcher(options: ToolDispatcherOptions = {}): ToolDispatcher {
   const limits = captureLimits(options.limits);
   const now = options.now === undefined ? Date.now.bind(Date) : options.now.bind(options);
-  if (options.challenge !== undefined && options.now !== undefined && options.fenceNow === undefined) throw new TypeError("Challenge clocks require a pure deadline reader.");
+  if ((options.challenge !== undefined || options.projection !== undefined) && options.now !== undefined && options.fenceNow === undefined) throw new TypeError("Challenge/projection clocks require a pure deadline reader.");
   const fenceNow = options.fenceNow === undefined ? Date.now.bind(Date) : options.fenceNow.bind(options);
   const challenges = options.challenge === undefined ? undefined : createToolChallenges(options.challenge, now, fenceNow);
+  const project = options.projection?.project.bind(options.projection);
   const jobs = new Map<string, ActiveToolDispatch>();
   const usedActions = new WeakSet<object>();
   let closed = false;
@@ -97,6 +98,7 @@ export function createToolDispatcher(options: ToolDispatcherOptions = {}): ToolD
     let reservedBytes = 0;
     let deadline = 0;
     let context: ToolActionContext | undefined;
+    const projectionPort = request.ports.admitProjection?.bind(request.ports);
     let currentPort: ((context: ToolActionContext) => unknown) | undefined;
     const primaryCode = (): ToolDispatchFailureCode | undefined => primary?.code;
     const failure = (): ToolDispatchOutcome<TOutput> => Object.freeze({
@@ -384,6 +386,34 @@ export function createToolDispatcher(options: ToolDispatcherOptions = {}): ToolD
         }
         cleanups.length = 0;
         if (cleanupFailures > 0) primary ??= { code: "cleanup-failed", phase };
+        if (primary === undefined && success !== undefined && context !== undefined && project !== undefined) {
+          phase = "projection";
+          try {
+            deliveryGuard();
+            if (projectionPort === undefined) {
+              primary = { code: "projection-failed", phase };
+            } else {
+              const projected: unknown = await project(success.output, context, () => {
+                deliveryGuard();
+                return true;
+              }, (authority) => {
+                live();
+                const allowed: unknown = context === undefined ? false : projectionPort(context, authority);
+                if (allowed !== true) {
+                  void Promise.resolve(allowed).catch(() => undefined);
+                  return false;
+                }
+                const time = fenceNow();
+                if (!Number.isFinite(time) || time < lastTime || time >= deadline) return false;
+                lastTime = time;
+                return !closed && !controller.signal.aborted && primaryCode() === undefined;
+              });
+              if (projected !== true) primary ??= { code: "projection-failed", phase };
+            }
+          } catch {
+            primary ??= { code: "projection-failed", phase };
+          }
+        }
         phase = "delivery";
         if (primary === undefined) {
           try {

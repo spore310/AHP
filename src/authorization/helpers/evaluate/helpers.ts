@@ -480,7 +480,7 @@ export const createReferenceAuthorizer = (options: ReferenceAuthorizerOptions): 
       return deny("missing-authority", snapshot, actor);
     }
     const stored = resourcesOnRoute.filter((resource): resource is StoredResource => resource !== undefined);
-    if (stored.some((resource) => !sameRoute(resource.route, snapshot.route) && sameResource(resource.resource, snapshot.scope))) {
+    if (stored.some((resource) => !sameRoute(resource.route, snapshot.route) && !(resource.allowedRoutes?.some((route) => sameRoute(route, snapshot.route)) ?? false) && sameResource(resource.resource, snapshot.scope))) {
       return deny("missing-authority", snapshot, actor);
     }
     const proofs = captureProofs(snapshot, stored);
@@ -738,7 +738,19 @@ export const createReferenceAuthorizer = (options: ReferenceAuthorizerOptions): 
     if (input.route.targets.length > inputLimits.maxRouteTargets || (input.mandatory?.length ?? 0) > inputLimits.maxMandatorySelectors) {
       throw new Error("Authorization route limit exceeded.");
     }
+    if ((input.allowedRoutes?.length ?? 0) > 16) throw new Error("Authorization route limit exceeded.");
+    for (const route of input.allowedRoutes ?? []) {
+      if (route.targets.length > inputLimits.maxRouteTargets) throw new Error("Authorization route limit exceeded.");
+    }
     const captured = copy(input);
+    for (const route of captured.allowedRoutes ?? []) {
+      if (route.targets.length > inputLimits.maxRouteTargets) throw new Error("Authorization route limit exceeded.");
+      const refs = [route.origin, ...route.targets];
+      for (const ref of refs) resourceRefSchema.parse(ref);
+      if (!refs.some((ref) => sameResource(ref, captured.resource))
+        || refs.some((ref) => ref.domainId !== captured.resource.domainId)
+        || new Set(route.targets.map(resourceKey)).size !== route.targets.length) throw new Error("Invalid resource route.");
+    }
     resourceRefSchema.parse(captured.resource);
     securitySubjectRefSchema.parse(captured.owner);
     if (captured.grantParent !== undefined) resourceRefSchema.parse(captured.grantParent);
@@ -940,12 +952,15 @@ export const createReferenceAuthorizer = (options: ReferenceAuthorizerOptions): 
     }
     return actorCount < limits.maxBindingsPerActor && childCount < limits.maxChildrenPerParent;
   };
-  const validateAssignmentCohort: ReferenceAuthorizer["validateAssignmentCohort"] = (cohort) => {
+  const validateAuthorityCohort: ReferenceAuthorizer["validateAuthorityCohort"] = (cohort, decisions) => {
     try {
       const candidate: unknown = cohort;
       if (!Array.isArray(candidate)) return false;
       const count = cohort.length;
-      if (!Number.isSafeInteger(count) || count < 1 || count > 512) return false;
+      const rawDecisions: unknown = decisions;
+      if (!Array.isArray(rawDecisions)) return false;
+      const decisionCount = decisions.length;
+      if (!Number.isSafeInteger(count) || count < 0 || count > 512 || !Number.isSafeInteger(decisionCount) || decisionCount < 0 || decisionCount > 1024 || count + decisionCount < 1) return false;
       let stampCount = 0;
       const captured: Array<{ readonly authorization: AssignmentAuthorization; readonly actor: TrustedRequestContext }> = [];
       for (let index = 0; index < count; index += 1) {
@@ -957,9 +972,18 @@ export const createReferenceAuthorizer = (options: ReferenceAuthorizerOptions): 
         if (stampCount > 1024) throw new TypeError("Too many authorization stamps.");
         captured.push({ authorization, actor: trustedRequestContextSchema.parse(copy(member.actor)) });
       }
+      const capturedDecisions: Array<{ readonly stamp: LocalDecisionStamp; readonly actor: TrustedRequestContext }> = [];
+      for (let index = 0; index < decisionCount; index += 1) {
+        const member = decisions[index];
+        if (member === undefined) return false;
+        const stamp = member.stamp;
+        if (!issued.has(stamp)) throw new TypeError("Unissued decision.");
+        capturedDecisions.push({ stamp, actor: trustedRequestContextSchema.parse(copy(member.actor)) });
+      }
+      if (stampCount + capturedDecisions.length > 1024) return false;
       const currentTime = now();
       pruneBindings(currentTime);
-      return finite(currentTime) && captured.every(({ authorization, actor }) =>
+      return finite(currentTime) && capturedDecisions.every(({ stamp, actor }) => liveMatchesAt(stamp, actor, currentTime)) && captured.every(({ authorization, actor }) =>
         authorization.stamps.every((stamp) => liveMatchesAt(stamp, actor, currentTime))
         && authorization.admitted.every((item) => {
           const installed = item.tuple.operation === "execute" ? executorAssignments : assignments;
@@ -973,7 +997,13 @@ export const createReferenceAuthorizer = (options: ReferenceAuthorizerOptions): 
       return false;
     }
   };
+  const validateAssignmentCohort: ReferenceAuthorizer["validateAssignmentCohort"] = (cohort) => validateAuthorityCohort(cohort, []);
   const registry: ReferenceAuthorizer = {
+    readResource(resource) {
+      const entry = findResource(resources, resource);
+      if (entry === undefined) return undefined;
+      return freeze({ resource: entry.resource, owner: entry.owner, route: entry.route, mandatory: entry.mandatory, externalAuthority: entry.externalAuthority, relationshipRevision: entry.relationshipRevision, ...(entry.allowedRoutes === undefined ? {} : { allowedRoutes: entry.allowedRoutes }), ...(entry.admission === undefined ? {} : { admission: entry.admission }), ...(entry.grantParent === undefined ? {} : { grantParent: entry.grantParent }) });
+    },
     onInvalidate(listener) {
       if (typeof listener !== "function" || listeners.size >= maxListeners) throw new Error("Invalidation listener limit exceeded.");
       const state: InvalidationListenerState = { listener, active: true, running: false };
@@ -1162,6 +1192,8 @@ export const createReferenceAuthorizer = (options: ReferenceAuthorizerOptions): 
         resource: captured.resource,
         owner: captured.owner,
         route: captured.route,
+        ...(captured.allowedRoutes === undefined ? {} : { allowedRoutes: captured.allowedRoutes }),
+        ...(captured.admission === undefined ? {} : { admission: captured.admission }),
         mandatory: captured.mandatory ?? [],
         externalAuthority: captured.externalAuthority,
         relationshipRevision: existing?.relationshipRevision ?? 1,
@@ -1401,6 +1433,7 @@ export const createReferenceAuthorizer = (options: ReferenceAuthorizerOptions): 
       return validateAssignmentCohort([{ authorization, actor }]);
     },
     validateAssignmentCohort,
+    validateAuthorityCohort,
     getContract(id) {
       return tools.get(id);
     },

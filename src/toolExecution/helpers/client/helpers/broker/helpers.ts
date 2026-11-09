@@ -9,7 +9,7 @@ import { createToolDispatcher } from "@toolExecution/helpers/dispatcher";
 import { createToolActionRegistration } from "@toolExecution/helpers/action";
 import { ToolAction } from "@toolExecution/types";
 import type { ToolActionContext } from "@toolExecution/types";
-import type { AssignmentAuthorization, ResourceRoute, TrustedRequestContext } from "@authorization";
+import type { ResourceOperationAuthority, AssignmentAuthorization, ResourceRoute, TrustedRequestContext } from "@authorization";
 import type { ClientToolBrokerOptions, ClientToolDispatchRequest, ClientToolPolicyRequest, ClientToolProof, ClientToolRegistration, ClientToolResolutionRequest, ClientToolRoute } from "./types";
 
 const schemas = createAuthorizationSchemas(POLICY_LIMIT_ABSOLUTE);
@@ -28,7 +28,7 @@ export function createClientToolPolicy(options: ClientToolBrokerOptions) {
   const select = policies.select.bind(policies);
   const project = registry.projectAssignments.bind(registry);
   const validate = registry.validateAssignments.bind(registry);
-  const validateCohort = registry.validateAssignmentCohort.bind(registry);
+  const validateCohort = registry.validateAuthorityCohort.bind(registry);
   const readBindings = registry.readBindings.bind(registry);
   const getContract = registry.getContract.bind(registry);
   const registrations = options.registrations.map((raw): ClientToolRegistration => {
@@ -61,7 +61,8 @@ export function createClientToolPolicy(options: ClientToolBrokerOptions) {
 
   return Object.freeze({
     registrations: Object.freeze(registrations),
-    current(proofs: readonly ClientToolProof[]): boolean {
+    current(proofs: readonly ClientToolProof[], resourceAuthority?: ResourceOperationAuthority): boolean {
+      if (resourceAuthority !== undefined && resourceAuthority.registry !== registry) return false;
       const candidate: unknown = proofs;
       if (!Array.isArray(candidate)) return false;
       const count = proofs.length;
@@ -73,7 +74,7 @@ export function createClientToolPolicy(options: ClientToolBrokerOptions) {
         if (member === undefined || member.signal.aborted) return false;
         captured.push(member);
       }
-      return validateCohort(captured) && captured.every((member) => !member.signal.aborted);
+      return validateCohort(captured, resourceAuthority?.decisions ?? []) && captured.every((member) => !member.signal.aborted);
     },
     async resolve(request: ClientToolResolutionRequest): Promise<ClientToolRoute> {
       const captured = captureRequest(request);
@@ -158,14 +159,14 @@ export function createClientToolDispatcher(options: ClientToolBrokerOptions) {
       const admission = Promise.withResolvers<ToolDispatchAdmission>();
       const enqueued = Promise.withResolvers<boolean>();
       let executedRoute: ResourceRoute | undefined;
-      const proofsCurrent = (cohort: readonly ClientToolProof[]): boolean => {
+      const proofsCurrent = (cohort: readonly ClientToolProof[], resourceAuthority?: ResourceOperationAuthority): boolean => {
         try {
           const live: unknown = current();
           if (live !== true) {
             void Promise.resolve(live).catch(() => undefined);
             return false;
           }
-          const owned: unknown = policy.current(cohort) && fence();
+          const owned: unknown = policy.current(cohort, resourceAuthority) && fence();
           if (owned !== true) void Promise.resolve(owned).catch(() => undefined);
           return owned === true;
         } catch {
@@ -216,6 +217,7 @@ export function createClientToolDispatcher(options: ClientToolBrokerOptions) {
             return { decision: { effect: "allow", reveal: false, challengeRequired }, authority: facts.authority };
           },
           current: isCurrent,
+          admitProjection: (_context, authority) => proofsCurrent(proofs, authority),
         },
       });
       void handle.admission.then((receipt) => {
