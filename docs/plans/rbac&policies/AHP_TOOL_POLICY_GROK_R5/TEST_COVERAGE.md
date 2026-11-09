@@ -156,12 +156,12 @@ Use the exact packet test targets as the initial suite map. Record actual test n
 
 | ID | Requirement | Distinguishing assertion / evidence | Status |
 | --- | --- | --- | --- |
-| X01 | Senior and junior agents have separate effective authority | Same harness + different verified delegation/roles yields different assignments, calls and cached results. | NOT RUN |
-| X02 | PM triage scenario is least-privileged | Read/summary grant does not become terminal input, production write or implementation replacement. | NOT RUN |
-| X03 | Actual SDK and raw wire agree with policy | Multi-client reducer/view and canary frame capture prove no alternate metadata route. | NOT RUN |
-| X04 | Existing regression gate stays meaningful | Full pnpm validate passes on candidate or exact blockers are reported; work/persistence guards unchanged. | NOT RUN |
-| X05 | Client invokes its own supplied implementation through public APIs | Real public server/tool client and pinned SDK transport execute the exact approved client handler and validate its distinctive result; prove the full identity, grant, contract/source/revision, resource/route, provider and raw-wire negative matrix in TEST_RUNBOOK §9. Zero competing-handler calls. | NOT RUN |
-| X06 | Distinct client A invokes client B's supplied implementation | Separate authenticated callers/executors and generations, independent invoke/execute assignments, exact selected B handler/result, zero A/competing handler calls and recipient-specific disclosure/negative matrix through the same public path. | NOT RUN |
+| X01 | Senior and junior agents have separate effective authority | Same harness + different verified delegation/roles yields different assignments, calls and cached results. | PASS P12 accepted. [Candidate evidence](execution/P12-handoff.md). |
+| X02 | PM triage scenario is least-privileged | Read/summary grant does not become terminal input, production write or implementation replacement. | PASS P12 accepted. [Candidate evidence](execution/P12-handoff.md). |
+| X03 | Actual SDK and raw wire agree with policy | Multi-client reducer/view and canary frame capture prove no alternate metadata route. | PASS P12 accepted. [Candidate evidence](execution/P12-handoff.md). |
+| X04 | Existing regression gate stays meaningful | Full pnpm validate passes on candidate or exact blockers are reported; work/persistence guards unchanged. | PASS P12 accepted. [Candidate evidence](execution/P12-handoff.md). |
+| X05 | Client invokes its own supplied implementation through public APIs | Real public server/tool client and pinned SDK transport execute the exact approved client handler and validate its distinctive result; prove the full identity, grant, contract/source/revision, resource/route, provider and raw-wire negative matrix in TEST_RUNBOOK §9. Zero competing-handler calls. | PASS P12 accepted. [Candidate evidence](execution/P12-handoff.md). |
+| X06 | Distinct client A invokes client B's supplied implementation | Separate authenticated callers/executors and generations, independent invoke/execute assignments, exact selected B handler/result, zero A/competing handler calls and recipient-specific disclosure/negative matrix through the same public path. | PASS P12 accepted. [Candidate evidence](execution/P12-handoff.md). |
 
 ## P13 — Implement nonblocking challenge and verified continuation
 

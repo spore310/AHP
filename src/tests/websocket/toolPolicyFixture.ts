@@ -18,6 +18,10 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
   readonly roles?: Readonly<Record<string, readonly ToolOperation[]>>;
   readonly permission?: () => Promise<"allow" | "deny">;
   readonly challenge?: boolean;
+  /** Keep native reads/advertisement live while only the exact invoke tuple requires a challenge. */
+  readonly invokeChallenge?: boolean;
+  readonly sessionType?: { readonly key: string; readonly version: number };
+  readonly parentChannel?: string;
   readonly onSecurityCheck?: (context: TrustedRequestContext) => void;
   readonly registryNow?: () => number;
   readonly securityNow?: () => number;
@@ -32,15 +36,21 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
   readonly assignment?: (subject: string, registration: ClientToolRegistration, operation: ToolOperation) => boolean;
   readonly route?: (origin: ResourceRef) => ClientToolRoute;
   readonly resolve?: ClientToolBrokerOptions["resolve"];
-  readonly configureResources?: (registry: ReferenceAuthorizer, scope: ResourceRef, sessionType: { readonly key: string; readonly version: number }) => void;
+  readonly configureResources?: (registry: ReferenceAuthorizer, scope: ResourceRef, sessionType: { readonly key: string; readonly version: number }, parent?: ResourceRef) => void;
 } = {}) {
   const roles = options.roles ?? { fixture: ["invoke", "advertise", "execute"] };
   const policy = { id: "fixture.tools", revision: 1 };
-  const sessionType = { key: "test.echo-session", version: 1 };
-  const rules = { admitted: { policies: [policy], namespaces: [] }, mandatory: [] };
+  const invokePolicy = options.invokeChallenge === true ? { id: "fixture.invoke-challenge", revision: 1 } : policy;
+  const admitted = options.invokeChallenge === true ? [policy, invokePolicy] : [policy];
+  const sessionType = options.sessionType ?? { key: "test.echo-session", version: 1 };
+  const rules = { admitted: { policies: admitted, namespaces: [] }, mandatory: [] };
   const policies = createToolPolicyFactory({ policies: [{ ...policy, operations: Object.fromEntries(["discover", "invoke", "advertise", "execute"].map((operation) => [operation,
     { actor: { mode: "roles", actors: { user: { anyOf: [operation] }, ...(options.actors === undefined ? {} : { agent: { anyOf: [operation] } }) } }, ...(operation === "discover" ? { reveal: true } : {}), ...(options.permission === undefined ? {} : { requiredPermissions: ["fixture-check"] }) }])),
-  challenge: { required: options.challenge ?? false } }, ...(options.additionalPolicies ?? [])], bindings: [{ sessionType, providerId: "mock", ...rules }] });
+  challenge: { required: options.challenge ?? false } }, ...(options.invokeChallenge === true
+    ? [{ ...invokePolicy,
+        operations: { invoke: { actor: { mode: "roles" as const, actors: { user: { anyOf: ["invoke"] }, agent: { anyOf: ["invoke"] } } } } },
+        challenge: { required: true } }]
+    : []), ...(options.additionalPolicies ?? [])], bindings: [{ sessionType, providerId: "mock", ...rules }] });
   const registry = createReferenceAuthorizer({ policies, now: options.registryNow ?? Date.now,
     permissionEvaluators: { ...options.permissionEvaluators, ...(options.permission === undefined ? {} : { "fixture-check": options.permission }) } });
   const registrations = options.registrations ?? definitions.map((definition) => ({ definition, revision: 1, source: { id: "fixture-source-" + definition.key, revision: 1 },
@@ -125,25 +135,29 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
   });
   const recreate = async () => {
     const context: TrustedRequestContext = { actor: { kind: "user", principal: { domainId: "local", subject: "creator" } }, connectionId: "fixture-creator", authRevision: "fixture-auth" };
+    if (options.parentChannel !== undefined && host.sessions.authorization?.getResource(options.parentChannel) === undefined) {
+      await host.sessions.authorization?.createSession({ channel: options.parentChannel, config: { "x-ahp-session-type": type.header } },
+        { context, connectionId: context.connectionId, connectionGeneration: 1, validUntil: Date.now() + 30000, signal: new AbortController().signal, isCurrent: () => true });
+    }
     await host.sessions.authorization?.createSession({ channel: toolPolicyChannel, config: { "x-ahp-session-type": type.header } },
       { context, connectionId: context.connectionId, connectionGeneration: 1, validUntil: Date.now() + 30000, signal: new AbortController().signal, isCurrent: () => true });
     const scope = host.sessions.authorization?.getResource(toolPolicyChannel);
     if (scope === undefined) throw new Error("Fixture creation failed");
-    options.configureResources?.(registry, scope, sessionType);
+    options.configureResources?.(registry, scope, sessionType, options.parentChannel === undefined ? undefined : host.sessions.authorization?.getResource(options.parentChannel));
     const route = options.route?.(scope).route ?? { origin: scope, targets: [scope] };
     for (const [subject, actorRoles] of Object.entries(roles)) {
       const actor = options.actors?.[subject]?.actor ?? { kind: "user" as const, principal: { domainId: "local", subject } };
       const bindingId = "fixture-grant-" + subject;
       const parent = options.actors?.[subject]?.parentSubject;
       const issuer = parent === undefined ? undefined : options.actors?.[parent]?.actor ?? { kind: "user" as const, principal: { domainId: "local", subject: parent } };
-      registry.installBinding({ id: bindingId, actor, scope, roles: actorRoles, policies: [policy], revision: 1,
+      registry.installBinding({ id: bindingId, actor, scope, roles: actorRoles, policies: admitted, revision: 1,
         authority: parent === undefined || issuer === undefined ? { kind: "host-policy", policy } : { kind: "delegation", issuer, parentGrantId: "fixture-grant-" + parent } });
       const operations: readonly ToolOperation[] = options.toolDiscovery?.includes(subject) === true ? ["discover", "invoke", "advertise"] : ["invoke", "advertise"];
       for (const registration of registrations) for (const operation of operations) {
         if (options.assignment?.(subject, registration, operation) === false) continue;
         const definition = registration.definition;
         registry.installToolAssignment({ resource: scope, route, recipient: actor,
-          contract: { id: definition.id, key: definition.key, version: definition.version }, operation, bindingId, policyRef: policy });
+          contract: { id: definition.id, key: definition.key, version: definition.version }, operation, bindingId, policyRef: operation === "invoke" ? invokePolicy : policy });
       }
     }
     for (const record of contexts.values()) {

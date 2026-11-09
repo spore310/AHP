@@ -1,6 +1,6 @@
 # R5 execution continuation
 
-Execute mode. P06-P11 accepted. Full P06-P19 goal ACTIVE; P12 next.
+Execute mode. P06-P12 accepted. Full P06-P19 goal ACTIVE; P13 next.
 P06 pushed bd46480bed27477b6262b0e8b63179aec74c05fa; P07 pushed
 e3dafe4b215d42a5c8223316b209389ae3f52747; P08 pushed
 c378c92d16b9e317a80c175b434d3e16da643ca1; P09 pushed
@@ -45,28 +45,29 @@ and all bounded retention/send/poll/join gates implemented. P11-handoff.md maps
 W01-W06 and every preserved RED/GREEN review regression. Historical P09 assertions
 use only tests/websocket/legacyToolClient; production has no fallback. Source binding
 is not remote code attestation. Lead sole writer; p06_review read-only.
-P12-plan.md independent plan PASS. Typed triage-chat session origin plus distinct
-chat/workspace targets is approved fixture representation; still must add distinct
-broader parent session and omitted/substituted-route negatives. No production changes.
-Current uncommitted P12 source: toolPolicyFixture opt-in actors/delegation parent,
-registrations, assignment selector, extra policies/permissions, route/resolver and
-resource setup. Defaults preserved: P12-fixture-defaults.log PASS3files47tests.
-Shared codingHarnessContracts/createCodingHarness added to toolExecution/fixtures.ts.
-New policyIntegrationFixture.ts uses real public host, exact credential-classified
-agents with canonical parentGrantId lineage, registered chat mandatory policy and
-workspace required external authority/provider policy. Source path/export/digest
-is trusted fixture evidence, not remote attestation. New policyIntegration.test.ts
-has first self/cross positive roundtrips PASS2 in P12-public-positive-second.log;
-first.log preserves a fixed fixture syntax error. Both actual handler/source/route/
-identity tuples and observer raw canaries asserted. These are incomplete X05/X06:
-negative matrices, meaningful competing/A-handler selection controls, distinct
-broader parent route, X01/X02/X03 scenarios, races, docs/fullgate/review remain.
-Current new files not layout-formatted/full-linted; run typecheck then continue
-thin negative slices. No P12 acceptance/commit. Reviewer p06_review idle after planPASS.
+P12 X01-X06 accepted after independent final review PASS. P12-handoff.md maps
+37 public self/cross tests. P12-reviewed-validate.log PASS88files/1111tests/
+199mappings plus lint/typecheck/build CHECK_EXIT0; revised-packet-focused PASS37.
+Final reviewer verified revised manifest15paths SHA115999024c75681308e0250b44a40c8f60d3444b0470795c71d36b5325808edb.
+Current HEAD cc796c9 is an automatic prior checkpoint; final P12 commit/push next.
+Actual local branch GLM/agentIdentity; local agentIdentity also at cc796c9, remote
+agentIdentity verified8189e1d. Preserve local branch and normal push HEAD:agentIdentity.
+Bounded production repair makes private advertisements unready on invalidation,
+requires fresh ack for new/awaited calls and preserves already-enqueued ownership.
+Source/matrix proves actual user/agent/delegation, post-init strict child subset,
+parent/triage/chat/workspace, required provider/evaluator/challenge, schema/source/
+connection substitution, SDK reducer/raw canaries, revoke/reconnect/incarnation races.
+No persistence/work guards changed. Failed logs and both earlier manifests remain.
+Final acceptance-record candidate: P12-final-candidate.sha256; final gate then
+scoped commit/push verification. Continue directly to P13 plan/review/implementation.
+P13 packet and EXECUTION E4/E7 pre-read only; no P13 code changes yet. Existing
+challenge types/dispatcher denial and v2 unsupported resume are current seams.
+Untracked src/tests/websocket/p12-debug.mts is an earlier diagnostic; exclude it.
+Lead sole writer/runtime; p06_review read-only independent reviewer. Full goal ACTIVE.
 
 User approved all tested R5 checkpoint pushes to origin/agentIdentity in chat.
 No dependency installs/live persistence/reset/stash/force push/model changes.
-Every check uses Invoke-DbSafeCheck.ps1 child environment. Unrelated nul stays
-untouched/untracked. X05/X06/E05 target additions exist but remain NOT RUN:
-P12 owns two public client routes, P15 server execution, P19 all three and full
+Every check uses Invoke-DbSafeCheck.ps1 child environment. Preserve unrelated artifacts.
+X05/X06 pass at P12. E05 server execution and P19's final rerun remain NOT RUN:
+P15 owns server execution, P19 all three routes and full
 negative matrices on the final integrated candidate. Do not stop at a checkpoint.

@@ -76,6 +76,10 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
   }
   const dispatcher = options === undefined ? undefined : createClientToolDispatcher(options);
   const advertisements = new Map<string, Map<string, Advertisement>>();
+  let privateAdvertisementEpoch: object = {};
+  const privateAdvertisementEpochs = new WeakMap<Advertisement, object>();
+  const advertisementReady = (advertisement: Advertisement): boolean => advertisement.advertisementId === undefined
+    || privateAdvertisementEpochs.get(advertisement) === privateAdvertisementEpoch;
   const sessionTokens = new Map<string, ResourceRef<"session">>();
   const stagedAdvertisements = new Set<StagedAdvertisement>();
   const stagedPrivateAdvertisements = new Set<object>();
@@ -196,6 +200,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
             if (selected.length === 0) clearAdvertisement(peer, channel);
             else {
               const registered = advertisements.get(context.connectionId) ?? new Map<string, Advertisement>();
+              privateAdvertisementEpochs.set(advertisement, privateAdvertisementEpoch);
               registered.set(channel, advertisement);
               advertisements.set(context.connectionId, registered);
             }
@@ -315,7 +320,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
       const candidates: { peer: AHPPeer; ad: Advertisement; registration: ClientToolRegistration; executor: ExecutorRevision }[] = [];
       for (const peer of peers.values()) {
         const ad = advertisements.get(peer.context.connectionId)?.get(request.channel);
-        if (ad === undefined || !ownAdvertisement(peer, request.channel, ad) || idCounts.get(ad.clientId) !== 1) continue;
+        if (ad === undefined || !advertisementReady(ad) || !ownAdvertisement(peer, request.channel, ad) || idCounts.get(ad.clientId) !== 1) continue;
         for (const entry of ad.entries) if (entry.registration.definition.id === contract.id) candidates.push({ peer, ad, ...entry });
       }
       // Admission is checked again by the one dispatcher; ambiguity is never an implicit routing policy.
@@ -323,12 +328,16 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
       if (selected === undefined || candidates.length !== 1) return unavailable();
       if (expectedContractId !== undefined && selected.ad.advertisementId === undefined) return unavailable();
       const controller = new AbortController();
+      let enqueued = false;
+      // Invalidation retires new dispatch readiness, not ownership of work that
+      // has already crossed the exact executor's enqueue boundary.
       const current = (): boolean => livePeer(caller, setup) && caller.subscriptions.has(request.channel)
-        && ownAdvertisement(selected.peer, request.channel, selected.ad) && liveSession(facts.origin);
+        && ownAdvertisement(selected.peer, request.channel, selected.ad) && liveSession(facts.origin)
+        && (enqueued || advertisementReady(selected.ad));
       const fence = (): boolean => ownedPeer(caller, setup) && ownedPeer(selected.peer, selected.ad.setup)
         && caller.subscriptions.has(request.channel) && selected.peer.subscriptions.has(request.channel)
         && advertisements.get(selected.peer.context.connectionId)?.get(request.channel) === selected.ad
-        && sessionTokens.get(request.channel) === facts.origin;
+        && sessionTokens.get(request.channel) === facts.origin && (enqueued || advertisementReady(selected.ad));
       const handle = dispatcher.dispatch({ caller: setup.context, origin: facts.origin, sessionType: facts.sessionType,
         providerId: facts.providerId, registration: selected.registration, input: request.input,
         signal: controller.signal, callId, executor: selected.executor, executorContext: selected.ad.setup.context, current, fence,
@@ -346,7 +355,6 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
                 connection: { id: selected.peer.context.connectionId, generation: selected.executor.generation },
                 advertisementId: selected.ad.advertisementId, input,
               });
-          let enqueued = false;
           let cancellationSent = false;
           const cancel = (): void => {
             if (!enqueued || cancellationSent || privateInvocation === undefined) return;
@@ -428,7 +436,10 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
         assignment,
         dispatch: (context, request, callId) => startCall({ channel: request.channel,
           key: request.contract.key, version: request.contract.version, input: request.input }, context, callId, request.contract.id),
-        onInvalidate: (listener) => options.registry.onInvalidate(listener),
+        onInvalidate: (listener) => options.registry.onInvalidate(() => {
+          privateAdvertisementEpoch = {};
+          listener();
+        }),
       });
   return {
     call, prepareAdvertisement,

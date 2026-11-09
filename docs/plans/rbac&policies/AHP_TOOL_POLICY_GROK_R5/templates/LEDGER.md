@@ -1,6 +1,6 @@
 # Execution ledger
 
-**Execution state:** P00-P05 retain historical candidate acceptance; P06-P10 are accepted with final manifests, independent source/docs reviews and DB-safe full gates. P10 final gate: 83 files / 1025 tests / 187 mappings. Continue P11-P19 under their dependencies. Tested normal pushes to origin/agentIdentity are explicitly approved in chat. Later public tool execution proofs remain NOT RUN.
+**Execution state:** P00-P05 retain historical candidate acceptance; P06-P12 are accepted with final manifests, independent source/docs reviews and DB-safe full gates. P12 final gate: 88 files / 1111 tests / 199 mappings. Continue P13-P19 under their dependencies. Tested normal pushes to origin/agentIdentity are explicitly approved in chat. X05/X06 client execution proofs pass at P12; E05 server execution and P19's final integrated three-route rerun remain NOT RUN.
 
 | Packet | Status | Candidate | Evidence path | Blocker / next step |
 | --- | --- | --- | --- | --- |
@@ -16,7 +16,7 @@
 | P09 | ACCEPTED | [27-file manifest](../execution/P09-final-candidate.sha256) | [acceptance](../execution/P09-handoff.md) | Independent source/docs PASS; DB-safe80files/991tests/182mappings; internal canonical broker only, P10 eligible |
 | P10 | ACCEPTED | [22-file manifest](../execution/P10-final-candidate.sha256) | [acceptance](../execution/P10-handoff.md) | Independent source/docs PASS; DB-safe83files/1025tests/187mappings; protected native views with actual SDK reducers/transport; P11 eligible |
 | P11 | ACCEPTED | [53-file manifest](../execution/P11-final-candidate.sha256) | [acceptance](../execution/P11-handoff.md) | Independent source/docs PASS; DB-safe87files/1074tests/199mappings; real public v2 SDK execution/cancellation/revocation and bounded retention; P12 eligible |
-| P12 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
+| P12 | ACCEPTED | [Final candidate](../execution/P12-final-candidate.sha256) | [Accepted handoff](../execution/P12-handoff.md) | 37 public route tests; full gate88files/1111tests/199mappings; independent final PASS. P13 eligible. |
 | P13 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
 | P14 | NOT STARTED | — | — | Await dependencies; authorized by active goal |
 | P15 | NOT STARTED | — | — | Await dependencies; authorized by active goal |

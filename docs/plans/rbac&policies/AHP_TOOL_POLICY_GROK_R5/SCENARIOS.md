@@ -3,6 +3,16 @@
 All roles, policy names and resource IDs below are **application-defined test
 fixtures**, not default SDK roles or built-in domain semantics.
 
+Current P12 fixture representation: the public native tool channel is a typed
+`test.triage-session` origin; distinct registered chat and workspace targets carry
+mandatory policies. A second real native session supplies broader parent grants,
+and the chat's `grantParent` names that parent. Sessions themselves cannot have a
+grant parent. The broader parent grants do not replace the triage origin's exact
+tool assignments or the chat/workspace obligations. This represents the scenarios
+below through supported public session channels; it does not add a chat runtime.
+See `src/tests/websocket/policyIntegrationFixture.ts` and the pending P12 acceptance
+record for implementation evidence, separate from these required target scenarios.
+
 ## 1. Senior and junior use the same coding harness
 
 Setup: one organization/security domain; senior subject S and junior subject J;

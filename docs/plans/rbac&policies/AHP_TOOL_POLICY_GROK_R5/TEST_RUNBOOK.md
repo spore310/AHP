@@ -122,7 +122,15 @@ what was actually exercised. Existing persistence test reports remain historical
 
 ## 9. Public execution acceptance additions
 
-Required by the execution goal; these are target checks, not implemented evidence.
+Required by the execution goal. These remain the acceptance requirements;
+candidate-specific evidence is recorded separately. The current P12 client-route
+implementation and exact test-name mapping are in
+[P12-handoff.md](execution/P12-handoff.md), including the required-evaluator absence
+and post-initialization strict delegation lifecycle added after independent review.
+Full DB-safe P12-reviewed-validate passes 88 files / 1111 tests and all other gate
+stages; independent final review passed and P12 X01-X06 are accepted. Historical
+P11 or aggregate test results do not substitute for this matrix. P15 server
+execution and P19 final integrated proof remain outstanding.
 P12 owns X05 (a client invokes its own supplied tool) and X06 (client A invokes
 distinct client B's supplied tool). P15 owns E05 (client invokes server-provided
 tool). P19 must execute all three complete matrices on the final integrated

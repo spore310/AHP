@@ -426,6 +426,11 @@ facts. Views are recipient-owned and capped at 128 per peer, 1024 total, with
 64 staged preparations. Negotiation caps 1024 peers including pending reservations.
 Existing view refresh works at capacity; failed enqueue preserves prior state.
 Advertisements commit only after exact reply enqueue and trailing owned fences.
+Registry invalidation synchronously retires private advertisements for new
+dispatch before sending assignment-change hints. A fresh private acknowledgement
+restores readiness. Calls still awaiting resolution cannot enqueue through the
+retired advertisement. Already-enqueued work retains its captured ownership and
+all existing connection, resource and policy fences for status/cancel/cleanup.
 
 Dispatch reserves private retention before using the sole canonical dispatcher,
 then replies at admission rather than remote completion. Status/cancel freshly
@@ -450,3 +455,13 @@ client and pinned SDK. toolProtocolCapacity.test.ts tests adapter capacity with
 synthetic ports and makes no authorization claim. Historical P09 native-broker
 assertions use the frozen test-only client under tests/websocket/legacyToolClient;
 it is not exported by production and does not verify the current client runtime.
+
+`policyIntegration.test.ts` extends public proof to self execution and distinct
+caller/executor connections, actual classified agents/delegation, senior/junior/PM
+inventories, parent/triage constraints, SDK reducers and recipient-specific raw
+frames. Its shared `policyIntegrationFixture.ts` composes `toolPolicyFixture.ts`
+with explicit canonical grants and provider rules; it does not substitute the
+private kernel. It also reproduces stale-advertisement routing after invalidation
+and checks fresh acknowledgement, awaited admission and in-flight cleanup.
+Packet acceptance and remaining matrix requirements are recorded in the R5
+execution area; these tests do not establish server-provided execution or P19.
