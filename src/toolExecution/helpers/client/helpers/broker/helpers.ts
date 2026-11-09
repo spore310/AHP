@@ -4,6 +4,7 @@ import { defineToolContract, canonicalJsonEqual } from "@tools";
 import { toolExecutionBindingSchema } from "@toolPolicy/helpers/validation";
 import { captureToolValue } from "@toolExecution/helpers/action/helpers";
 import { ToolDispatchFailure } from "@toolExecution/helpers/dispatcher/types";
+import type { ToolDispatchAdmission } from "@toolExecution/helpers/dispatcher";
 import { createToolDispatcher } from "@toolExecution/helpers/dispatcher";
 import { createToolActionRegistration } from "@toolExecution/helpers/action";
 import { ToolAction } from "@toolExecution/types";
@@ -116,7 +117,7 @@ export function createClientToolPolicy(options: ClientToolBrokerOptions) {
           ...(resolution.externalProofs === undefined ? {} : { externalProofs: resolution.externalProofs }),
           ...(resolution.mandatoryBindings === undefined ? {} : { mandatoryBindings: resolution.mandatoryBindings }),
         });
-        const admitted = authorization.admitted.find((entry) => entry.allowed && !entry.challengeRequired
+        const admitted = authorization.admitted.find((entry) => entry.allowed
           && (operation !== "discover" || entry.reveal)
           && entry.tuple.operation === operation && entry.tuple.contract.id === registered.id
           && entry.tuple.contract.key === registered.key && entry.tuple.contract.version === registered.version
@@ -125,7 +126,7 @@ export function createClientToolPolicy(options: ClientToolBrokerOptions) {
           && (operation !== "execute" || canonicalJsonEqual(entry.tuple.implementation, request.registration.implementation)));
         if (aborted()) return deny();
         if (admitted === undefined || !validate(authorization, request.caller)) continue;
-        const proof = Object.freeze({ authorization, authority: admitted.decision.stamp.authority,
+        const proof = Object.freeze({ challengeRequired: admitted.challengeRequired, authorization, authority: admitted.decision.stamp.authority,
           current: () => !request.signal.aborted && validate(authorization, request.caller) });
         issuedProofs.set(proof, { authorization, actor: request.caller, signal: request.signal });
         return proof;
@@ -143,6 +144,7 @@ export function createClientToolDispatcher(options: ClientToolBrokerOptions) {
     policy,
     stats: dispatcher.stats.bind(dispatcher),
     shutdown: dispatcher.shutdown.bind(dispatcher),
+    invalidateChallenges: dispatcher.invalidateChallenges.bind(dispatcher),
     dispatch(raw: ClientToolDispatchRequest) {
       const current = raw.current.bind(raw);
       const fence = raw.fence.bind(raw);
@@ -152,7 +154,9 @@ export function createClientToolDispatcher(options: ClientToolBrokerOptions) {
         executor: schemas.executorRevisionSchema.parse(captureToolValue(raw.executor, limits).value),
         executorContext: schemas.trustedRequestContextSchema.parse(captureToolValue(raw.executorContext, limits).value) };
       let proofs: readonly ClientToolProof[] = [];
-      const admission = Promise.withResolvers<boolean>();
+      let challengeRequired = false;
+      const admission = Promise.withResolvers<ToolDispatchAdmission>();
+      const enqueued = Promise.withResolvers<boolean>();
       let executedRoute: ResourceRoute | undefined;
       const proofsCurrent = (cohort: readonly ClientToolProof[]): boolean => {
         try {
@@ -180,19 +184,25 @@ export function createClientToolDispatcher(options: ClientToolBrokerOptions) {
         const facts = { caller: request.caller, executor: request.executor, resources: resolution.route,
           contract: { id: request.registration.definition.id, revision: request.registration.definition.version },
           implementation: request.registration.implementation, callId: request.callId, authority: execute.authority };
-        return { cohort, facts };
+        return { cohort, facts, challengeRequired: invoke.challengeRequired || execute.challengeRequired };
       };
       const authorize = async (input: unknown, signal: AbortSignal) => {
         const authorized = await resolveAuthorization(input, signal);
+        if (executedRoute !== undefined && !sameRoute(authorized.facts.resources, executedRoute)) throw new ToolDispatchFailure("stale");
+        executedRoute = authorized.facts.resources;
         proofs = authorized.cohort;
+        challengeRequired = authorized.challengeRequired;
         return authorized.facts;
       };
       class RemoteAction extends ToolAction<unknown, unknown> {
         override execute(input: unknown, context: ToolActionContext): Promise<unknown> {
           if (!isCurrent()) throw new ToolDispatchFailure("stale");
           executedRoute = context.resources;
-          admission.resolve(true);
-          return send(input, context);
+          return send(input, context, () => {
+            if (!isCurrent() || context.signal.aborted) return;
+            admission.resolve({ status: "ready" });
+            enqueued.resolve(true);
+          });
         }
       }
       const registration = createToolActionRegistration({ definition: request.registration.definition,
@@ -203,15 +213,23 @@ export function createClientToolDispatcher(options: ClientToolBrokerOptions) {
           coarse: () => proofs.length === 3 && isCurrent(),
           authorize: async (context, input) => {
             const facts = await authorize(input, context.signal);
-            return { decision: { effect: "allow", reveal: false, challengeRequired: false }, authority: facts.authority };
+            return { decision: { effect: "allow", reveal: false, challengeRequired }, authority: facts.authority };
           },
           current: isCurrent,
         },
       });
+      void handle.admission.then((receipt) => {
+        if (receipt.status !== "ready") admission.resolve(receipt);
+      });
       void handle.result.then(() => {
-        admission.resolve(false);
+        admission.resolve({ status: "denied" });
+        enqueued.resolve(false);
       });
       return Object.freeze({ ...handle, current: isCurrent, admitted: admission.promise,
+        async resume(proofRef: string): Promise<boolean> {
+          if (!await handle.resume(proofRef)) return false;
+          return enqueued.promise;
+        },
         async refresh(signal: AbortSignal = request.signal): Promise<(() => boolean) | undefined> {
           if (executedRoute === undefined || signal.aborted) return undefined;
           try {

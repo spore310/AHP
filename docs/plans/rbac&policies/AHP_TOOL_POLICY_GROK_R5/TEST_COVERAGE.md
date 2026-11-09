@@ -167,13 +167,13 @@ Use the exact packet test targets as the initial suite map. Record actual test n
 
 | ID | Requirement | Distinguishing assertion / evidence | Status |
 | --- | --- | --- | --- |
-| C01 | Required challenge cannot be skipped | No verifier, false proof or client mfaPassed flag produces zero prepare/execute calls. | NOT RUN |
-| C02 | Continuation is nonblocking | Same-socket challenge/status/resume succeeds without holding the first dispatch. | NOT RUN |
-| C03 | Exact request binding enforced | Input, actor, resource instance, policy revision or selected executor substitution invalidates approval. | NOT RUN |
-| C04 | Continuation is atomic single use | Two simultaneous valid resumes result in one admitted execution; duplicate completion cannot project twice. | NOT RUN |
-| C05 | Current revocation still wins | Grant revoked during verify causes denial; replay/expiry/disconnect/restart cannot resurrect authority. | NOT RUN |
-| C06 | MFA is not delegation or human consent | Agent remains agent; satisfied identity step-up alone does not authorize a separate approval obligation. | NOT RUN |
-| C07 | Challenge metadata and storage are bounded | Unapproved redirects, secret metadata, excessive pending/proof bytes and hanging verifier fail safely. | NOT RUN |
+| C01 | Required challenge cannot be skipped | No verifier, false proof or client mfaPassed flag produces zero prepare/execute calls. | PASS P13 accepted. [Evidence](execution/P13-handoff.md). |
+| C02 | Continuation is nonblocking | Same-socket challenge/status/resume succeeds without holding the first dispatch. | PASS P13 accepted. [Evidence](execution/P13-handoff.md). |
+| C03 | Exact request binding enforced | Input, actor, resource instance, policy revision or selected executor substitution invalidates approval. | PASS P13 accepted. [Evidence](execution/P13-handoff.md). |
+| C04 | Continuation is atomic single use | Two simultaneous valid resumes result in one admitted execution; duplicate completion cannot project twice. | PASS P13 accepted. [Evidence](execution/P13-handoff.md). |
+| C05 | Current revocation still wins | Grant revoked during verify causes denial; replay/expiry/disconnect/restart cannot resurrect authority. | PASS P13 accepted. [Evidence](execution/P13-handoff.md). |
+| C06 | MFA is not delegation or human consent | Agent remains agent; satisfied identity step-up alone does not authorize a separate approval obligation. | PASS P13 accepted. [Evidence](execution/P13-handoff.md). |
+| C07 | Challenge metadata and storage are bounded | Unapproved redirects, secret metadata, excessive pending/proof bytes and hanging verifier fail safely. | PASS P13 accepted. [Evidence](execution/P13-handoff.md). |
 
 ## P14 — Exercise resource-specific policies and authorized result projection
 

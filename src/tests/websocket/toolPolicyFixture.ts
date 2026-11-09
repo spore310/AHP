@@ -18,6 +18,7 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
   readonly roles?: Readonly<Record<string, readonly ToolOperation[]>>;
   readonly permission?: () => Promise<"allow" | "deny">;
   readonly challenge?: boolean;
+  readonly dispatcher?: ClientToolBrokerOptions["dispatcher"];
   /** Keep native reads/advertisement live while only the exact invoke tuple requires a challenge. */
   readonly invokeChallenge?: boolean;
   readonly sessionType?: { readonly key: string; readonly version: number };
@@ -116,7 +117,7 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
           resolve: ({ resource }: { resource: import("@authorization").ResourceRef }) => options.route?.(resource) ?? ({ route: { origin: resource, targets: [resource] } }) } }
       : {}),
     sessions: { providers: [createMockProvider()], application: { catalogue: createSessionTypeCatalogue({ tools: createToolCatalogue({ definitions }), types: [type.registration] }), defaultType: sessionType }, creationSecurity: { registry, policies } },
-    toolExecution: { registry, policies, registrations, resolve: options.resolve ?? (({ origin }) => options.route?.(origin) ?? ({ route: { origin, targets: [origin] } })), dispatcher: { limits: { shutdownWaitMs: 20 } } },
+    toolExecution: { registry, policies, registrations, resolve: options.resolve ?? (({ origin }) => options.route?.(origin) ?? ({ route: { origin, targets: [origin] } })), dispatcher: { limits: { shutdownWaitMs: 20 }, ...options.dispatcher } },
     security: { composition, ...(options.securityNow === undefined ? {} : { now: options.securityNow }), initialAuthority: { prepare: ({ context, fence }) => {
       const releaseSignal = Promise.withResolvers<undefined>();
       const record = { context, fence, tuples: installConnection(context, fence), released: releaseSignal.promise };

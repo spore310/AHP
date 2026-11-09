@@ -107,7 +107,7 @@ export function createResourceViews(options: ResourceViewOptions, source: Resour
         ...(resolution.externalProofs === undefined ? {} : { externalProofs: resolution.externalProofs }),
         ...(resolution.mandatoryBindings === undefined ? {} : { mandatoryBindings: resolution.mandatoryBindings }) });
       if (!live(recipient)) return deny();
-      if (proof.decision.effect === "allow" && proof.decision.reveal && !proof.decision.challengeRequired) return proof.stamp;
+      if (proof.decision.effect === "allow" && proof.decision.reveal) return proof.stamp;
     }
     return undefined;
   };

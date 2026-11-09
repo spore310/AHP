@@ -1,9 +1,9 @@
-import type { ToolDispatchHandle } from "@toolExecution/helpers/dispatcher";
+import type { ToolDispatchAdmission, ToolDispatchHandle } from "@toolExecution/helpers/dispatcher";
 import type { ToolStatusReply } from "@toolExecution/helpers/client/helpers/protocol";
 
 export interface PrivateToolCallHandle extends ToolDispatchHandle<unknown> {
-  /** True only after full schema/policy admission, before remote completion. */
-  readonly admitted: Promise<boolean>;
+  /** Structured initial receipt; ready requires actual enqueue, challenge keeps the call waiting. */
+  readonly admitted: Promise<ToolDispatchAdmission>;
 }
 export interface PrivateToolCallLimits {
   readonly maxRecords: number;
@@ -20,7 +20,7 @@ export type PrivateToolCallOptions = {
 });
 export interface PrivateToolCallReceipt {
   readonly callId: string;
-  readonly admitted: Promise<boolean>;
+  readonly admitted: Promise<ToolDispatchAdmission>;
 }
 export interface PrivateToolCallRead {
   readonly status: ToolStatusReply;
@@ -34,6 +34,8 @@ export interface PrivateToolCallRead {
 /** Owner is an exact trusted connection lease. These methods do not grant policy authority. */
 export interface PrivateToolCalls {
   start(owner: object, start: (callId: string) => PrivateToolCallHandle): PrivateToolCallReceipt | undefined;
+  findContinuation(continuationId: string, owner: object): string | undefined;
+  resume(callId: string, owner: object, proofRef: string, admission: () => boolean): Promise<boolean>;
   read(callId: string, owner: object): PrivateToolCallRead | undefined;
   cancel(callId: string, owner: object, admission?: () => boolean): boolean;
   forget(owner: object): void;
@@ -46,7 +48,7 @@ export interface PrivateToolCallEntry {
   readonly callId: string;
   readonly owner: object;
   readonly expiresAt: number;
-  readonly admission: ReturnType<typeof Promise.withResolvers<boolean>>;
+  readonly admission: ReturnType<typeof Promise.withResolvers<ToolDispatchAdmission>>;
   timer?: ReturnType<typeof setTimeout>;
   handle?: PrivateToolCallHandle;
   status: ToolStatusReply;
@@ -54,4 +56,6 @@ export interface PrivateToolCallEntry {
   cancelled: boolean;
   finished: boolean;
   resultSeen: boolean;
+  continuationId?: string;
+  resuming?: boolean;
 }

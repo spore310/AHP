@@ -10,7 +10,7 @@ and the chat's `grantParent` names that parent. Sessions themselves cannot have 
 grant parent. The broader parent grants do not replace the triage origin's exact
 tool assignments or the chat/workspace obligations. This represents the scenarios
 below through supported public session channels; it does not add a chat runtime.
-See `src/tests/websocket/policyIntegrationFixture.ts` and the pending P12 acceptance
+See `src/tests/websocket/policyIntegrationFixture.ts` and the accepted P12 acceptance
 record for implementation evidence, separate from these required target scenarios.
 
 ## 1. Senior and junior use the same coding harness
@@ -160,3 +160,15 @@ WorkService to claim owner-only work under J's own principal.
 Expected: existing work service/repository guard still denies. The SDK must not
 substitute S's subject or remove SQL predicates to fake delegated work support.
 Tool authorization and work assignment are separate capability contracts. Coverage: G06.
+
+
+## P13 challenge evidence boundary
+
+The continuation suite uses the same real public multi-resource client harness.
+Discovery shows only challenge-required under existing reveal/grants; dispatch
+suspends before effects. The original socket can read waiting status and submit a
+proof reference. A trusted adapter result still requires exact current authority;
+identity step-up does not satisfy a separate human-consent permission. Disconnect,
+executor replacement, session incarnation replacement and restart retire old IDs.
+The fixture's injected adapter is not a production MFA provider or remote attestation.
+Current executed evidence and review status: [P13 handoff](execution/P13-handoff.md).

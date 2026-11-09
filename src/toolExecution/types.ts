@@ -93,8 +93,12 @@ export type ChallengeStatus
  * Application challenge port. A policy boolean means verification is mandatory.
  * This type does not implement MFA or consent.
  */
+export interface ChallengeContext extends ToolActionContext {
+  readonly inputDigest: string;
+}
+
 export interface ChallengeAdapter {
-  begin(context: ToolActionContext): Awaitable<ChallengeContinuation>;
+  begin(context: ChallengeContext): Awaitable<ChallengeContinuation>;
   verify(proof: ChallengeProof): Awaitable<ChallengeVerification>;
   cancel?(continuationId: string): Awaitable<void>;
   status?(continuationId: string): Awaitable<ChallengeStatus>;

@@ -46,6 +46,7 @@ export interface ClientToolPolicyRequest extends ClientToolResolutionRequest {
 }
 
 export interface ClientToolProof {
+  readonly challengeRequired: boolean;
   readonly authorization: AssignmentAuthorization;
   readonly authority: AuthorityRevisionStamp;
   /** Freshness only. Construction has already required the exact allowed tuple. */
@@ -59,7 +60,7 @@ export interface ClientToolDispatchRequest extends ClientToolResolutionRequest {
   /** Captured host connection/resource/registration fences, never a grant. */
   current(): boolean;
   /** Settles on the selected remote protocol completion, not on caller cancellation. */
-  send(input: unknown, context: ToolActionContext): Promise<unknown>;
+  send(input: unknown, context: ToolActionContext, onEnqueued: () => void): Promise<unknown>;
   /** Callback-free check of broker-owned fences after all authority/identity callbacks. */
   fence(): boolean;
 }

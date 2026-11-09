@@ -19,12 +19,12 @@ const descriptor = z.strictObject({ name: z.string().min(1).max(256), title: z.s
   annotations: annotations.optional(), _meta: z.record(z.string(), json) });
 export const assignedToolSchema = z.strictObject({ contract: toolContractSelectorSchema, descriptor,
   purposes: z.array(z.enum(["discover", "invoke", "advertise", "execute"])).min(1).max(4),
-  conditions: z.array(z.never()).max(0), execution: execution.optional() });
+  conditions: z.array(z.literal("challenge-required")).max(1), execution: execution.optional() });
 const view = { version, channel, resource: resourceRefSchema, connection, viewRevision: revision };
 
 export const toolCapabilitiesRequestSchema = z.strictObject({ version });
 export const toolCapabilitiesReplySchema = z.strictObject({ version, assignments: z.literal(true),
-  dispatch: z.literal(true), continuation: z.literal(false) });
+  dispatch: z.literal(true), continuation: z.boolean() });
 export const toolAssignedRequestSchema = z.strictObject({ version, channel });
 export const toolAssignedReplySchema = z.strictObject({ ...view, tools: z.array(assignedToolSchema).max(128) });
 export const toolAdvertiseRequestSchema = z.strictObject({ version, channel, viewRevision: revision,

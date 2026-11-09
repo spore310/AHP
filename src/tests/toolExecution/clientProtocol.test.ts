@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { toolDispatchRequestSchema, toolCapabilitiesRequestSchema, toolStatusReplySchema, parseToolWire } from "@toolExecution/helpers/client/helpers/protocol";
 import { createPrivateToolCalls } from "@toolExecution/helpers/calls";
 import type { PrivateToolCallHandle } from "@toolExecution/helpers/calls";
-import type { ToolDispatchOutcome } from "@toolExecution/helpers/dispatcher";
+import type { ToolDispatchAdmission, ToolDispatchOutcome } from "@toolExecution/helpers/dispatcher";
 import { createClientToolDispatcher } from "@toolExecution/helpers/client/helpers/broker";
 import { clientPolicyFixture } from "./clientPolicyFixture";
 
@@ -38,7 +38,8 @@ function pending() {
   const result = Promise.withResolvers<ToolDispatchOutcome<unknown>>();
   const settled = Promise.withResolvers<ToolDispatchOutcome<unknown>>();
   const cancel = vi.fn();
-  const handle: PrivateToolCallHandle = { admitted: admitted.promise, result: result.promise, settled: settled.promise, cancel };
+  const admission = admitted.promise.then((allowed): ToolDispatchAdmission => ({ status: allowed ? "ready" : "denied" }));
+  const handle: PrivateToolCallHandle = { admission, continuationCurrent: () => false, resume: () => Promise.resolve(false), admitted: admission, result: result.promise, settled: settled.promise, cancel };
   return { admitted, result, settled, cancel, handle };
 }
 
@@ -59,7 +60,7 @@ it.each(["expired", "invalid", "disposed"] as const)("does not publish delayed a
   };
   else time = condition === "invalid" ? Number.NaN : 100;
   work.admitted.resolve(true);
-  expect(await record.admitted).toBe(false);
+  expect(await record.admitted).toEqual({ status: "denied" });
   expect(work.cancel).toHaveBeenCalledOnce();
   work.result.resolve(succeeded("late"));
   work.settled.resolve(succeeded("late"));
@@ -104,7 +105,7 @@ it("receipts wait for admission but not remote completion and records belong to 
   expect(store.read(record.callId, foreign)).toBeUndefined();
   expect(store.read(record.callId, caller)?.status).toEqual({ version: 2, callId: record.callId, status: "waiting" });
   work.admitted.resolve(true);
-  expect(await record.admitted).toBe(true);
+  expect(await record.admitted).toEqual({ status: "ready" });
   expect(store.read(record.callId, caller)?.status.status).toBe("running");
   expect(store.cancel(record.callId, foreign)).toBe(false);
   expect(work.cancel).not.toHaveBeenCalled();
@@ -167,7 +168,7 @@ it("count admission and reentrant startup are bounded; expiry cancels but cannot
   expect(store.read(record.callId, caller)).toBeUndefined();
   expect(work.cancel).toHaveBeenCalledTimes(1);
   expect(settled).toBe(false);
-  expect(await record.admitted).toBe(false);
+  expect(await record.admitted).toEqual({ status: "denied" });
   work.admitted.resolve(true);
   work.result.resolve(succeeded("late"));
   work.settled.resolve(succeeded("late"));
@@ -185,7 +186,7 @@ it("disposal during startup cancels the late handle and does not resurrect a rec
     return work.handle;
   });
   if (record === undefined) throw new Error("Reserved record should retain its denied receipt");
-  expect(await record.admitted).toBe(false);
+  expect(await record.admitted).toEqual({ status: "denied" });
   expect(work.cancel).toHaveBeenCalledTimes(1);
   work.admitted.resolve(true);
   work.result.resolve(succeeded("late"));
@@ -202,7 +203,10 @@ it("expired disclosure cannot free the real dispatcher's draining execution slot
   if (registration === undefined) throw new Error("Missing registration");
   const store = createPrivateToolCalls({ limits: { maxRecords: 1, ttlMs: 100 } });
   const remote = Promise.withResolvers<unknown>();
-  const send = vi.fn(() => remote.promise);
+  const send = vi.fn((_input: unknown, _context: unknown, onEnqueued: () => void) => {
+    onEnqueued();
+    return remote.promise;
+  });
   const launch = (callId: string) => dispatcher.dispatch({ ...f.request, registration, callId,
     executor: f.executor, executorContext: f.executorContext, current: () => true, fence: () => true, send });
   let first: ReturnType<typeof launch> | undefined;
@@ -211,12 +215,12 @@ it("expired disclosure cannot free the real dispatcher's draining execution slot
     return first;
   });
   if (record === undefined) throw new Error("Missing call");
-  expect(await record.admitted).toBe(true);
+  expect(await record.admitted).toEqual({ status: "ready" });
   await vi.advanceTimersByTimeAsync(100);
   expect(store.stats().records).toBe(0);
   expect(dispatcher.stats()).toMatchObject({ active: 1, draining: 1 });
   const next = store.start(f.caller, launch);
-  expect(await next?.admitted).toBe(false);
+  expect(await next?.admitted).toEqual({ status: "denied" });
   expect(send).toHaveBeenCalledOnce();
   remote.resolve({ value: "late canary" });
   await first?.settled;
@@ -246,7 +250,7 @@ it("invalid or reentrant clocks close retention and cannot recreate expired reco
   expect(proof?.current()).toBe(false);
   expect(store.start(owner, () => pending().handle)).toBeUndefined();
   expect(work.cancel).toHaveBeenCalledOnce();
-  expect(await record.admitted).toBe(false);
+  expect(await record.admitted).toEqual({ status: "denied" });
   onClock = () => undefined;
   time = Number.NaN;
   expect(() => store.stats()).toThrow("Invalid private call clock");

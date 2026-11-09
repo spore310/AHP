@@ -1,3 +1,5 @@
+import { createToolChallenges } from "@toolExecution/helpers/challenge";
+import type { ToolChallengeHandle } from "@toolExecution/helpers/challenge";
 import type { ToolContractDefinition } from "@tools/types";
 import type { ToolExecutionBinding } from "@toolPolicy/types";
 import type { Awaitable, ToolAction, ToolActionContext } from "../../types";
@@ -8,7 +10,7 @@ import {
 } from "./types";
 import type {
   ActiveToolDispatch, ToolDispatchFacts, ToolDispatchFailureCode, ToolDispatchHandle,
-  ToolDispatchLimits, ToolDispatchOutcome, ToolDispatchPhase, ToolDispatchRequest,
+  ToolDispatchAdmission, ToolDispatchLimits, ToolDispatchOutcome, ToolDispatchPhase, ToolDispatchRequest,
   ToolDispatcher, ToolDispatcherOptions,
 } from "./types";
 
@@ -55,6 +57,9 @@ function captureLimits(input: Partial<ToolDispatchLimits> | undefined): ToolDisp
 export function createToolDispatcher(options: ToolDispatcherOptions = {}): ToolDispatcher {
   const limits = captureLimits(options.limits);
   const now = options.now === undefined ? Date.now.bind(Date) : options.now.bind(options);
+  if (options.challenge !== undefined && options.now !== undefined && options.fenceNow === undefined) throw new TypeError("Challenge clocks require a pure deadline reader.");
+  const fenceNow = options.fenceNow === undefined ? Date.now.bind(Date) : options.fenceNow.bind(options);
+  const challenges = options.challenge === undefined ? undefined : createToolChallenges(options.challenge, now, fenceNow);
   const jobs = new Map<string, ActiveToolDispatch>();
   const usedActions = new WeakSet<object>();
   let closed = false;
@@ -75,6 +80,11 @@ export function createToolDispatcher(options: ToolDispatcherOptions = {}): ToolD
 
   function dispatch<TInput, TOutput, TPrepared = void>(request: ToolDispatchRequest<TInput, TOutput, TPrepared>): ToolDispatchHandle<TOutput> {
     const callId = request.callId;
+    const admission = Promise.withResolvers<ToolDispatchAdmission>();
+    const resumed = Promise.withResolvers<boolean>();
+    let challenge: ToolChallengeHandle | undefined;
+    let challengeApproved = false;
+    let effectsStarted = false;
     const result = Promise.withResolvers<ToolDispatchOutcome<TOutput>>();
     const settled = Promise.withResolvers<ToolDispatchOutcome<TOutput>>();
     const controller = new AbortController();
@@ -96,6 +106,8 @@ export function createToolDispatcher(options: ToolDispatcherOptions = {}): ToolD
     const publish = (outcome: ToolDispatchOutcome<TOutput>): void => {
       if (delivered) return;
       delivered = true;
+      admission.resolve({ status: "denied" });
+      resumed.resolve(false);
       result.resolve(outcome);
     };
     const interrupt = (code: "timeout" | "cancelled"): void => {
@@ -105,6 +117,12 @@ export function createToolDispatcher(options: ToolDispatcherOptions = {}): ToolD
       publish(failure());
     };
     const handle: ToolDispatchHandle<TOutput> = Object.freeze({
+      admission: admission.promise,
+      continuationCurrent: () => challenge?.pendingFence() === true && !controller.signal.aborted && !closed,
+      resume: async (proofRef: string) => {
+        if (challenge === undefined || !await challenge.resume(proofRef)) return false;
+        return resumed.promise;
+      },
       result: result.promise, settled: settled.promise, cancel: () => {
         interrupt("cancelled");
       },
@@ -194,6 +212,7 @@ export function createToolDispatcher(options: ToolDispatcherOptions = {}): ToolD
             void Promise.resolve(verdict).catch(() => undefined);
             throw new ToolDispatchFailure("stale");
           }
+          if (challengeApproved && !effectsStarted && challenge?.fence() !== true) throw new ToolDispatchFailure("stale");
           // No clock/adapter callback after the final currentness decision.
           if (closed || controller.signal.aborted) throw new ToolDispatchFailure(primary?.code ?? "cancelled");
         };
@@ -208,6 +227,10 @@ export function createToolDispatcher(options: ToolDispatcherOptions = {}): ToolD
             : undefined;
           try {
             if (context !== undefined) guard();
+            if (!effectsStarted && (next === "prepare" || next === "execute")) {
+              effectsStarted = true;
+              if (challengeApproved) resumed.resolve(true);
+            }
             const value = await callback();
             if (bounded && clock() >= endsAt) interrupt("timeout");
             live();
@@ -264,7 +287,44 @@ export function createToolDispatcher(options: ToolDispatcherOptions = {}): ToolD
         context = captureContext(facts, callId, registration.definition, registration.implementation, controller.signal, context);
         guard();
         if (decision.effect !== "allow") throw new ToolDispatchFailure("denied");
-        if (decision.challengeRequired) throw new ToolDispatchFailure("challenge-required");
+        if (decision.challengeRequired) {
+          if (challenges === undefined) throw new ToolDispatchFailure("challenge-required");
+          const boundContext = JSON.stringify(context);
+          const boundDecision = JSON.stringify(decision);
+          const digest = await step("authorize", async () => {
+            const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(input)));
+            return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+          });
+          guard();
+          challenge = challenges.open({ context: Object.freeze({ ...context, inputDigest: digest }), deadline,
+            current: () => {
+              try {
+                guard();
+                return true;
+              } catch {
+                return false;
+              }
+            } });
+          if (challenge === undefined) throw new ToolDispatchFailure("challenge-required");
+          const continuation = await challenge.ready;
+          guard();
+          if (continuation === undefined || !challenge.pendingFence()) throw new ToolDispatchFailure("challenge-required");
+          admission.resolve(Object.freeze({ status: "challenge-required", ...continuation }));
+          if (!await challenge.verified) throw new ToolDispatchFailure("challenge-required");
+          guard();
+          const fresh = await step("context", () => resolve(input, controller.signal));
+          context = captureContext(fresh, callId, registration.definition, registration.implementation, controller.signal, context);
+          if (JSON.stringify(context) !== boundContext) throw new ToolDispatchFailure("stale");
+          const rawFresh = await step("authorize", () => authorize(context as ToolActionContext, input));
+          const authorized = toolDispatchAuthorizationSchema.parse(captureToolValue(rawFresh, contextLimits).value);
+          context = captureContext({ caller: context.caller, executor: context.executor, resources: context.resources,
+            contract: context.contract, implementation: context.implementation, callId, authority: authorized.authority }, callId, registration.definition, registration.implementation, controller.signal, context);
+          if (JSON.stringify(context) !== boundContext || JSON.stringify(authorized.decision) !== boundDecision) throw new ToolDispatchFailure("stale");
+          guard();
+          if (!challenge.fence() || controller.signal.aborted || closed) throw new ToolDispatchFailure("stale");
+          challengeApproved = true;
+        }
+        admission.resolve({ status: "ready" });
         if (prepare !== undefined) {
           preparing = true;
           effectPossible = true;
@@ -302,6 +362,10 @@ export function createToolDispatcher(options: ToolDispatcherOptions = {}): ToolD
               ? "invalid-output"
               : phase === "validate" ? "invalid-input" : "action-failed", phase };
       } finally {
+        admission.resolve({ status: "denied" });
+        resumed.resolve(false);
+        challenge?.cancel();
+        await challenge?.settled;
         phase = "cleanup";
         preparing = false;
         if (cleanupAction !== undefined) {
@@ -346,9 +410,13 @@ export function createToolDispatcher(options: ToolDispatcherOptions = {}): ToolD
 
   return Object.freeze({
     dispatch,
+    invalidateChallenges: () => {
+      challenges?.invalidate();
+    },
     stats: () => ({ active: jobs.size, draining: [...jobs.values()].filter((job) => job.draining()).length, retainedOutputBytes }),
     shutdown: async () => {
       closed = true;
+      challenges?.dispose();
       for (const job of jobs.values()) job.cancel();
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {

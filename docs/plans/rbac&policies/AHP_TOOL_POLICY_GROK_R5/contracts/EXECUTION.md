@@ -210,3 +210,27 @@ factories are imported through a separate entrypoint and are not transitively
 loaded by a client contract import. Test this with throwing module sentinels.
 Do not claim universal browser/package support until the actual target build is
 verified; package publishing/bundler redesign is not part of this task.
+
+
+## P13 implementation amendment: receipts and exact challenge ownership
+
+ChallengeContext extends ToolActionContext with the digest of captured canonical
+input. The neutral handle now supplies structured admission (ready, denied or
+challenge-required) and a separate single-attempt resume result. The client proxy
+reports ready only after a trusted onEnqueued callback; its remote completion
+promise remains distinct. Existing call retention owns continuation lookup for
+an exact connection lease, with no parallel public invocation registry.
+
+Discovery exposes a bounded challenge-required condition while preserving actual
+reveal/grant/provider requirements (E7). P12's transitional view-level challenge
+denial tests become discovery-plus-zero-effect controls in P13. This changes no
+rule for missing reveal, permissions or evaluator denial. No verifier still denies
+invoke/execute. One generic challenge satisfies only the SDK challenge condition;
+separate human-approval permissions remain independently required.
+
+A challenge deadline is fenced after callbacks before the first effectful hook.
+It is consumed when preparation (or execution without prepare) begins; ordinary
+currentness and overall dispatch deadline govern later effects/results. Timeouts
+never free unsettled adapter or action work. Custom challenge clocks require a
+paired pure deadline reader. Redirect/message approval is explicit host policy;
+only bare wait is permitted by default. No connection rebind or retry is supplied.

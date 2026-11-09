@@ -378,7 +378,7 @@ fixtures still select the internal kernel and are not P12 public privacy proof.
 `protectedViews` is an explicit host opt-in with the same canonical registry and
 compiler as creation. Its admitted policy refs authorize resource content reads
 through selected discover/reveal, actual scoped bindings, mandatory route rules
-and no challenge. Authentication, creator identity and tool assignments do not
+without invoking an effectful challenge. Authentication, creator identity and tool assignments do not
 substitute for these grants. Global-sequence consent remains independently required.
 
 Initial batches are atomic. Repeated subscriptions and listings use the same
@@ -465,3 +465,16 @@ private kernel. It also reproduces stale-advertisement routing after invalidatio
 and checks fresh acknowledgement, awaited admission and in-flight cleanup.
 Packet acceptance and remaining matrix requirements are recorded in the R5
 execution area; these tests do not establish server-provided execution or P19.
+
+
+P13 private continuations use the same dispatcher and retained call owner. With a
+configured toolExecution.dispatcher.challenge adapter, dispatch promptly returns
+challenge-required, status reports waiting, and resume accepts only a host-issued
+continuation UUID and opaque proof reference. Resumption is exact-connection,
+one-attempt and freshly authorized before effects. The client remains able to
+send status/resume on the original socket; no generic pump priority bypass exists.
+Capabilities reports the configured continuation support. Discovery exposes only
+the safe challenge-required condition; absent verifiers still deny execution.
+Registry invalidation cancels pending continuations before assignment hints;
+private advertisement freshness and in-flight draining behavior remain enforced.
+See ../toolExecution/README.md for adapter approval, clock, bounds and ownership.

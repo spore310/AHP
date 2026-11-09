@@ -1,3 +1,5 @@
+import type { ChallengeContinuation } from "@toolExecution/types";
+import type { ToolChallengeOptions } from "@toolExecution/helpers/challenge";
 import type { AuthorityRevisionStamp, PolicyDecision } from "@authorization/types";
 import type { Awaitable, ToolActionContext } from "../../types";
 import type { ToolActionRegistration } from "../action/types";
@@ -57,7 +59,15 @@ export type ToolDispatchOutcome<TOutput>
     | { readonly status: "failed"; readonly code: ToolDispatchFailureCode; readonly phase: ToolDispatchPhase;
       readonly effectPossible: boolean; readonly cleanupFailures: number; };
 
+export type ToolDispatchAdmission = { readonly status: "ready" } | { readonly status: "denied" }
+  | ({ readonly status: "challenge-required" } & ChallengeContinuation);
+
 export interface ToolDispatchHandle<TOutput> {
+  readonly admission: Promise<ToolDispatchAdmission>;
+  /** Pure fence for an initial challenge receipt after all host callbacks. */
+  continuationCurrent(): boolean;
+  /** One proof attempt; true only after fresh authorization admits effects. */
+  resume(proofRef: string): Promise<boolean>;
   /** May settle before the action does on cancellation/deadline. */
   readonly result: Promise<ToolDispatchOutcome<TOutput>>;
   /** Settles only after owned work and all cleanup settle. */
@@ -76,10 +86,14 @@ export interface ToolDispatchRequest<TInput, TOutput, TPrepared = void> {
 export interface ToolDispatcherOptions {
   readonly limits?: Partial<ToolDispatchLimits>;
   readonly now?: () => number;
+  /** Required with a custom clock when challenges are configured; same domain, no callbacks. */
+  readonly fenceNow?: () => number;
+  readonly challenge?: ToolChallengeOptions;
 }
 
 export interface ToolDispatcher {
   dispatch<TInput, TOutput, TPrepared = void>(request: ToolDispatchRequest<TInput, TOutput, TPrepared>): ToolDispatchHandle<TOutput>;
+  invalidateChallenges(): void;
   shutdown(): Promise<{ readonly draining: number }>;
   stats(): { readonly active: number; readonly draining: number; readonly retainedOutputBytes: number };
 }

@@ -22,6 +22,7 @@ export interface PrivateProtocolCall extends PrivateToolCallHandle {
   refresh(signal: AbortSignal): Promise<(() => boolean) | undefined>;
 }
 export interface PrivateToolProtocolPorts {
+  readonly continuation?: boolean;
   ready(context: WebSocketConnectionContext): boolean;
   fence(context: WebSocketConnectionContext): boolean;
   assignment(context: WebSocketConnectionContext, channel: string, signal: AbortSignal): Promise<PrivateAssignmentTicket>;

@@ -146,9 +146,9 @@ describe("client tool canonical policy", () => {
     await expect(changed.authorize({ ...f.request, registration, operation: "invoke" })).rejects.toThrow("denied");
   });
 
-  it("denies challenges and provider selection denial", async () => {
+  it("retains required challenge conditions and still denies provider substitution", async () => {
     const f = clientPolicyFixture({ challenge: true });
-    await expect(f.policyService.authorize({ ...f.request, operation: "invoke" })).rejects.toThrow("denied");
+    await expect(f.policyService.authorize({ ...f.request, operation: "invoke" })).resolves.toMatchObject({ challengeRequired: true });
     const allowed = clientPolicyFixture();
     await expect(allowed.policyService.authorize({ ...allowed.request, providerId: "wrong-provider", operation: "invoke" })).rejects.toThrow("denied");
   });
@@ -212,11 +212,14 @@ describe("client host proxy dispatcher", () => {
   it("returns admission while remote execution is pending and denies unadmitted receipts", async () => {
     const f = setup();
     const remote = deferred<unknown>();
-    const handle = f.dispatcher.dispatch({ ...f.request, send: () => remote.promise });
-    expect(await handle.admitted).toBe(true);
+    const handle = f.dispatcher.dispatch({ ...f.request, send: (_input, _context, onEnqueued) => {
+      onEnqueued();
+      return remote.promise;
+    } });
+    expect(await handle.admitted).toEqual({ status: "ready" });
     expect(f.dispatcher.stats().active).toBe(1);
     const denied = f.dispatcher.dispatch({ ...f.request, callId: "over-capacity", send: () => Promise.resolve({ value: "forbidden" }) });
-    expect(await denied.admitted).toBe(false);
+    expect(await denied.admitted).toEqual({ status: "denied" });
     handle.cancel();
     expect(f.dispatcher.stats().draining).toBe(1);
     remote.resolve({ value: "late" });
@@ -237,7 +240,7 @@ describe("client host proxy dispatcher", () => {
     const refreshed = await handle.refresh();
     expect(refreshed?.()).toBe(true);
     expect(handle.current()).toBe(false);
-    expect(send).toHaveBeenCalledExactlyOnceWith({ path: "original" }, expect.anything());
+    expect(send).toHaveBeenCalledExactlyOnceWith({ path: "original" }, expect.anything(), expect.any(Function));
     f.registry.removeBinding({ bindingId: `grant-${f.caller.connectionId}`, scope: f.origin, revision: 1 });
     expect(refreshed?.()).toBe(false);
     expect(await handle.refresh()).toBeUndefined();
@@ -371,4 +374,55 @@ describe("client host proxy dispatcher", () => {
       vi.useRealTimers();
     }
   });
+});
+
+it("P13 verified continuation cannot report admission when final enqueue fails", async () => {
+  const f = clientPolicyFixture({ challenge: true });
+  const remote = Promise.withResolvers<unknown>();
+  const dispatcher = createClientToolDispatcher({ ...f.brokerOptions, dispatcher: { challenge: { adapter: {
+    begin: () => ({ continuationId: "adapter", expiresAt: new Date(Date.now() + 10000).toISOString(), presentation: { kind: "wait" } }),
+    verify: () => ({ status: "verified", continuationId: "adapter" }),
+  } } } });
+  const registration = dispatcher.policy.registrations[0];
+  if (registration === undefined) throw new Error("Missing registration");
+  const send = vi.fn(() => {
+    handle.cancel();
+    return remote.promise;
+  });
+  const handle = dispatcher.dispatch({ ...f.request, registration, executor: f.executor, executorContext: f.executorContext, callId: "enqueue-fails", current: () => true, fence: () => true, send });
+  try {
+    expect((await handle.admitted).status).toBe("challenge-required");
+    expect(await handle.resume("proof")).toBe(false);
+    expect(send).toHaveBeenCalledOnce();
+    expect(dispatcher.stats()).toMatchObject({ active: 1, draining: 1 });
+    remote.resolve({ value: "late" });
+    await handle.settled;
+    expect(dispatcher.stats().active).toBe(0);
+  } finally {
+    remote.resolve({ value: "cleanup" });
+    await dispatcher.shutdown();
+  }
+});
+
+it("P13 E7 advertise-only challenge does not run an invocation challenge", async () => {
+  const f = clientPolicyFixture({ challengeOperation: "advertise" });
+  const begin = vi.fn(() => ({ continuationId: "adapter", expiresAt: new Date(Date.now() + 10000).toISOString(), presentation: { kind: "wait" as const } }));
+  const verify = vi.fn(() => ({ status: "verified" as const, continuationId: "adapter" }));
+  const dispatcher = createClientToolDispatcher({ ...f.brokerOptions, dispatcher: { challenge: { adapter: { begin, verify } } } });
+  const registration = dispatcher.policy.registrations[0];
+  if (registration === undefined) throw new Error("Missing registration");
+  const send = vi.fn((_input: unknown, _context: unknown, onEnqueued: () => void) => {
+    onEnqueued();
+    return Promise.resolve({ value: "allowed" });
+  });
+  const handle = dispatcher.dispatch({ ...f.request, registration, executor: f.executor, executorContext: f.executorContext, callId: "advertise-only", current: () => true, fence: () => true, send });
+  try {
+    expect(await handle.admitted).toEqual({ status: "ready" });
+    await expect(handle.settled).resolves.toMatchObject({ status: "succeeded", output: { value: "allowed" } });
+    expect(send).toHaveBeenCalledOnce();
+    expect(begin).not.toHaveBeenCalled();
+    expect(verify).not.toHaveBeenCalled();
+  } finally {
+    await dispatcher.shutdown();
+  }
 });

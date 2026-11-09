@@ -7,7 +7,7 @@ import { createClientToolPolicy } from "@toolExecution/helpers/client/helpers/br
 import type { ClientToolBrokerOptions } from "@toolExecution/helpers/client/helpers/broker";
 import { contract } from "./fixtures";
 
-export const clientPolicyFixture = (options: { operations?: readonly ToolOperation[]; challenge?: boolean;
+export const clientPolicyFixture = (options: { operations?: readonly ToolOperation[]; challenge?: boolean; challengeOperation?: ToolOperation;
   permission?: () => Promise<"allow" | "deny">; resolve?: ClientToolBrokerOptions["resolve"];
   now?: () => number; decisionTtlMs?: number; } = {}) => {
   const policy = { id: "client-tool", revision: 1 };
@@ -21,8 +21,10 @@ export const clientPolicyFixture = (options: { operations?: readonly ToolOperati
   const executor: ExecutorRevision = { actor: executorContext.actor, connectionId: executorContext.connectionId, generation: 1, registrationRevision: 1 };
   const operationRules = Object.fromEntries((options.operations ?? ["invoke", "advertise", "execute"]).map((operation) => [operation,
     { actor: { mode: "direct-grant" as const, actors: ["user" as const] }, ...(options.permission === undefined ? {} : { requiredPermissions: ["check"] }) }]));
-  const policies = createToolPolicyFactory({ policies: [{ ...policy, operations: operationRules, challenge: { required: options.challenge ?? false } }],
-    bindings: [{ sessionType, providerId: "test", admitted: { policies: [policy], namespaces: [] }, mandatory: [] }] });
+  const conditionalPolicy = { id: "operation-challenge", revision: 1 };
+  const refs = options.challengeOperation === undefined ? [policy] : [policy, conditionalPolicy];
+  const policies = createToolPolicyFactory({ policies: [{ ...policy, operations: operationRules, challenge: { required: options.challenge ?? false } }, ...(options.challengeOperation === undefined ? [] : [{ ...conditionalPolicy, operations: { [options.challengeOperation]: { actor: { mode: "direct-grant" as const, actors: ["user" as const] } } }, challenge: { required: true } }])],
+    bindings: [{ sessionType, providerId: "test", admitted: { policies: refs, namespaces: [] }, mandatory: [] }] });
   const registry = createReferenceAuthorizer({ policies, now: options.now ?? Date.now,
     ...(options.decisionTtlMs === undefined ? {} : { decisionTtlMs: options.decisionTtlMs }),
     ...(options.permission === undefined ? {} : { permissionEvaluators: { check: options.permission } }) });
@@ -32,12 +34,12 @@ export const clientPolicyFixture = (options: { operations?: readonly ToolOperati
   const implementation = { location: "client" as const, suppliedBy: "client" as const, implementation: "client-owned" as const, implementationId: "approved-echo" };
   const tuples: ToolAssignmentRecord[] = [];
   for (const context of [caller, executorContext]) {
-    const binding = { id: `grant-${context.connectionId}`, actor: context.actor, scope: origin, roles: [], policies: [policy],
+    const binding = { id: `grant-${context.connectionId}`, actor: context.actor, scope: origin, roles: [], policies: refs,
       authority: { kind: "host-policy" as const, policy }, revision: 1 };
     registry.installBinding(binding);
     for (const operation of options.operations ?? ["invoke", "advertise", "execute"]) {
       const tuple: ToolAssignmentRecord = { resource: origin, route, recipient: context.actor,
-        contract: { id: contract.id, key: contract.key, version: 1 }, operation, bindingId: binding.id, policyRef: policy,
+        contract: { id: contract.id, key: contract.key, version: 1 }, operation, bindingId: binding.id, policyRef: operation === options.challengeOperation ? conditionalPolicy : policy,
         ...(operation !== "execute" || context !== executorContext ? {} : { executor, implementation }) };
       if (operation === "execute") {
         if (context !== executorContext) continue;

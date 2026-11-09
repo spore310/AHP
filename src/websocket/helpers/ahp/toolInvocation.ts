@@ -145,20 +145,24 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
           const discover = await dispatcher.policy.authorize({ ...base, resolution, operation: "discover" });
           const currentProofs = [discover];
           const purposes: AssignedTool["purposes"] = ["discover"];
+          let challengeRequired = false;
           for (const operation of ["invoke", "advertise", "execute"] as const) {
             try {
               const proof = await dispatcher.policy.authorize({ ...base, resolution, operation,
                 ...(operation === "execute" ? { executor: selectedExecutor, executorContext: setup.context } : {}) });
+              if (operation !== "advertise" && proof.challengeRequired) challengeRequired = true;
               purposes.push(operation);
               currentProofs.push(proof);
-            } catch { /* An affordance cannot create its missing grant. */ }
+            } catch {
+              /* An affordance cannot create its missing grant. */ }
           }
           const executable = purposes.includes("advertise") && purposes.includes("execute");
           const tool = parseToolWire(assignedToolSchema, { contract: { id: contract.id, key: contract.key, version: contract.version },
-            descriptor: toAhpToolDefinition(registration.definition), purposes, conditions: [],
+            descriptor: toAhpToolDefinition(registration.definition), purposes, conditions: challengeRequired ? ["challenge-required"] : [],
             ...(executable ? { execution: { binding: registration.implementation, registrationRevision: registration.revision, source: registration.source } } : {}) });
           permitted.push({ tool, registration, executor: selectedExecutor, proofs: currentProofs });
-        } catch { /* Private descriptors require a complete discover/reveal path. */ }
+        } catch {
+          /* Private descriptors require a complete discover/reveal path. */ }
       }
       // No implicit implementation selection when several exact candidates remain.
       const selected = permitted[0];
@@ -341,7 +345,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
       const handle = dispatcher.dispatch({ caller: setup.context, origin: facts.origin, sessionType: facts.sessionType,
         providerId: facts.providerId, registration: selected.registration, input: request.input,
         signal: controller.signal, callId, executor: selected.executor, executorContext: selected.ad.setup.context, current, fence,
-        send: (input, actionContext) => new Promise<unknown>((resolve, reject) => {
+        send: (input, actionContext, onEnqueued) => new Promise<unknown>((resolve, reject) => {
           if (!current()) {
             reject(new Error("Unavailable"));
             return;
@@ -375,6 +379,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
           const message: JsonRpcMessage = { jsonrpc: JSONRPC_VERSION, method: TOOL_INVOCATION_METHOD,
             params: jsonRpcParamsSchema.parse(privateInvocation ?? parseUnknownJson(JSON.stringify({ callId, channel: request.channel, key: request.key, version: request.version, input }))) };
           enqueued = selected.peer.context.send(message, handle.current);
+          if (enqueued) onEnqueued();
           if (!enqueued) {
             // A boolean enqueue failure is not a remote termination guarantee.
             handle.cancel();
@@ -425,6 +430,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
   const privateProtocol = options === undefined
     ? undefined
     : createPrivateToolProtocol({
+        continuation: options.dispatcher?.challenge !== undefined,
         ready: (context) => {
           const peer = peers.get(context.connectionId), setup = context.security;
           return peer !== undefined && setup !== undefined && livePeer(peer, setup);
@@ -438,6 +444,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
           key: request.contract.key, version: request.contract.version, input: request.input }, context, callId, request.contract.id),
         onInvalidate: (listener) => options.registry.onInvalidate(() => {
           privateAdvertisementEpoch = {};
+          dispatcher?.invalidateChallenges();
           listener();
         }),
       });

@@ -1,6 +1,6 @@
 # R5 execution continuation
 
-Execute mode. P06-P12 accepted. Full P06-P19 goal ACTIVE; P13 next.
+Execute mode. P06-P13 accepted. Full P06-P19 goal ACTIVE; P14 next.
 P06 pushed bd46480bed27477b6262b0e8b63179aec74c05fa; P07 pushed
 e3dafe4b215d42a5c8223316b209389ae3f52747; P08 pushed
 c378c92d16b9e317a80c175b434d3e16da643ca1; P09 pushed
@@ -49,19 +49,27 @@ P12 X01-X06 accepted after independent final review PASS. P12-handoff.md maps
 37 public self/cross tests. P12-reviewed-validate.log PASS88files/1111tests/
 199mappings plus lint/typecheck/build CHECK_EXIT0; revised-packet-focused PASS37.
 Final reviewer verified revised manifest15paths SHA115999024c75681308e0250b44a40c8f60d3444b0470795c71d36b5325808edb.
-Current HEAD cc796c9 is an automatic prior checkpoint; final P12 commit/push next.
-Actual local branch GLM/agentIdentity; local agentIdentity also at cc796c9, remote
-agentIdentity verified8189e1d. Preserve local branch and normal push HEAD:agentIdentity.
+P12 committed/pushed b72122aae8ee2e49bc4164f0677146005ded5477; exact remote
+origin/agentIdentity verified. Actual local branch GLM/agentIdentity; local
+agentIdentity remains cc796c9. Preserve branch and normal push HEAD:agentIdentity.
 Bounded production repair makes private advertisements unready on invalidation,
 requires fresh ack for new/awaited calls and preserves already-enqueued ownership.
 Source/matrix proves actual user/agent/delegation, post-init strict child subset,
 parent/triage/chat/workspace, required provider/evaluator/challenge, schema/source/
 connection substitution, SDK reducer/raw canaries, revoke/reconnect/incarnation races.
 No persistence/work guards changed. Failed logs and both earlier manifests remain.
-Final acceptance-record candidate: P12-final-candidate.sha256; final gate then
-scoped commit/push verification. Continue directly to P13 plan/review/implementation.
-P13 packet and EXECUTION E4/E7 pre-read only; no P13 code changes yet. Existing
-challenge types/dispatcher denial and v2 unsupported resume are current seams.
+Final P12 manifest16paths SHA a634b259a759a6ac2ee9774c145237dfc1046e4097057e0bbc941edf0e4f9b2a.
+P12-final-records-validate.log PASS88files1111tests199mappings, lint/typecheck/build.
+P13 implementation accepted; final source/tests unchanged by acceptance records.
+P13 ACCEPTED C01-C07 after independent integrated review PASS36/36 hashes.
+P13-review-validate-2.log PASS90files1156tests202mappings lint/typecheck/build;
+P13-packet-focused PASS3files44tests. P13-handoff maps all criteria and RED/GREEN.
+Coordinator bounds/atomic proof/exact binding/draining, dispatcher suspension,
+structured receipts/actual enqueue, exact-owner resume/status and E7 discovery
+implemented. Three review findings repaired: first-effect deadline, initial reply
+pending deadline, advertise-only aggregation. Explicit policy/auth/origin tests.
+Final record candidate P13-final-candidate.sha256; final record gate and scoped
+commit/push next. P14 not started. Full goal ACTIVE through P19.
 Untracked src/tests/websocket/p12-debug.mts is an earlier diagnostic; exclude it.
 Lead sole writer/runtime; p06_review read-only independent reviewer. Full goal ACTIVE.
 

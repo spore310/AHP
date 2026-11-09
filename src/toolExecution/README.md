@@ -1,6 +1,6 @@
 # Tool execution contracts
 
-R5 action/challenge contracts and a local action dispatcher. Importing this module does not load a transport, database or platform executor. There is no artifact verifier or challenge continuation store. The local dispatcher is trusted host wiring; public transport admission remains separate.
+R5 action/challenge contracts and a local action dispatcher. Importing this module does not load a transport, database or platform executor. The dispatcher owns bounded in-memory challenge continuations; there is no artifact verifier. The local dispatcher is trusted host wiring; public transport admission remains separate.
 
 The existing `ToolAction` class and presentation schemas remain the contract. Optional `prepare` means `execute` receives `TPrepared | undefined`. Validation has one canonical input, not a separate validated argument. `executor` is an `ExecutorRevision`, not only an actor ref.
 
@@ -19,6 +19,9 @@ The existing `ToolAction` class and presentation schemas remain the contract. Op
 | `helpers/action/index.ts` | Action registration exports and the existing ToolAction class. |
 | `helpers/action/types.ts` | Trusted schema/action registration and compatibility JSON capture type exports. |
 | `helpers/action/helpers.ts` | Captured schema/implementation registration and compatibility bounded JSON capture export. |
+| `helpers/challenge/index.ts` | Internal challenge coordinator exports. |
+| `helpers/challenge/types.ts` | Bounded adapter options, ownership handles and strict result schemas. |
+| `helpers/challenge/helpers.ts` | Atomic one-attempt continuation, presentation approval, deadlines and adapter draining. |
 | `helpers/dispatcher/index.ts` | Local dispatcher public boundary. |
 | `helpers/dispatcher/types.ts` | Ports, limits, safe outcomes, lifecycle handles and runtime context schemas. |
 | `helpers/dispatcher/helpers.ts` | Ordered gates, draining ownership, output budgets, cleanup and bounded shutdown. |
@@ -40,17 +43,17 @@ The existing `ToolAction` class and presentation schemas remain the contract. Op
 
 ## Public names
 
-Types: `Awaitable`, `ValidationResult`, `ToolPreparationHooks`, `ToolActionContext`, `ToolAction`, `ChallengePresentation`, `ChallengeContinuation`, `ChallengeProof`, `ChallengeVerification`, `ChallengeStatus`, `ChallengeAdapter`, `ArtifactDescriptor`.
+Types: `Awaitable`, `ValidationResult`, `ToolPreparationHooks`, `ToolActionContext`, `ToolAction`, `ChallengePresentation`, `ChallengeContinuation`, `ChallengeProof`, `ChallengeVerification`, `ChallengeStatus`, `ChallengeAdapter`, `ChallengeContext`, `ArtifactDescriptor`.
 
 Values: `ToolAction`, `challengePresentationSchema`, `createChallengePresentationSchema`, `createToolActionRegistration`, `createToolDispatcher`, `createResourceViews`.
 
-Registration/dispatcher types: `ToolActionRegistration`, `ToolActionRegistrationOptions`, `ToolDispatchFacts`, `ToolDispatchPorts`, `ToolDispatchLimits`, `ToolDispatchPhase`, `ToolDispatchFailureCode`, `ToolDispatchOutcome`, `ToolDispatchHandle`, `ToolDispatchRequest`, `ToolDispatcherOptions`, `ToolDispatcher`.
+Registration/dispatcher types: `ToolActionRegistration`, `ToolActionRegistrationOptions`, `ToolDispatchAdmission`, `ToolDispatchFacts`, `ToolDispatchPorts`, `ToolDispatchLimits`, `ToolDispatchPhase`, `ToolDispatchFailureCode`, `ToolDispatchOutcome`, `ToolDispatchHandle`, `ToolDispatchRequest`, `ToolDispatcherOptions`, `ToolDispatcher`.
 
 `ToolActionContext` keeps caller, executor revision, origin, targets, contract revision, implementation binding, call id, `AbortSignal`, and an authority stamp separate. Redirect text is length-bounded and must be a syntactically valid `http` or `https` URL. That check is not approval.
 
 ## Omissions
 
-No challenge store, artifact transport or server executor adapter. The separate client entry uses the private v2 protocol. Root imports do not load a transport or session factory; resource-view cursors use Node crypto.
+No artifact transport or server executor adapter. The separate client entry uses the private v2 protocol. Root imports do not load a transport or session factory; resource-view cursors use Node crypto.
 
 ## Private protocol
 
@@ -59,7 +62,7 @@ DTOs after a bounded immutable plain-JSON capture (2 MiB, depth 64, 131072 keys)
 Requests contain selectors rather than authority. Required payload fields reject
 undefined; unknown versions/fields reject. Schemas describe private assignment,
 advertisement, dispatch, status and exact execution correlation. Capabilities
-declares continuation unsupported. The public host and client negotiate these DTOs;
+declares continuation support when a challenge adapter is configured. The public host and client negotiate these DTOs;
 legacy public call/completion envelopes fail closed.
 
 `helpers/calls` owns private result retention for an exact trusted connection lease.
@@ -91,7 +94,7 @@ from remote code attestation.
 `createResourceViews` is the policy-aware embedding service. `ResourceViewOptions`
 requires the canonical registry/compiler, explicit admitted resource-read policy
 refs and trusted full-route resolution. Selected discover/reveal with an actual
-binding and no challenge authorizes resource content, including authored text.
+binding authorizes resource content, including authored text.
 Tool assignments alone do not authorize this seam. Mandatory route constraints
 remain canonical. All native metadata requires separate global-sequence consent
 from the transport recipient adapter.
@@ -122,7 +125,7 @@ id/revision. These are registry facts, not remote code attestation. Its trusted
 resource resolver supplies the full route and optional external/mandatory selectors;
 it cannot grant permission. Factory selection is intersected with canonical bindings
 and exact assignments. One complete positive path suffices; mandatory restrictions
-remain required. Unknown registrations, challenge requirements and stale proofs deny.
+remain required. Unknown registrations and stale proofs deny. Required invoke/execute challenges suspend before effects; no configured verifier denies.
 
 `createClientToolDispatcher` runs a fresh host proxy through the local dispatcher.
 It independently checks caller invoke, executor advertisement and executor receive
@@ -192,7 +195,7 @@ cancel it. Exact call-ID tombstones prevent replay; at 4096 admitted IDs the
 endpoint closes instead of evicting replay protection.
 
 The public client exposes dispatchTool, statusTool, cancelTool and resumeTool.
-Resume currently returns unsupported. Convenience callTool resolves an exact
+Resume verifies one opaque continuation for the same connection and invocation. Convenience callTool resolves an exact
 private assignment, dispatches once, and polls status with 25-500 ms backoff and
 a 35-second overall budget. It returns only completed output; known unresolved
 receipts throw ToolPendingError(callId), and challenge replies throw
@@ -234,3 +237,59 @@ Input/output/context facts are copied as bounded plain JSON without invoking get
 Failures expose only fixed code, phase, effectPossible and cleanup failure count. EffectPossible means prepare or execute was admitted, not that an effect is proven. Primary errors survive cleanup errors; successful work followed by cleanup failure returns cleanup-failed. No automatic retries. Early results cannot contain future cleanup diagnostics; settled supplies the final safe outcome. No completed replay cache exists here; caller retention and wire request reuse belong to caller/transport ownership.
 
 Default/maximum limits: in-flight64/1024; input/output1MiB/16MiB; JSON depth64/128 and keys131072/1048576; retained output16MiB/256MiB; overall timeout30s/120s, hook timeout5s/60s, shutdown wait5s/60s. Context capture separately bounds2MiB/depth64/131072keys. Overrides are positive safe integers. The injected clock must stay finite and nondecreasing. Shutdown stops admissions, cancels, waits its drain budget and reports remaining calls. Unsettled work stays owned and cleans up later. Shutdown cannot forcibly terminate code or undo effects.
+
+
+## Verified challenge continuation
+
+Configure createToolDispatcher({ challenge: { adapter } }) or the public host's
+ toolExecution.dispatcher.challenge. The adapter implements begin(context) and
+verify({ continuationId, proofRef }); optional cancel is called on invalidation.
+Optional adapter status never authorizes execution. begin receives the frozen
+trusted caller/executor, complete route/authority/contract/implementation and
+SHA-256 inputDigest of the canonical captured input. It returns a private adapter
+ID, finite ISO expiresAt and presentation. The wire gets a separate random UUID.
+Proof references and adapter metadata are bounded; neither inputs nor authority
+can be replaced by resume. Adapter IDs and failure codes stay private.
+
+Bare { kind: "wait" } is the default permitted presentation. Any message or
+redirect requires approvePresentation(presentation) returning exact true after
+strict capture. HTTP(S) syntax alone is insufficient; URL credentials reject even
+with approval. Applications must approve safe display text and exact redirects.
+
+The handle's admission promise returns ready, denied or challenge-required with
+continuation metadata. result/settled retain their existing ownership semantics.
+resume(proofRef) consumes one attempt before awaiting trusted verification; only
+fresh exact authorization can admit the first prepare/execute hook. The pure
+challenge deadline fence follows callback-bearing guards immediately before that
+first effect. Once preparation begins, the challenge is consumed; subsequent work
+is governed by the dispatch deadline and current permissions. A custom dispatcher
+clock requires a paired callback-free fenceNow in the same domain when challenges
+are configured. No automatic retries or connection rebinds occur.
+
+The proxy's structured admitted receipt reports ready only after the trusted send
+port calls onEnqueued for a successful exact enqueue. Its separate resume result
+also waits for that signal; remote completion is a different promise. Call retention
+keeps waiting status for challenges and updates it once after successful resume.
+Foreign, expired, consumed and unknown continuation IDs return the same safe denial.
+Pending status authorization checks the original route even before execution.
+
+Default/maximum challenge limits: host pending64/1024, per actor16/256, captured
+metadata4096/16384 bytes, proof1024/4096 bytes, lifetime30/120 seconds and adapter
+hook5/60 seconds. Lifetime is also clamped to the dispatcher deadline and adapter
+expiry. Timers and access checks both enforce expiry. Registry invalidation,
+disconnect, session destruction and shutdown cancel pending calls; restart loses
+all in-memory continuations. Timed-out begin/verify/cancel promises retain their
+slots and dispatcher cleanup ownership until actual settlement. Late work cannot
+execute or reopen an ID. The socket adapter also cancels resume on its 5-second
+request work deadline. These trusted callbacks are not a JavaScript sandbox.
+
+MFA does not change an agent into a user or fabricate delegation or human consent.
+All independent grant/provider/approval requirements remain mandatory on resume.
+Discovery may show the sole safe condition "challenge-required" without running
+the adapter. It still needs actual discover/reveal authority; advertised execution
+remains subject to independent invoke and executor receive permissions.
+
+Initial challenge replies also require continuationCurrent() after the final host
+callbacks and retention fence. This pure check rejects expiry or cancellation
+before publication. Generic invocation challenge aggregation uses invoke and
+execute proofs; an advertise-only challenge does not run the invocation adapter.

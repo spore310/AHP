@@ -91,7 +91,7 @@ export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): Priv
             else context.close();
           }
         });
-        return { version: 2, assignments: true, dispatch: true, continuation: false };
+        return { version: 2, assignments: true, dispatch: true, continuation: ports.continuation === true };
       },
       "x-ahp/tools/assigned": async (params, context, invocation) => {
         requireLive(context, invocation);
@@ -192,16 +192,20 @@ export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): Priv
           access.set(handle, { current: handle.current.bind(handle), refresh: handle.refresh.bind(handle) });
           return handle;
         });
-        if (receipt === undefined || !await receipt.admitted) return { version: 2, status: "denied", code: "unavailable" };
+        const initial = await receipt?.admitted;
+        if (receipt === undefined || initial === undefined || initial.status === "denied") return { version: 2, status: "denied", code: "unavailable" };
         const record = calls.read(receipt.callId, context);
         if (record === undefined) return { version: 2, status: "denied", code: "unavailable" };
         const admitted = access.get(record.handle);
         invocation.guardReply?.(() => {
           const current = calls.read(receipt.callId, context);
           return current !== undefined && current.handle === record.handle && live(context)
-            && admitted?.current() === true && owned(context) && current.fence();
+            && admitted?.current() === true && owned(context) && current.fence()
+            && (initial.status !== "challenge-required" || record.handle.continuationCurrent());
         });
-        return { version: 2, status: "accepted", callId: receipt.callId };
+        return initial.status === "challenge-required"
+          ? { version: 2, ...initial, callId: receipt.callId }
+          : { version: 2, status: "accepted", callId: receipt.callId };
       },
       "x-ahp/tools/status": async (params, context, invocation) => {
         requireLive(context, invocation);
@@ -229,10 +233,37 @@ export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): Priv
         invocation.guardReply?.(() => current.current() && live(context) && authorized() && owned(context) && current.fence());
         return jsonRpcParamsSchema.parse(current.status);
       },
-      "x-ahp/tools/resume": (params, context, invocation) => {
+      "x-ahp/tools/resume": async (params, context, invocation) => {
         requireLive(context, invocation);
-        parseToolWire(toolResumeRequestSchema, params);
-        return { version: 2, status: "denied", code: "unsupported" };
+        const request = parseToolWire(toolResumeRequestSchema, params);
+        const denied = { version: 2, status: "denied", code: "unavailable" };
+        const callId = calls.findContinuation(request.continuationId, context);
+        const record = callId === undefined ? undefined : calls.read(callId, context);
+        if (callId === undefined || record === undefined) return denied;
+        const admitted = access.get(record.handle);
+        const current = (): boolean => {
+          const entry = calls.read(callId, context);
+          return entry !== undefined && entry.handle === record.handle && live(context)
+            && admitted?.current() === true && owned(context) && entry.fence();
+        };
+        const resumed = await bounded(async (signal) => {
+          const abort = (): void => {
+            record.handle.cancel();
+          };
+          signal.addEventListener("abort", abort, { once: true });
+          try {
+            if (signal.aborted) {
+              abort();
+              return false;
+            }
+            return await calls.resume(callId, context, request.proofRef, current);
+          } finally {
+            signal.removeEventListener("abort", abort);
+          }
+        });
+        if (resumed !== true || !current()) return denied;
+        invocation.guardReply?.(current);
+        return { version: 2, status: "accepted", callId };
       },
     },
     negotiated: (context) => owned(context),

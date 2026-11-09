@@ -2,6 +2,7 @@ export type {
   ArtifactDescriptor,
   Awaitable,
   ChallengeAdapter,
+  ChallengeContext,
   ChallengeContinuation,
   ChallengePresentation,
   ChallengeProof,
@@ -19,7 +20,9 @@ export { createToolActionRegistration } from "./helpers/action";
 export type { ToolActionRegistration, ToolActionRegistrationOptions } from "./helpers/action";
 export { createToolDispatcher } from "./helpers/dispatcher";
 export type {
-  ToolDispatchFacts, ToolDispatchPorts, ToolDispatchLimits, ToolDispatchPhase,
+  ToolDispatchAdmission, ToolDispatchFacts, ToolDispatchPorts, ToolDispatchLimits, ToolDispatchPhase,
   ToolDispatchFailureCode, ToolDispatchOutcome, ToolDispatchHandle,
   ToolDispatchRequest, ToolDispatcherOptions, ToolDispatcher,
 } from "./helpers/dispatcher";
+
+export type { ToolChallengeOptions, ToolChallengeLimits } from "./helpers/challenge";

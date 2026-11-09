@@ -171,3 +171,18 @@ Source binding proves the trusted registration and the exact fixture handler
 observed in this test. It is not remote code attestation, and a client-reported hash
 cannot establish what an arbitrary remote process ran. Preserve EXECUTION E6/E8
 and F03's existing proof boundary; no attestation mechanism or dependency is added.
+
+
+## P13 continuation reproduction
+
+Use the same DB-safe wrapper for vitest run src/tests/toolExecution/challenge.test.ts
+src/tests/websocket/challengeContinuation.test.ts src/tests/websocket/deferred.test.ts.
+The public fixture uses the real host and pinned SDK transport, injected trusted
+begin/verify callbacks, frozen server input and captured recipient frames. It
+installs no real MFA service. Separate verify barriers prove revocation and late
+work; fake clocks prove logical expiry independently of timer scheduling.
+
+P13's EXECUTION E7 migration replaces the temporary P12 view-level challenge denial
+with reveal-authorized discovery plus a safe condition and zero unsatisfied effects.
+Missing disclosure permission, evaluator, grants or mandatory constraints still deny.
+[Candidate evidence](execution/P13-handoff.md) records current gates/review status.

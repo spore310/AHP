@@ -169,13 +169,20 @@ describe("P10 recipient view projections", () => {
     await expect(f.views.snapshot(other, allowed.resource.id)).rejects.toThrow();
   });
 
-  for (const denied of [{ reveal: false }, { challenge: true }, { admitted: false }, { mandatory: true }, { permission: () => Promise.resolve("deny" as const) }]) {
-    it("V01 denies absent resource disclosure consent or challenge/permission denial " + JSON.stringify(denied), async () => {
+  for (const denied of [{ reveal: false }, { admitted: false }, { mandatory: true }, { permission: () => Promise.resolve("deny" as const) }]) {
+    it("V01 denies absent resource disclosure consent or permission denial " + JSON.stringify(denied), async () => {
       const f = fixture(denied);
       const record = f.add("one", true);
       await expect(f.views.snapshot(f.recipient, record.resource.id)).rejects.toThrow();
     });
   }
+  it("V01 discovery preserves explicit reveal consent without running invocation challenges", async () => {
+    const f = fixture({ challenge: true });
+    const record = f.add("one", true);
+    const proof = await f.views.snapshot(f.recipient, record.resource.id);
+    expect(proof.current()).toBe(true);
+    expect(JSON.stringify(proof.value)).not.toContain("SECRET-SCHEMA-CANARY");
+  });
   it("V01 denies provider substitution and a resolver that changes the canonical origin", async () => {
     const f = fixture();
     const record = f.add("one", true);

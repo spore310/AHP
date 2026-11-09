@@ -668,18 +668,23 @@ it.each(["self", "cross"] as const)("X05/X06 %s route obeys mandatory provider d
   for (const competing of harness.slice(1)) expect(competing.execute).not.toHaveBeenCalled();
 });
 
-it.each(["self", "cross"] as const)("X05/X06 %s route denies an unsatisfied required challenge before any assigned tool view", async (mode) => {
+it.each(["self", "cross"] as const)("X05/X06 %s route exposes safe challenge conditions but no unsatisfied execution", async (mode) => {
   const f = await createPolicyIntegrationFixture({ mode, challengeRequired: true });
   fixtures.push(f);
-  // With no implemented challenge continuation (P13), the required challenge must
-  // deny the protected view itself: no assigned inventory, no private metadata.
-  const outcomes = await Promise.all([...new Set([f.executor, f.caller, "observer"])].map(async (subject) => [
-    subject, await f.connect(subject).then(() => "connected", (error: unknown): string => error instanceof Error ? error.message : String(error))] as const));
-  for (const [subject, outcome] of outcomes) {
-    expect(outcome, subject + " denied").toContain("Protected view unavailable");
-    expect(outcome, subject + " no hidden canary").not.toMatch(/P12-DESCRIPTOR|P12-SCHEMA|P12-HANDLER-RESULT/);
-  }
-  for (const capture of f.captures) expect(JSON.stringify(capture.received)).not.toMatch(/P12-DESCRIPTOR|P12-SCHEMA|P12-HANDLER-RESULT/);
+  // P13 EXECUTION E7: a reveal grant permits discovery; challenge gates effects.
+  const executor = await f.connect(f.executor), caller = mode === "self" ? executor : await f.connect(f.caller), observer = await f.connect("observer");
+  const harness = createCodingHarness(), chosen = harness[0];
+  if (chosen === undefined) throw new Error("Missing handler");
+  await executor.client.joinSession(channel, [chosen]);
+  const view = await caller.assigned();
+  expect(view.tools.find((tool) => tool.contract.id === chosen.definition.id)?.conditions).toEqual(["challenge-required"]);
+  const selector = { id: chosen.definition.id, key: chosen.definition.key, version: chosen.definition.version };
+  expect(await caller.client.dispatchTool(channel, selector, { path: "P12-UNSATISFIED-CHALLENGE" })).toMatchObject({ status: "denied" });
+  await executor.client.client.ping();
+  await observer.client.client.ping();
+  for (const tool of harness) expect(tool.execute).not.toHaveBeenCalled();
+  expect(JSON.stringify(executor.received)).not.toContain("P12-UNSATISFIED-CHALLENGE");
+  expect(JSON.stringify(observer.received)).not.toMatch(/P12-DESCRIPTOR|P12-SCHEMA|P12-HANDLER-RESULT|P12-UNSATISFIED-CHALLENGE/);
 });
 
 it.each(["self", "cross"] as const)("X05/X06 %s route reaches a required invoke challenge with a real independently authorized executor", async (mode) => {
@@ -695,10 +700,11 @@ it.each(["self", "cross"] as const)("X05/X06 %s route reaches a required invoke 
   if (chosen === undefined) throw new Error("Missing handler");
   await executor.client.joinSession(channel, [chosen]);
   const selected = (await executor.assigned()).tools.find((tool) => tool.contract.id === chosen.definition.id);
-  expect(selected?.purposes).toEqual(["discover", "advertise", "execute"]);
+  expect(selected?.purposes).toEqual(["discover", "invoke", "advertise", "execute"]);
+  expect(selected?.conditions).toEqual(["challenge-required"]);
   expect(selected?.execution).toBeDefined();
   const callerView = await caller.assigned();
-  expect(callerView.tools.find((tool) => tool.contract.id === chosen.definition.id)?.purposes).not.toContain("invoke");
+  expect(callerView.tools.find((tool) => tool.contract.id === chosen.definition.id)?.purposes).toContain("invoke");
   const selector = { id: chosen.definition.id, key: chosen.definition.key, version: chosen.definition.version };
   const before = invokeChecks;
   expect(await caller.client.dispatchTool(channel, selector, { path: "P12-UNSATISFIED-CHALLENGE" })).toMatchObject({ status: "denied" });

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { captureToolValue } from "@toolExecution/helpers/value";
-import type { ToolDispatchOutcome } from "@toolExecution/helpers/dispatcher";
+import type { ToolDispatchAdmission, ToolDispatchOutcome } from "@toolExecution/helpers/dispatcher";
 import type { PrivateToolCallEntry as Entry, PrivateToolCallLimits, PrivateToolCallOptions, PrivateToolCalls } from "./types";
 
 const defaults: PrivateToolCallLimits = { maxRecords: 256, maxOutputBytes: 1024 * 1024, maxRetainedBytes: 16 * 1024 * 1024, ttlMs: 60_000 };
@@ -37,7 +37,7 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
     retainedBytes -= entry.bytes;
     entry.bytes = 0;
     clearTimeout(entry.timer);
-    entry.admission.resolve(false);
+    entry.admission.resolve({ status: "denied" });
     if (!entry.finished) cancelWork(entry);
   };
   const dispose = (): void => {
@@ -77,7 +77,7 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
   const acceptResult = (entry: Entry, outcome: ToolDispatchOutcome<unknown>): void => {
     if (!live(entry) || entry.resultSeen) return;
     entry.resultSeen = true;
-    entry.admission.resolve(false);
+    entry.admission.resolve({ status: "denied" });
     if (entry.cancelled) {
       state(entry, entry.finished ? "cancelled" : "draining");
       return;
@@ -105,7 +105,7 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
       const time = clock();
       if (closed || entries.size >= limits.maxRecords) return undefined;
       const callId = randomUUID();
-      const admission = Promise.withResolvers<boolean>();
+      const admission = Promise.withResolvers<ToolDispatchAdmission>();
       const entry: Entry = { callId, owner, expiresAt: time + limits.ttlMs, admission,
         status: Object.freeze({ version: 2, callId, status: "waiting" }), bytes: 0, cancelled: false, finished: false, resultSeen: false };
       entries.set(callId, entry);
@@ -119,18 +119,22 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
         if (!owned(entry)) cancelWork(entry);
         void handle.admitted.then((allowed) => {
           if (!live(entry) || entry.cancelled || entry.resultSeen) {
-            admission.resolve(false);
+            admission.resolve({ status: "denied" });
             return;
           }
-          const verdict: unknown = allowed;
-          if (verdict !== true) {
-            admission.resolve(false);
+          if (allowed.status === "challenge-required") {
+            entry.continuationId = allowed.continuationId;
+            admission.resolve(allowed);
+            return;
+          }
+          if (allowed.status !== "ready") {
+            admission.resolve({ status: "denied" });
             return;
           }
           state(entry, "running");
-          admission.resolve(true);
+          admission.resolve({ status: "ready" });
         }, () => {
-          admission.resolve(false);
+          admission.resolve({ status: "denied" });
         });
         void handle.result.then((outcome) => {
           acceptResult(entry, outcome);
@@ -139,7 +143,7 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
             entry.resultSeen = true;
             state(entry, "failed");
           }
-          admission.resolve(false);
+          admission.resolve({ status: "denied" });
         });
         void handle.settled.then((outcome) => {
           entry.finished = true;
@@ -149,12 +153,39 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
         }, () => {
           entry.finished = true;
           if (owned(entry)) state(entry, entry.cancelled ? "cancelled" : "failed");
-          admission.resolve(false);
+          admission.resolve({ status: "denied" });
         });
       } catch {
         remove(entry);
       }
       return Object.freeze({ callId, admitted: admission.promise });
+    },
+    findContinuation(continuationId, owner) {
+      clock();
+      for (const entry of entries.values()) if (entry.owner === owner && entry.continuationId === continuationId
+        && !entry.cancelled && !entry.finished && !entry.resuming && owned(entry)) return entry.callId;
+      return undefined;
+    },
+    async resume(callId, owner, proofRef, admission) {
+      clock();
+      const entry = entries.get(callId);
+      if (entry === undefined || entry.owner !== owner || entry.handle === undefined || entry.continuationId === undefined
+        || entry.cancelled || entry.finished || entry.resuming === true || !owned(entry)) return false;
+      const cancelled = (): boolean => entry.cancelled;
+      entry.resuming = true;
+      try {
+        if (!await entry.handle.resume(proofRef) || !live(entry) || cancelled()) return false;
+        const allowed: unknown = admission();
+        if (allowed !== true) {
+          void Promise.resolve(allowed).catch(() => undefined);
+          return false;
+        }
+        if (!owned(entry) || cancelled()) return false;
+        if (entry.status.status === "waiting") state(entry, "running");
+        return entry.status.status === "running" || entry.status.status === "completed";
+      } catch {
+        return false;
+      }
     },
     read(callId, owner) {
       clock();
@@ -195,7 +226,7 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
       entry.cancelled = true;
       retainedBytes -= entry.bytes;
       entry.bytes = 0;
-      entry.admission.resolve(false);
+      entry.admission.resolve({ status: "denied" });
       state(entry, "draining");
       cancelWork(entry);
       return true;
