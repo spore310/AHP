@@ -1,0 +1,15 @@
+{
+  "same": 25,
+  "changed": [
+    "src/authorization/index.ts",
+    "src/authorization/README.md",
+    "src/toolPolicy/helpers/validation/helpers.ts",
+    "src/toolPolicy/index.ts",
+    "src/toolPolicy/README.md"
+  ],
+  "missing": [],
+  "importOnlyVerified": true,
+  "manifest": "docs/plans/rbac&policies/AHP_TOOL_POLICY_GROK_R5/execution/P03-final-candidate.sha256",
+  "files": 55,
+  "sha256": "8af025e1b010965b6c1f795ae12615a11752586247878048ccf7b94765c29f6a"
+}

@@ -267,7 +267,9 @@ Prefer:
 - clear module boundaries
 - configured aliases such as `@env/*`, `@env`, `@jsonrpc/*`, `@jsonrpc`,
   `@sessions/*`, `@sessions`, `@application`, `@application/*`, `@tools/*`, `@tools`,
-  `@toolClient`, `@toolClient/*`, `@websocket/*`, and `@websocket`, declared in
+  `@toolClient`, `@toolClient/*`, `@authorization`, `@authorization/*`,
+  `@toolPolicy`, `@toolPolicy/*`, `@toolExecution`, `@toolExecution/*`,
+  `@websocket/*`, and `@websocket`, declared in
   `tsconfig.json`
 
 Use those aliases for cross-folder imports when relative paths would require

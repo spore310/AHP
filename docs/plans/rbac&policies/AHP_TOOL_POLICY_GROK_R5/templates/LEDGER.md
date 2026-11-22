@@ -1,0 +1,38 @@
+# Execution ledger
+
+**Execution state:** P00–P15 retain their packet acceptances. P16–P19 passed
+on the integrated working-tree candidate. P19 reran X05, X06, and E05 and passed
+`pnpm validate` with 1,257 tests in 99 files and 217 source mappings.
+
+| Packet | Status | Candidate | Evidence path | Blocker / next step |
+| --- | --- | --- | --- | --- |
+| P00 | VERIFIED FOR PACKET | `22fa7955b8e43839e041228f647f26e00762ebbe` + untracked plan/evidence | [handoff](../execution/P00-handoff.md) | P01 eligible; baseline 407 tests passed |
+| P01 | VERIFIED FOR PACKET | Base + [21-file hash manifest](../execution/P01-accepted.sha256) | [accepted handoff](../execution/P01-handoff.md) | Orchestrator final gate: 421 passed; review findings resolved; P02 eligible |
+| P02 | VERIFIED FOR PACKET | Base + [30-file hash manifest](../execution/P02-accepted.sha256) | [accepted handoff](../execution/P02-handoff.md) | Final gate: 57 files / 440 tests; findings resolved; P03 eligible |
+| P03 | VERIFIED FOR PACKET | Base + [56-file hash manifest](../execution/P03-accepted.sha256) | [accepted handoff](../execution/P03-handoff.md) | Lead full DB-safe gate: 68 files / 533 tests, 151 mappings; Luna P1 resolved and recheck PASS; exact hashes reverified; P04 eligible |
+| P04 | VERIFIED FOR PACKET | [85-file accepted manifest](../execution/P04-accepted.sha256) | [accepted handoff](../execution/P04-handoff.md) | Independent lead gate70files/591tests/159mappings; sequence leak resolved and Luna final recheck PASS; allhashes reverified. P05 eligible |
+| P05 | ACCEPTED | [106-file manifest](../execution/P05-accepted.sha256) | [acceptance](../execution/P05-handoff.md) | Independent72files/684tests/163mapped gate; Luna narrowrecheck PASS; all106hashes post-review verified. Draining work/atomiccohort gaps fixed |
+| P06 | ACCEPTED | [112-file final manifest](../execution/P06-final-candidate.sha256) | [acceptance](../execution/P06-handoff.md) | Independent review PASS; full DB-safe gate PASS; P07 eligible |
+| P07 | ACCEPTED | [13-file manifest](../execution/P07-final-candidate.sha256) | [acceptance](../execution/P07-handoff.md) | Independent review PASS; DB-safe75files/886tests/173mappings; one runtime and explicit endpoint ownership; P08 eligible |
+| P08 | ACCEPTED | [11-file manifest](../execution/P08-final-candidate.sha256) | [acceptance](../execution/P08-handoff.md) | Independent source/docs PASS; full DB-safe77files/941tests/179mappings; local lifecycle only, P09 eligible |
+| P09 | ACCEPTED | [27-file manifest](../execution/P09-final-candidate.sha256) | [acceptance](../execution/P09-handoff.md) | Independent source/docs PASS; DB-safe80files/991tests/182mappings; internal canonical broker only, P10 eligible |
+| P10 | ACCEPTED | [22-file manifest](../execution/P10-final-candidate.sha256) | [acceptance](../execution/P10-handoff.md) | Independent source/docs PASS; DB-safe83files/1025tests/187mappings; protected native views with actual SDK reducers/transport; P11 eligible |
+| P11 | ACCEPTED | [53-file manifest](../execution/P11-final-candidate.sha256) | [acceptance](../execution/P11-handoff.md) | Independent source/docs PASS; DB-safe87files/1074tests/199mappings; real public v2 SDK execution/cancellation/revocation and bounded retention; P12 eligible |
+| P12 | ACCEPTED | [Final candidate](../execution/P12-final-candidate.sha256) | [Accepted handoff](../execution/P12-handoff.md) | 37 public route tests; full gate88files/1111tests/199mappings; independent final PASS. P13 eligible. |
+| P13 | ACCEPTED | [Final candidate](../execution/P13-final-candidate.sha256) | [Accepted handoff](../execution/P13-handoff.md) | C01-C07 independent final PASS; DB-safe90files1156tests202mappings; packet44tests; P14 eligible |
+| P14 | ACCEPTED | [Final candidate](../execution/P14-final-candidate.sha256) | [Accepted handoff](../execution/P14-handoff.md) | R01-R05 independent PASS; DB-safe92files1199tests205mappings; packet43tests; P15 eligible |
+| P15 | ACCEPTED | [Final candidate](../execution/P15-final-candidate.sha256) | [Accepted handoff](../execution/P15-handoff.md) | E01-E05 independent PASS; DB-safe94files1242tests211mappings; packet43tests; P16 eligible |
+| P16 | VERIFIED | [Integrated candidate](../execution/P19-final-candidate.sha256) | [Handoff](../execution/P16-handoff.md) | Q01–Q04, explicit live activation and independent assignments |
+| P17 | VERIFIED | [Integrated candidate](../execution/P19-final-candidate.sha256) | [Handoff](../execution/P17-handoff.md) | F01–F04, authorized bytes and explicit verified loader |
+| P18 | VERIFIED | [Integrated candidate](../execution/P19-final-candidate.sha256) | [Handoff](../execution/P18-handoff.md) | D01–D03, consumer examples and source mappings |
+| P19 | VERIFIED | [Integrated candidate](../execution/P19-final-candidate.sha256) | [Handoff](../execution/P19-handoff.md) | Z01–Z03, three public routes and settled denial retention |
+
+## Contract amendments
+
+P01 accepted amendments: synchronous local grant commit/rollback after async prepare; full actor/resource/executor revision identity; configurable bounded schema construction; frozen defaults and consistent safe identifiers/roles. Exact names and P02/P03/P05/P06/P08/P13 impact: [accepted handoff](../execution/P01-handoff.md).
+
+P03 dependency-only amendment: authorization leaf imports replace a root-barrel import in toolPolicy validation so the reference authorizer can reuse the existing implementation-binding schema without a cycle. No schema/public-type behavior change; reconstructed old imports matched the accepted hash. [Amendment](../execution/P03-schema-import-amendment.md).
+
+## External integration status
+
+No database queries/migrations, real MFA provider, artifact runtime or production service is authorized by this package. Fake and loopback tests remain distinct from those external integrations.

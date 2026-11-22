@@ -1,0 +1,19 @@
+{
+  "workerFiles": 30,
+  "workerDigest": "02cd1a6f231ba2a816ae0e8c8a74884d8ac372d24703b079bb49d8897a805097",
+  "predecessorChanged": [
+    "src/authorization/README.md",
+    "src/authorization/helpers/evaluate/helpers.ts",
+    "src/authorization/helpers/evaluate/types.ts",
+    "src/tests/websocket/policyInitialization.test.ts",
+    "src/websocket/README.md",
+    "src/websocket/helpers/ahp/helpers.ts",
+    "src/websocket/helpers/ahp/helpers/kernel/helpers.ts",
+    "src/websocket/helpers/ahp/types.ts",
+    "src/websocket/helpers/host/helpers.ts"
+  ],
+  "unaccounted": [],
+  "files": 106,
+  "manifest": "docs/plans/rbac&policies/AHP_TOOL_POLICY_GROK_R5/execution/P05-candidate.sha256",
+  "sha256": "be7738824a0049a65c5a687ab4557123f533f8031ec7fea2f62d79e1b29fee23"
+}

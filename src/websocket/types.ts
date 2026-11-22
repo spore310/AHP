@@ -1,11 +1,28 @@
 import type { AddressInfo } from "node:net";
 
+import type { AuthenticatedPrincipal, ConnectionAuthenticator } from "@agents";
 import type { JsonRpcMessage, JsonRpcParams } from "@jsonrpc";
+import type { ConnectionSecuritySnapshot, ConnectionSetupAdapter } from "./helpers/security/types";
 
 /** Per-connection surface handed to JSON-RPC method handlers. */
 export interface WebSocketConnectionContext {
   /** Identifier for the connection, unique within the server. */
   readonly connectionId: string;
+  /** Optional for legacy in-process fixtures; every transport-created context supplies it. */
+  readonly connectionGeneration?: number;
+  readonly security?: ConnectionSecuritySnapshot;
+  /** Absent means no protected authority. Never invokes an asynchronous port. */
+  isSecurityCurrent?(): boolean;
+  /** Actual transport's callback-free local socket/lifetime fence. */
+  isOpen?(): boolean;
+  /**
+   * Server-authenticated principal for the upgrade request.
+   *
+   * `undefined` when no authenticator is configured or the credential was not
+   * accepted. Sensitive extensions must fail closed in that case; this value is
+   * never derived from AHP `initialize.clientId`.
+   */
+  readonly principal?: AuthenticatedPrincipal;
   /**
    * Send a JSON-RPC message to this connection. A no-op once the connection
    * is no longer open.
@@ -15,7 +32,7 @@ export interface WebSocketConnectionContext {
    * Returns whether the frame was accepted by the open socket. A `false`
    * result is local enqueue failure, not proof a peer received nothing.
    */
-  send(message: JsonRpcMessage): boolean;
+  send(message: JsonRpcMessage, admission?: () => boolean): boolean;
   /** Registers a handler to run when the socket closes. */
   onClose(handler: () => void): void;
   /** Begins socket closure. Buffered text frames are still flushed by the socket. */
@@ -37,6 +54,8 @@ export interface ReplySettlement {
  */
 export interface JsonRpcInvocation {
   readonly kind: "request" | "notification";
+  /** Actual transport supplies one final result veto, after setup callbacks; legacy fixtures may omit it. */
+  guardReply?(admission: () => boolean): void;
   onReplySettled(listener: (settlement: ReplySettlement) => void): void;
 }
 
@@ -80,6 +99,18 @@ export interface WebSocketServerOptions {
   readonly path?: string;
   /** JSON-RPC methods to dispatch. Unknown methods answer `MethodNotFound`. */
   readonly handlers?: JsonRpcHandlers;
+  /**
+   * Optional server-side credential verification for the WebSocket upgrade.
+   *
+   * Runs once before the connection context is created. A resolved principal is
+   * attached to the context; an unresolved credential leaves it `undefined`.
+   * A thrown authentication failure closes that socket without stopping the
+   * server.
+   */
+  readonly authenticator?: ConnectionAuthenticator;
+  /** Mutually exclusive with authenticator. Reserves the actual fence before asynchronous setup. */
+  readonly connectionSetup?: ConnectionSetupAdapter;
+  readonly setupDeadlineMs?: number;
   /** Called once when a socket is accepted, before any frame is dispatched. */
   readonly onConnection?: (context: WebSocketConnectionContext) => void;
   /**

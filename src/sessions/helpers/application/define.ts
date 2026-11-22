@@ -2,6 +2,7 @@ import type { SessionConfigSchema } from "@microsoft/agent-host-protocol";
 
 import type { ApplicationSessionType } from "@sessions/helpers/sessionTypes";
 import type { SessionConfigContract } from "@sessions/types";
+import type { SessionTypePolicyRegistration } from "@sessions/helpers/creation/types";
 
 import type { AuthorizedToolGrant } from "./types";
 
@@ -20,6 +21,7 @@ export function defineApplicationSession(input: {
   readonly config: SessionConfigContract;
   readonly tools: readonly AuthorizedToolGrant[];
   readonly enabledForCreation?: boolean;
+  readonly policy?: SessionTypePolicyRegistration;
 }): {
   readonly header: string;
   readonly registration: ApplicationSessionType;
@@ -37,6 +39,7 @@ export function defineApplicationSession(input: {
         tools: input.tools.map((grant) => ({ ...grant.ref })),
       },
       config: input.config,
+      ...(input.policy === undefined ? {} : { policy: input.policy }),
       enabledForCreation: input.enabledForCreation ?? true,
     },
     grants: input.tools.map((grant) => ({

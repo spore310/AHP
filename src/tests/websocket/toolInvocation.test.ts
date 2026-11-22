@@ -1,16 +1,19 @@
-import type { ActionEnvelope, SessionConfigSchema } from "@microsoft/agent-host-protocol";
+import type { ActionEnvelope } from "@microsoft/agent-host-protocol";
 import { AhpClient, type AhpTransport } from "@microsoft/agent-host-protocol/client";
-import { WebSocketTransport } from "@microsoft/agent-host-protocol/ws";
-import { afterEach, describe, expect, it } from "vitest";
-import { z } from "zod";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseUnknownJson } from "@jsonrpc";
-import { createSessionConfig, createSessionTypeCatalogue, defineApplicationSession, ToolAccessLevel } from "@sessions";
 import { ACTION_TYPE_SESSION_ACTIVE_CLIENT_SET } from "@sessions/constants";
-import { createMockProvider } from "@sessions/mock";
-import { connectToolClient, type ToolClient } from "@toolClient";
-import { createToolCatalogue, defineToolContract, toAhpToolDefinition } from "@tools";
-import { createAHPServer, type AHPServerHandle } from "@websocket";
+import { connectToolClient, type ToolClient } from "./legacyToolClient";
+import { defineToolContract, toAhpToolDefinition } from "@tools";
+import { type AHPServerHandle } from "@websocket";
+
+import { createToolPolicyHost, connectPolicyTransport } from "./toolPolicyFixture";
+
+// INTERNAL canonical broker/correlation compatibility; no public-host authorization claim.
+vi.mock("@websocket/helpers/ahp", async () => ({
+  createAHPBinding: (await import("@websocket/helpers/ahp/helpers/kernel/helpers")).createAHPKernel,
+}));
 
 const definition = defineToolContract({
   id: "11111111-1111-4111-8111-111111111111", key: "test.echo", version: 1, name: "echo",
@@ -27,43 +30,54 @@ const clients: Array<{ shutdown(): Promise<void> }> = [];
 const channel = "ahp-session:/capacity";
 const ref = { key: definition.key, version: definition.version };
 
+it("preserves all 64 tools supported by the canonical session type and rejects 129 without replacing them", async () => {
+  const count = 64;
+  const definitions = Array.from({ length: count }, (_, index) => defineToolContract({ ...definition,
+    id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, key: `test.capacity${String(index)}`, name: `capacity${String(index)}` }));
+  const { host, url, caller } = await fixture(definitions);
+  const executor = await openToolClient(url, "executor");
+  const handlers = definitions.map((definition) => ({ definition, execute: vi.fn(() => ({ result: definition.key })) }));
+  await executor.joinSession(channel, handlers);
+  const last = definitions.at(-1);
+  if (last === undefined) throw new Error("Missing boundary contract");
+  await expect(caller.callTool(channel, last, { text: "boundary" })).resolves.toEqual({ result: last.key });
+  expect(handlers.at(-1)?.execute).toHaveBeenCalledOnce();
+  for (const handler of handlers.slice(0, -1)) expect(handler.execute).not.toHaveBeenCalled();
+  const before = host.sessions.getSessionSnapshot(channel);
+  if (before === undefined) throw new Error("Missing canonical session");
+  executor.client.dispatch(channel, { type: ACTION_TYPE_SESSION_ACTIVE_CLIENT_SET,
+    activeClient: { clientId: "executor", tools: Array.from({ length: 129 }, (_, index) => toAhpToolDefinition(definitions[index % count] ?? last)) } });
+  await executor.client.ping();
+  expect(host.sessions.getSessionSnapshot(channel)?.state.activeClients).toEqual(before.state.activeClients);
+  await expect(caller.callTool(channel, last, { text: "retained" })).resolves.toEqual({ result: last.key });
+  expect(handlers.at(-1)?.execute).toHaveBeenCalledTimes(2);
+}, 10_000);
+
+it.each([65, 128])("preserves the existing session-type rejection of %i tools", async (count) => {
+  const definitions = Array.from({ length: count }, (_, index) => defineToolContract({ ...definition,
+    id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, key: `test.capacity${String(index)}`, name: `capacity${String(index)}` }));
+  await expect(createToolPolicyHost(definitions)).rejects.toThrow("Session type has too many tools");
+});
+
 async function fixture(definitions = [definition]) {
-  const schema: SessionConfigSchema = { type: "object", properties: {} };
-  const type = defineApplicationSession({
-    id: "22222222-2222-4222-8222-222222222222", key: "test.echo-session", version: 1, providerId: "mock",
-    configSchema: schema,
-    config: createSessionConfig({ schema, parser: z.object({}).strict() }),
-    tools: definitions.map((tool) => ({ ref: tool, access: ToolAccessLevel.Standard })),
-  });
-  const host = createAHPServer({
-    host: "127.0.0.1", port: 0, path: "/capacity",
-    sessions: {
-      providers: [createMockProvider()], application: {
-        catalogue: createSessionTypeCatalogue({
-          tools: createToolCatalogue({ definitions }), types: [type.registration],
-        }),
-        defaultType: { key: type.header, version: 1 },
-      },
-    },
-  });
+  const { host, recreate } = await createToolPolicyHost(definitions);
   hosts.push(host);
   const address = await host.start();
-  const url = `ws://127.0.0.1:${String(address.port)}/capacity`;
+  const url = "ws://127.0.0.1:" + String(address.port) + "/capacity";
   const caller = await openToolClient(url, "caller");
-  await caller.client.request("createSession", { channel, config: { "x-ahp-session-type": type.header } });
   await caller.client.subscribe(channel);
-  return { host, url, caller };
+  return { host, url, caller, recreate };
 }
 
 async function openToolClient(url: string, clientId: string): Promise<ToolClient> {
-  const client = await connectToolClient(url, { clientId, protocolVersions: ["1.0.0"] });
+  const client = await connectToolClient({ transport: await connectPolicyTransport(url), ownership: "owned" }, { clientId, protocolVersions: ["1.0.0"] });
   clients.push(client);
   return client;
 }
 
 /** Observe actual frames, including extension frames an ordinary SDK would ignore. */
 async function openObserver(url: string, clientId = "observer") {
-  const inner = await WebSocketTransport.connect(url);
+  const inner = await connectPolicyTransport(url);
   const frames: unknown[] = [];
   const transport: AhpTransport = {
     send: (message) => {
@@ -163,7 +177,8 @@ describe("end-to-end client tool capacity", () => {
     const before = host.sessions.getSessionSnapshot(channel);
     await expect(caller.callTool(channel, ref, { text: "private-input" }))
       .resolves.toEqual({ result: "private-result:private-input" });
-    await observer.client.ping(); // Causal barrier, not a silence timeout.
+    await observer.client.ping();
+    // Causal barrier, not a silence timeout.
     expect(executions).toBe(1);
     expect(host.sessions.getSessionSnapshot(channel)).toEqual(before);
     expect(observer.frames.slice(start).some((frame) => method(frame, "x-ahp/tools/invoke"))).toBe(false);
@@ -220,7 +235,8 @@ describe("end-to-end client tool capacity", () => {
       await attacker.transport.send({ jsonrpc: "2.0", method: "x-ahp/tools/complete", params: {
         ...invocation, output: { result: "forged" },
       } });
-      await attacker.client.ping(); // Proves the forged completion was processed before the real one.
+      await attacker.client.ping();
+      // Proves the forged completion was processed before the real one.
       return { result: "real-executor" };
     } }]);
     await executor.client.ping();
@@ -236,21 +252,24 @@ describe("end-to-end client tool capacity", () => {
       return { result: "ok" };
     } }]);
     await executor.client.ping();
-    const duplicate = await openToolClient(url, "executor"); // Not subscribed; still identity-ambiguous.
+    const duplicate = await openToolClient(url, "executor");
+    // Not subscribed; still identity-ambiguous.
     await expect(caller.callTool(channel, ref, { text: "ambiguous" })).rejects.toThrow();
     expect(executions).toBe(0);
     await duplicate.shutdown();
     await executor.shutdown();
     const replacement = await openToolClient(url, "executor");
-    await replacement.client.subscribe(channel); // No accepted advertisement on this new socket.
+    await replacement.client.subscribe(channel);
+    // No accepted advertisement on this new socket.
     expect(host.sessions.getSessionSnapshot(channel)?.state.activeClients.some((active) => active.clientId === "executor"))
-      .toBe(true); // Presence is deliberately still stale; execution ownership is not.
+      .toBe(true);
+    // Presence is deliberately still stale; execution ownership is not.
     await expect(caller.callTool(channel, ref, { text: "stale" })).rejects.toThrow();
     expect(executions).toBe(0);
   });
 
   it("settles an in-flight call on executor disconnect and on session removal/URI reuse", async () => {
-    const { host, url, caller } = await fixture();
+    const { host, url, caller, recreate } = await fixture();
     const executor = await openToolClient(url, "executor");
     const started = Promise.withResolvers<undefined>();
     const finish = Promise.withResolvers<{ result: string }>();
@@ -277,7 +296,7 @@ describe("end-to-end client tool capacity", () => {
     await nextStarted.promise;
     await host.sessions.disposeSession({ channel });
     await nextResult;
-    await host.sessions.createSession({ channel });
+    await recreate();
     const recreated = host.sessions.getSessionSnapshot(channel);
     nextFinish.resolve({ result: "old-generation-output" });
     await second.client.ping();

@@ -25,6 +25,8 @@ import {
 } from "@jsonrpc";
 
 import { WEBSOCKET_CLOSE_UNSUPPORTED_DATA } from "../constants";
+import type { AuthenticatedPrincipal } from "@agents";
+import type { ConnectionAttachment } from "./security/types";
 import type {
   JsonRpcHandler,
   JsonRpcHandlers,
@@ -36,6 +38,7 @@ import type {
 
 interface Invocation extends JsonRpcInvocation {
   settle(settlement: ReplySettlement): void;
+  admitReply(): boolean;
 }
 
 const resultResponse = (id: JsonRpcRequestId, result: unknown): JsonRpcResultResponse => ({
@@ -101,9 +104,23 @@ const extractRequestId = (value: unknown): JsonRpcRequestId | null => {
 const createInvocation = (kind: JsonRpcInvocation["kind"]): Invocation => {
   const listeners = new Set<(settlement: ReplySettlement) => void>();
   let settled = false;
+  let replyGuard: (() => boolean) | undefined;
 
   return {
     kind,
+    guardReply: (admission) => {
+      if (kind !== "request" || settled || replyGuard !== undefined || typeof admission !== "function") throw new Error("Reply guard unavailable");
+      replyGuard = admission;
+    },
+    admitReply: () => {
+      try {
+        const allowed: unknown = replyGuard?.() ?? (replyGuard === undefined);
+        if (allowed !== true) void Promise.resolve(allowed).catch(() => undefined);
+        return !settled && allowed === true;
+      } catch {
+        return false;
+      }
+    },
     onReplySettled: (listener: (settlement: ReplySettlement) => void): void => {
       listeners.add(listener);
     },
@@ -171,8 +188,16 @@ const handleRequest = async (
 
   try {
     const result = await handler(request.params, context, invocation);
-    const responseSent = context.send(resultResponse(request.id, result));
-    invocation.settle({ outcome: "success", responseSent });
+    let admitted = true;
+    const denied = () => !admitted;
+    const responseSent = context.send(resultResponse(request.id, result), () => {
+      admitted = invocation.admitReply();
+      return admitted;
+    });
+    if (denied()) {
+      const errorSent = context.send(errorResponse(request.id, JSONRPC_INVALID_PARAMS, "Protected reply unavailable"));
+      invocation.settle({ outcome: "failure", responseSent: errorSent });
+    } else invocation.settle({ outcome: "success", responseSent });
   } catch (cause) {
     const responseSent = sendMappedError(context, request.id, cause);
     invocation.settle({ outcome: "failure", responseSent });
@@ -287,6 +312,8 @@ export const attachConnection = (
   handlers: JsonRpcHandlers,
   beforeDispatch?: (dispatch: WebSocketDispatchContext) => void,
   deferredRequestCompletionMethods: ReadonlyMap<string, import("../types").DeferredRequestCompletionRule> = new Map(),
+  principal?: AuthenticatedPrincipal,
+  attachment?: ConnectionAttachment,
 ): WebSocketConnectionContext => {
   const closeHandlers = new Set<() => void>();
   let closed = false;
@@ -295,14 +322,64 @@ export const attachConnection = (
   const pendingDeferredRequests = new Map<Promise<void>, string>();
   const queuedFrames: string[] = [];
 
+  const setup = attachment?.setup;
+  const isCurrent = setup?.isCurrent.bind(setup);
+  const socketOpen = () => !closed && socket.readyState === socket.OPEN;
   const context: WebSocketConnectionContext = {
-    connectionId: randomUUID(),
-    send: (message: JsonRpcMessage): boolean => {
-      if (closed || socket.readyState !== socket.OPEN) {
+    connectionId: attachment?.fence.connectionId ?? randomUUID(),
+    connectionGeneration: attachment?.fence.connectionGeneration ?? 1,
+    ...(setup === undefined ? {} : { security: setup.snapshot }),
+    isOpen: socketOpen,
+    isSecurityCurrent: (): boolean => {
+      try {
+        const live: unknown = isCurrent?.();
+        return live === true && !closed && socket.readyState === socket.OPEN;
+      } catch {
         return false;
       }
+    },
+    ...(principal !== undefined ? { principal } : {}),
+    send: (message: JsonRpcMessage, admission?: () => boolean): boolean => {
+      if (!socketOpen()) {
+        return false;
+      }
+      let encoded: string;
       try {
-        socket.send(JSON.stringify(message));
+        encoded = JSON.stringify(message);
+      } catch {
+        return false;
+      }
+      if (setup !== undefined) {
+        let current = false;
+        try {
+          current = isCurrent?.() === true;
+        } catch {
+          // A failed synchronous guard cannot authorize output.
+        }
+        if (!current) {
+          try {
+            socket.close();
+          } catch {
+            // The close/error path still owns local cleanup.
+          }
+          return false;
+        }
+      }
+      if (admission !== undefined) {
+        try {
+          const allowed: unknown = admission();
+          if (allowed !== true) {
+            void Promise.resolve(allowed).catch(() => undefined);
+            return false;
+          }
+        } catch {
+          return false;
+        }
+      }
+      if (!socketOpen()) return false;
+      // No await between the final currentness check and local enqueue.
+      try {
+        socket.send(encoded);
         return true;
       } catch {
         return false;

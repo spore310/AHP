@@ -7,8 +7,18 @@ Inert example session policy for the default host. It lists allowed tool contrac
 | File | Responsibility |
 | ---- | -------------- |
 | `constants.ts` | Stable revision ids and session-type keys. |
-| `helpers.ts` | `createBaselineSessionApplication`. |
+| `helpers.ts` | Baseline session catalogue and bounded in-memory host action registration. |
 | `index.ts` | Public exports. |
+
+`createScopedToolPolicyExample("direct")` creates direct-policy admission.
+The `"namespace"` form selects the same policy through an included namespace.
+Both examples use the application's `maintainer`, `reader`, and `triage` roles for
+the senior owner, junior agent, and PM, respectively. Importing or creating the
+example leaves bindings and assignments empty. An authorized host supplies the
+actor's exact scoped binding and any separate tool assignment. The mandatory
+`example-provider-consent` evaluator can deny invocation independently of the
+local role. The example and public namespace loopback are exercised by
+[`applicationPolicyExamples.test.ts`](../tests/applicationPolicyExamples.test.ts).
 
 ## API
 
@@ -53,3 +63,30 @@ For registering a local implementation and calling it from another client, use t
 ## Testing
 
 [`src/tests/application.test.ts`](../tests/application.test.ts) covers fresh catalogues, separate application/provider config, two running hosts with different defaults and the same session URI, and terminal stop behavior.
+
+## In-memory host action
+
+`createInMemoryEchoRegistration()` returns an inert `ServerToolRegistration` for
+`example.echo@1`. It accepts `{ text: string }` (at most 4096 characters) and returns
+`{ value: text }`, with strict object schemas, registration/source revision 1 and
+server/host implementation `application.echo.v1`. It has no optional preparation
+or external effects. The baseline application does not install this registration.
+
+```ts
+import { createInMemoryEchoRegistration } from "@application";
+import type { ServerToolBrokerOptions } from "@toolExecution/server";
+
+// These ports are application-owned canonical authority, never request data.
+const registration = createInMemoryEchoRegistration();
+const serverTools: ServerToolBrokerOptions = {
+  registry, policies, executor, resolve, registrations: [registration],
+};
+// Add registration.definition to the authorized session catalogue, install
+// caller invoke and exact host execute grants, then pass serverTools as
+// createAHPServer({ ...hostOptions, serverToolExecution: serverTools }).
+```
+
+The embedding application supplies `registry`, `policies`, `executor`, `resolve`
+and `hostOptions`. Registration alone creates no permissions or network listeners.
+The executor requires an explicit trusted identity, generation and current/pure
+fence callbacks. See [tool execution](../toolExecution/README.md#host-controlled-actions).

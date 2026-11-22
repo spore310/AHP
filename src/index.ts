@@ -1,13 +1,84 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { loadEnv } from "@env";
+import { createStaticTokenAuthenticator } from "@agents";
+import { loadEnv, parseAllowedKinds, parseAuthTokens, type EnvConfig } from "@env";
+import { createConfiguredPersistenceProvider } from "@persistence/helpers/adapters";
+import { createPersistence } from "@persistence";
+import type { PersistenceProvider } from "@persistence/types";
 
 import { createBaselineSessionApplication } from "./application";
 import { mockProvider } from "@sessions/mock";
-import { createAHPServer, type WebSocketServerHandle } from "./websocket";
+import {
+  createAHPServer,
+  type AHPServerAgentWorkOptions,
+  type WebSocketServerHandle,
+} from "./websocket";
 
 export const APP_NAME = "Agent Hosting Protocol";
+
+/**
+ * Build optional durable agent/work wiring from validated environment values.
+ *
+ * Both the database URL and at least one bearer token are required. A partial
+ * configuration is a startup error rather than a silently unauthenticated or
+ * non-durable server.
+ */
+export const createAgentWorkOptions = async (
+  config: EnvConfig,
+): Promise<AHPServerAgentWorkOptions | undefined> => {
+  const databaseUrl = config.AGENT_HOSTING_PROTOCOL_DATABASE_URL;
+  const authTokens = config.AGENT_HOSTING_PROTOCOL_AUTH_TOKENS;
+  const providerName = config.AGENT_HOSTING_PROTOCOL_PERSISTENCE_PROVIDER;
+
+  if (databaseUrl === undefined && authTokens === undefined) {
+    if (providerName !== undefined) {
+      throw new Error(
+        "AGENT_HOSTING_PROTOCOL_PERSISTENCE_PROVIDER requires durable agent/work configuration",
+      );
+    }
+    return undefined;
+  }
+  if (databaseUrl === undefined || authTokens === undefined) {
+    throw new Error(
+      "Agent/work features require both AGENT_HOSTING_PROTOCOL_DATABASE_URL and AGENT_HOSTING_PROTOCOL_AUTH_TOKENS",
+    );
+  }
+
+  const tokens = parseAuthTokens(authTokens);
+  const allowedKinds = parseAllowedKinds(
+    config.AGENT_HOSTING_PROTOCOL_ALLOWED_WORK_KINDS,
+  );
+  const authenticator = createStaticTokenAuthenticator(tokens);
+  let provider: PersistenceProvider | undefined;
+  try {
+    provider = await createConfiguredPersistenceProvider({
+      provider: providerName,
+      options: {
+        url: databaseUrl,
+        workLeaseSeconds: config.AGENT_HOSTING_PROTOCOL_WORK_LEASE_SECONDS,
+      },
+    });
+    const persistence = createPersistence(provider);
+    return {
+      authenticator,
+      registrations: persistence.registrations,
+      work: persistence.work,
+      allowedKinds,
+      presenceTtlMs: config.AGENT_HOSTING_PROTOCOL_PRESENCE_TTL_SECONDS * 1_000,
+      dispose: () => persistence.dispose(),
+    };
+  } catch (error) {
+    if (provider !== undefined) {
+      try {
+        await provider.dispose();
+      } catch {
+        // Composition failure remains primary; cleanup is best-effort here.
+      }
+    }
+    throw error;
+  }
+};
 
 /**
  * Connects termination signals to server shutdown.
@@ -34,14 +105,26 @@ export const installShutdownHandlers = (server: WebSocketServerHandle): (() => v
 
 export const main = async (): Promise<void> => {
   const config = loadEnv();
-  const server = createAHPServer({
-    host: config.AGENT_HOSTING_PROTOCOL_WEBSOCKET_HOST,
-    port: config.AGENT_HOSTING_PROTOCOL_WEBSOCKET_PORT,
-    sessions: {
-      providers: [mockProvider],
-      application: createBaselineSessionApplication(),
-    },
-  });
+  const agentWork = await createAgentWorkOptions(config);
+  let server: ReturnType<typeof createAHPServer>;
+  try {
+    server = createAHPServer({
+      host: config.AGENT_HOSTING_PROTOCOL_WEBSOCKET_HOST,
+      port: config.AGENT_HOSTING_PROTOCOL_WEBSOCKET_PORT,
+      sessions: {
+        providers: [mockProvider],
+        application: createBaselineSessionApplication(),
+      },
+      ...(agentWork !== undefined ? { agentWork } : {}),
+    });
+  } catch (error) {
+    try {
+      await agentWork?.dispose?.();
+    } catch {
+      // Preserve the composition failure that prevented host ownership transfer.
+    }
+    throw error;
+  }
 
   const address = await server.start();
   installShutdownHandlers(server);

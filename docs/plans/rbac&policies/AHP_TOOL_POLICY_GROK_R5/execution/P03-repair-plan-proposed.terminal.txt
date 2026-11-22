@@ -1,0 +1,160 @@
+ Projection must call evaluate for each installed assignment. Otherwise the RED disclosure test would │
+ pass with empty descriptors even when evaluate is skipped, leaving the bypass unproven. The lead test│
+ passes tools in the request, so it still needs a valid assignment to exercise the projection gate.   │
+                                                                                                      │
+ If projection ignores the request's tool selector, the RED disclosure test would pass with empty     │
+ descriptors even when a sync bypass exists. The review requires existing assertions to remain        │
+ meaningful, so projection must still consider the selector but only as a match against an installed  │
+ assignment. Because the lead test installs a tool without a linking assignment, the assertion must be│
+ preserved through a different mechanism.                                                             │
+                                                                                                      │
+ The plan defers the lead test update to execution time. The lead test will be extended to install the│
+ exact tool assignment at that stage. This ensures the empty-descriptor assertion proves the          │
+ projection pipeline ran rather than passing vacuously.                                               │
+                                                                                                      │
+ No P01 or P02 amendments are required. The existing forSessionType and getPolicy APIs already satisfy│
+ the admission requirements.                                                                          │
+                                                                                                      │
+ A new decisionTtlMs option will replace challengeLifetimeSeconds as the finite local bound for stamp │
+ validity. This prevents accidental reuse of challenge lifetime semantics.                            │
+                                                                                                      │
+ The decisionTtlMs option will be required rather than optional. Existing tests that omit it will fail│
+ at compile time, which prevents accidental reuse of challenge lifetime semantics. The default value  │
+ will be a named constant DEFAULT_DECISION_TTL_MS in the P03 evaluate constants, not                  │
+ challengeLifetimeSeconds. Expiry will be the minimum of binding expiration, external validUntil, and │
+ now plus decision TTL.                                                                               │
+                                                                                                      │
+ The expiry tests are compatible with the minimum expiry rule. Their binding and external timestamps  │
+ are both 1000 ms, so they still expire before the decision TTL.                                      │
+                                                                                                      │
+ NaN and Infinity external validUntil values will be rejected before any allow decision.              │
+                                                                                                      │
+ Mutable arrays such as roles, policies, route, and owner will be cloned and frozen at install time.  │
+ Later mutations to those arrays will not affect the stored binding. The RED test that expects deny   │
+ because the policies array was empty at install remains valid.                                       │
+                                                                                                      │
+ matches must re-read binding expiry and external validUntil from the registry rather than relying    │
+ solely on stamp.validUntil. The stamp’s validity is set to the minimum of those values, so advancing │
+ time past the binding or external expiry makes the stamp invalid.                                    │
+                                                                                                      │
+ The review requires final admission to verify actual captured context, route, executor, and current  │
+ revisions against the live registration. Comparing a route to itself is the bug. matches(stamp,      │
+ actor) should load the resource by stamp.authority.route, compare it to the current registration, and│
+ check the executor grant revision.                                                                   │
+                                                                                                      │
+ matches will look up the resource by stamp route origin and targets. It returns false if the resource│
+ is missing, its route differs, or its relationship revision changed. It also returns false if the    │
+ executor record is missing or does not match. For evaluate, the full route must be resolved: every   │
+ origin and target is loaded, and mandatory rules are gathered from each. A restriction on a target   │
+ still applies even if the origin registration omitted it. The request route is only a selector; the  │
+ registered routes on those resources are authoritative, so a mismatch causes deny.                   │
+                                                                                                      │
+ Executor keys must match the installed tuple exactly across domain, subject, agentId, connection,    │
+ generation, registrationRevision, contractId, resource key, and implementation id.                   │
+                                                                                                      │
+ Tools, executors, external invalidations, resources, and bindings are capped at                      │
+ POLICY_LIMIT_DEFAULTS.maxPolicyRefs. Reinstalling a tool with the same id but different version bumps│
+ the revision; silent overwrite is prevented without an explicit epoch bump, and conflicting          │
+ replacements throw unless the revision increases.                                                    │
+                                                                                                      │
+ Extension evaluators must be registered and invoked; a missing evaluator for a non-undefined         │
+ extension causes denial. Permission evaluators will be copied into a frozen Map at construction using│
+ Object.hasOwn. The authorization module will drop its import of descriptorsFor to break a module     │
+ cycle, and the toolPolicy wrapper will add descriptors after evaluate returns assignment decisions.  │
+                                                                                                      │
+ projectAssignments will return decisions and contract ids. The toolPolicy wrapper will add           │
+ descriptors via a new projectAssignedDescriptors(authorizer, input) helper. Worker tests will move   │
+ descriptor assertions to this wrapper. Authorization A06 will keep checking descriptors. The         │
+ authorizer will accept an injected materialize function to avoid importing toolPolicy directly.      │
+                                                                                                      │
+ The lead test omits the materializer port, so descriptors would be missing unless a default is       │
+ injected. A default that denies disclosure is safer than a local structural copy, because an empty   │
+ array would pass the deny assertion but leave the bypass unproven. The plan will state this trade-off│
+ explicitly.                                                                                          │
+                                                                                                      │
+ No shell runtime, database, or P04 will be added. The rejected candidate and RED tests will be       │
+ preserved. The plan will remain compact and structured, with no tool writes.                         │
+                                                                                                      │
+ P03 stays rejected. This is a plan only: no files, tests, or code were changed. The rejected         │
+ candidate and the seven RED tests stay as they are.                                                  │
+                                                                                                      │
+ Repair shape                                                                                         │
+                                                                                                      │
+ One async pipeline. Requests are selectors. Host registration and the P02 compiler are the authority.│
+ projectAssignments becomes async and calls that same pipeline. There is no synchronous allow path.   │
+                                                                                                      │
+ Authorization owns the registry and the decision. It does not import @toolPolicy/helpers/assignments.│
+ The tool-policy assignment helper owns toAhpToolDefinition and may call evaluate. A descriptor       │
+ materializer is an injected port, not a runtime import from the compiler.                            │
+                                                                                                      │
+ Authoritative install                                                                                │
+                                                                                                      │
+ Trusted host installation is still not P06 issuance.                                                 │
+                                                                                                      │
+ - installAdmission({ sessionType, providerId }) freezes factory.forSessionType admitted and mandatory│
+   refs. A selected select() result is not a grant.                                                   │
+ - installResource binds one full resource ref to an owner, a registered route, and that admission.   │
+   The owner is immutable. The request cannot supply mandatory refs.                                  │
+ - Mandatory rules are the union of compiler mandatory refs for every registered resource on the      │
+   origin and every target. An explicit { ref, applicable: false } registration may skip one. A       │
+   missing registration for a compiler-mandatory ref denies. A caller mandatory: [] does not bypass   │
+   this.                                                                                              │
+ - installToolAssignment freezes one canonical contract, one policy ref inside that resource's        │
+   admitted set, one purpose (discover, invoke, or execute), and one binding id. A global tool id is  │
+   not an assignment.                                                                                 │
+ - installExecutorAssignment freezes the full executor identity, the implementation, the contract id, │
+   the resource ref, and execute. The caller is not an executor.                                      │
+ - installBinding deep-copies and freezes roles, policies, scope, and actor. A later mutation of the  │
+   caller's array is not a grant and does not bump revision. Conflicting replacement throws. Caps use │
+   the existing maxPolicyRefs limit for resources, bindings, tools, executors, and external           │
+   invalidations.                                                                                     │
+                                                                                                      │
+ Evaluation                                                                                           │
+                                                                                                      │
+ evaluate selectors are actor context, operation, binding id, scope ref, route selector, and optional │
+ external proof. The policy ref comes from that binding, not from the caller.                         │
+                                                                                                      │
+ A positive result requires one binding whose actor, full scope ref, and policy ref match together,   │
+ and whose policy is inside the resource admission. Every applicable mandatory rule on the origin and │
+ every target is evaluated on its own binding and its own roles. Mandatory failures deny. They do not │
+ add a grant. requiredPermissions run for the positive rule and every applicable mandatory rule,      │
+ through own-key evaluators captured at construction. A missing, throwing, timing-out, or non-allow   │
+ result denies. If a compiled policy has extension data and no registered extension evaluator accepts │
+ it, deny.                                                                                            │
+                                                                                                      │
+ discover, invoke, and execute are separate. reveal applies only to discover disclosure. Invoke       │
+ assignment does not disclose. Execute disclosure requires the executor assignment, not invoke.reveal.│
+ Challenges accumulate only on an allow. Projection's challengeRequired comes from that decision, not │
+ from a hardcoded false.                                                                              │
+                                                                                                      │
+ Expiry and final check                                                                               │
+                                                                                                      │
+ validUntil is the minimum of every contributing binding expiry, the external validUntil when
+ required, and an explicit decisionTtlMs. It is not challengeLifetimeSeconds. A non-finite external
+ validUntil denies before allow.
+
+ matches(stamp, actor) is synchronous and performs no input/output. It re-reads the registered route,
+ the binding expiry, the grant and relationship revisions, and the executor tuple. It does not compare
+ the stamp route to itself. It does not call FreshnessPort. An expired binding, an expired external
+ proof, or a local invalidation makes the stamp fail even if the actor matches.
+
+ Tests when execution is assigned
+
+ Keep all seven RED denials. Await projection. Add regressions for omitted route-target mandatory
+ rules, extension-without-evaluator, executor and contract mismatch, cross-domain teardown, non-finite
+ proofs, and mutable installer arrays. The disclosure RED test should install the assignment its
+ selector names. Otherwise an empty descriptor list does not prove the permission pipeline ran. That
+ is a fixture addition, not a weaker expected denial.
+
+ Amendments
+
+ No P01 or P02 amendment. forSessionType, getPolicy, PolicyScopeRules, and ToolExecutionBinding are
+ enough. LocalDecisionStamp stays helper-local. No database, session, work, or shell runtime changes.
+ P04 stays blocked until this design is reviewed and then implemented.
+
+● lead · flexible
+───────────────────────────────────────────────────────────────────────────────────────────────────────
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────
+~\OneDrive\Documents\Code\ahp (agentIdentity)
+↑367k ↓175k R43M CH99.2% $39.875 (sub) 72.1%/500k (auto)                        (xai) grok-4.7 • medium

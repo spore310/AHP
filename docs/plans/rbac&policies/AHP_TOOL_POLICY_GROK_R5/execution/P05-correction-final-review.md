@@ -1,0 +1,25 @@
+# P05 correction narrow final recheck
+
+**Recheck: PASS for the two authorized corrections and scoped README update. This is not P05 acceptance and does not authorize P06.** I reviewed the correction authorization, exact 10-file scope, corrected candidate manifest, handoff, and the specified actual source/tests/docs. No source, test, or documentation edits or runtime/DB commands were made; I did not start children or duplicate the full validation.
+
+## P1 — draining preparation capacity: PASS
+
+`src/sessions/helpers/creation/helpers.ts:196,267,281-288,301-308` now separates the visible URI reservation from `outstandingPreparations`. The cap is checked before reserving/scheduling; occupancy increments before scheduling the callback and decrements only in the underlying invocation's `finally` settlement path. The cancellation path promptly removes the URI reservation and rejects the caller but does not decrement/reset the outstanding count. Late fulfilled values go through the captured release path, while the raced promise observes late rejection. `cancelAll` only cancels reservations (`:376-380`); it does not clear draining occupancy.
+
+The focused regression coverage exercises the previously failing scenarios: `src/tests/sessions/policyCreation.test.ts:814-858` tests max-1 abort, timeout, and disposal across never-settling, late-allow, and late-reject callbacks, including factory disposal/reuse and same-URI retry only after actual settlement. Lines `:860-890` separately prove prompt URI release while one draining callback still occupies a slot and a distinct second slot can create a successor. These tests and source address the prior unbounded-work finding without waiting for an ignored signal or manufacturing capacity during cleanup.
+
+## P2 — atomic admission cohorts: PASS
+
+`src/authorization/helpers/evaluate/helpers.ts:579-640` bounds the list before iteration (`:581-585`), captures a fixed selector cohort before compiler lookups (`:586-603`), stages and checks duplicate/conflicting compiler results (`:593-627`), then checks current canonical entries and aggregate new-entry capacity before publishing (`:628-640`). The commit is synchronous and calls `bump()` once only for nonempty additions; empty/all-identical cohorts return without a bump. `installAdmission` delegates to this same path (`:667-668`). Protected creation captures and invokes the batch method once for all validated registrations (`src/sessions/helpers/creation/helpers.ts:109-111,123-149`).
+
+The new input bound is separate from storage capacity: `ReferenceInputLimits.maxAdmissionInstalls` is declared in `src/authorization/helpers/evaluate/types.ts:156-161`, defaulted to 128 in `constants.ts:20-26`, validated/captured in `helpers.ts:114-121`, and checked before list copying/iteration. Tests cover cap-1 two-type failure preserving a genuine existing allow stamp and either free slot (`src/tests/sessions/policyCreation.test.ts:890-922`); canonical batch over-capacity, mixed existing/new, invalid-later-selector, conflicts, no-op/revision semantics, and input capture (`src/tests/authorization/bindingRemoval.test.ts:155-289`); default-128/absolute-1024 and one-over boundaries plus a genuine higher-budget compiler selector positive (`:291-321`). The authorized `admissionInputReview.test.ts` addition preserves the old four input-limit controls while extending the default assertion and invalid/boundary loop for the fifth limit.
+
+The narrow review issue about the old P03 test's edit order is resolved by the correction handoff: it records reversing the two actual first-key insertions (not appended keys) and recovering the historical SHA-256 `d0a33b069cefb72b30d961b66c0facaed10f4b40801d54b8abb33c6c58832c3a`. The reviewed current test additions correspond to the specifically authorized controls; I found no further P03 behavior expansion in the permitted scope.
+
+## Scope and README check
+
+The lead-provided scope record lists exactly these 10 changed files, no unaccounted paths, 96 unchanged files, and worker digest `6f194e2729ecef2b8c77519261e06de3aa7a80cf6452a482cdb7803c08bc1d05`. The combined 106-entry correction manifest is SHA-256 `97f8c95f904c9357ee4c8b89fc5d53ee261fc603d2c4bc8e418d78aec7252121`. I reviewed those declared artifacts and actual changed-file contents; these hashes/counts are the recorded lead/worker integrity evidence, not a separate hash recomputation here.
+
+Scoped README drift is resolved: `src/sessions/README.md` documents draining occupancy and prompt cancellation, `src/authorization/README.md` documents atomic cohorts and the per-call input bound versus storage cap, and `src/websocket/README.md:84-90` documents `ownerLookup` as the read-only binding option and distinguishes it from legacy mutable `sessionOwners`. No further scoped README drift found.
+
+The correction handoff reports full DB-safe `pnpm validate` PASS at 72 files / 684 tests / 163 mapped sources, exit 0. The lead's independent gate is running; this recheck neither duplicates nor claims that gate. No P06/P12 work or acceptance decision is made here. P05 acceptance remains lead-owned.

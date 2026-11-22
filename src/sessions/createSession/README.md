@@ -20,8 +20,17 @@ This submodule owns the ordering guarantees; the factory in
 
 - `createSessionParamsSchema` — Zod schema for the method params. `channel` is
   the only required member.
-- `executeCreateSession(dependencies, rawParams): Promise<void>` — internal entry
-  invoked by `SessionsFactory.createSession`.
+- `executeCreateSession(dependencies, rawParams, onRecordCreated?): Promise<void>`
+  — internal entry invoked by `SessionsFactory.createSession`.
+
+The optional `onRecordCreated(sessionUri)` hook is the **attach hook**: it runs
+synchronously the instant the record is added to the registry — before the
+`root/sessionAdded` broadcast and before the backend starts. A create that
+still owns this call therefore observes its own record through identity-scoped
+installers (for example an owner binding) exactly once, never claiming a URI a
+later creator is attaching. A throwing hook fails the whole create and the
+record is removed, so a failed create leaves nothing behind and the URI stays
+re-creatable.
 
 ## 5-Minute Usage
 
@@ -88,7 +97,8 @@ const provider: SessionProvider = {
 
 - **Enforced order:** params shape → typed selection/application configuration
   and manifest preparation → provider resolution → URI uniqueness → provider
-  config parsing → registration + `root/sessionAdded` → backend start. All
+  config parsing → registration + attach hook + `root/sessionAdded` → backend
+  start. All
   deterministic configuration/manifest failures happen before registration.
   Application settings never enter the mock provider's config bag.
 - **The backend starts last** so a failure leaves a well-formed, inspectable
@@ -113,7 +123,7 @@ const provider: SessionProvider = {
 
 | Test | Pins |
 | ---- | ---- |
-| [`src/tests/sessions/createSession.test.ts`](../../tests/sessions/createSession.test.ts) | The creation sequence and failure payloads, provider resolution and `ProviderNotFound`, uniqueness (including while still creating), parameter validation, configuration contract behavior, and working-directory truncation. |
+| [`src/tests/sessions/createSession.test.ts`](../../tests/sessions/createSession.test.ts) | The creation sequence and failure payloads, provider resolution and `ProviderNotFound`, uniqueness (including while still creating), parameter validation, configuration contract behavior, working-directory truncation, and the attach hook (invoked once with the record live; a throwing hook fails the create and leaves no record). |
 
 ## Related Documentation
 

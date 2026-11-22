@@ -48,6 +48,10 @@ export const SESSION_STATUS_IDLE: SessionState["status"] = 1;
 
 /** `ActionType.SessionReady` — backend initialised successfully. */
 export const ACTION_TYPE_SESSION_READY = "session/ready" as ActionType.SessionReady;
+/** Native metadata replacement, projected by protected resource views. */
+export const ACTION_TYPE_SESSION_META_CHANGED = "session/metaChanged" as ActionType.SessionMetaChanged;
+/** Native server tool replacement, projected by protected resource views. */
+export const ACTION_TYPE_SESSION_SERVER_TOOLS_CHANGED = "session/serverToolsChanged" as ActionType.SessionServerToolsChanged;
 
 /** `ActionType.SessionCreationFailed` — backend failed to initialise. */
 export const ACTION_TYPE_SESSION_CREATION_FAILED = "session/creationFailed" as ActionType.SessionCreationFailed;

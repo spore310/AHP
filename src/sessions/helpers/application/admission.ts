@@ -33,6 +33,7 @@ export function admitTypedAdvertisement(
   application: SessionApplicationOptions | undefined,
   action: ParsedClientSessionAction,
   clientId: string,
+  effectiveTools?: readonly ToolContractDefinition[],
 ): AdvertisementDecision {
   if (record.application === undefined || application === undefined) {
     return { accepted: action };
@@ -49,12 +50,12 @@ export function admitTypedAdvertisement(
     return { rejectionReason: ADMISSION_REJECTION };
   }
 
-  const resolved = application.catalogue.resolveExisting({
+  const definitions = effectiveTools ?? application.catalogue.resolveExisting({
     key: record.application.key,
     version: record.application.version,
-  });
+  }).tools;
   const visible = new Map<string, ToolContractDefinition>();
-  for (const tool of resolved.tools) {
+  for (const tool of definitions) {
     const pinned = record.application.tools.some(
       (ref) => ref.key === tool.key && ref.version === tool.version,
     );

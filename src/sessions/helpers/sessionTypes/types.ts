@@ -1,6 +1,7 @@
 import type { SessionConfigSchema } from "@microsoft/agent-host-protocol";
 
 import type { SessionConfigContract } from "@sessions/types";
+import type { SessionTypePolicyRegistration } from "@sessions/helpers/creation/types";
 import type { ToolContractDefinition, ToolContractRef } from "@tools";
 
 /** Exact session-type revision. There is no latest resolver. */
@@ -21,12 +22,14 @@ export interface SessionTypeDefinition {
 
 /** Code registration that binds a definition to its parser. */
 export interface ApplicationSessionType {
+  readonly policy?: SessionTypePolicyRegistration;
   readonly definition: SessionTypeDefinition;
   readonly config: SessionConfigContract;
   readonly enabledForCreation: boolean;
 }
 
 export interface ResolvedSessionType {
+  readonly policy?: SessionTypePolicyRegistration;
   readonly definition: SessionTypeDefinition;
   readonly tools: readonly ToolContractDefinition[];
   readonly config: SessionConfigContract;

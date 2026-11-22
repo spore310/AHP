@@ -1,11 +1,17 @@
 import { AhpClient } from "@microsoft/agent-host-protocol/client";
 import { WebSocketTransport } from "@microsoft/agent-host-protocol/ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SESSION_URI_PREFIX } from "@sessions";
 import { ACTION_TYPE_SESSION_TITLE_CHANGED } from "@sessions/constants";
 import { createMockProvider } from "@sessions/mock";
 import { createAHPServer, type AHPServerHandle } from "@websocket";
+
+// INTERNAL canonical SDK compatibility, not authorized public-host/P12 evidence.
+// File-isolated substitution preserves real host composition and all canonical assertions.
+vi.mock("@websocket/helpers/ahp", async () => ({
+  createAHPBinding: (await import("@websocket/helpers/ahp/helpers/kernel/helpers")).createAHPKernel,
+}));
 
 const hosts: AHPServerHandle[] = [];
 const clients: AhpClient[] = [];

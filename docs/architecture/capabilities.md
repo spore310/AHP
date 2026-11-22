@@ -10,10 +10,15 @@ How Agent Hosting Protocol composes. Module READMEs contain the public contracts
 | Tools | `src/tools/` | [README](../../src/tools/README.md) | Immutable exact tool contracts, trusted-schema validation, detached descriptor projection. |
 | Sessions | `src/sessions/` | [README](../../src/sessions/README.md) | Provider registry, in-memory sessions, type/visible-tool policy, manifests, advertisement admission, reducer and sequence. |
 | WebSocket | `src/websocket/` | [README](../../src/websocket/README.md) | Raw transport, connection-bound AHP state, subscriptions, private invocation routing and composed host lifecycle. |
-| Application | `src/application/` | [README](../../src/application/README.md) | Fresh baseline `code-review`/`coding` policy. Descriptors only; no filesystem executor. |
-| Tool client | `src/toolClient/` | [README](../../src/toolClient/README.md) | Public SDK adapter for local tool implementations and application-extension calls. |
+| Application | `src/application/` | [README](../../src/application/README.md) | Baseline session types, scoped policy examples and an inert host action registration. |
+| Tool policy | `src/toolPolicy/` | [README](../../src/toolPolicy/README.md) | Direct policy, namespace admission, and bounded proposal and publication lifecycle. |
+| Tool execution | `src/toolExecution/` | [README](../../src/toolExecution/README.md) | Scoped client/server lifecycle, private results, challenge handling, and approved artifact delivery. |
+| Tool client | `src/toolClient/` | [README](../../src/toolClient/README.md) | Compatibility entry for the tool execution client. |
+| Agents | `src/agents/` | [README](../../src/agents/README.md) | Static bearer authentication, durable registration, and in-memory generation-fenced presence. |
+| Persistence | `src/persistence/` | [README](../../src/persistence/README.md) | Neutral durable ports/facades, lazy allowlisted provider selection, and the PostgreSQL adapter. No SQL in the session engine. |
+| Work | `src/work/` | [README](../../src/work/README.md) | Session-owner authorization, bounded validation, and work-lease coordination. |
 | Environment | `env/` | [README](../../env/README.md) | Validated process configuration. |
-| Process composition | `src/index.ts` | [README](../../src/README.md) | Application/host wiring, entrypoint guard and signal handlers. |
+| Process composition | `src/index.ts` | [README](../../src/README.md) | Application/host wiring, optional agent/work composition, entrypoint guard and signal handlers. |
 
 Tests live under `src/tests/`. Each module README maps the relevant acceptance tests.
 
@@ -21,9 +26,13 @@ Tests live under `src/tests/`. Each module README maps the relevant acceptance t
 
 ```text
 src/index.ts -> env + application + websocket.createAHPServer
+                 + optional persistence/agents/work composition
 application -> public sessions + tools
 websocket host -> sessions + AHP binding + raw transport
-AHP binding -> sessions + tools + JSON-RPC
+AHP binding -> sessions + tools + JSON-RPC + optional agents/work
+work -> agents + persistence ports
+persistence contract/facades -> plain repository ports; selected PostgreSQL adapter -> pg
+live sessions stay in memory; persisted session data is a work-linked projection
 sessions -> tools + JSON decoding; never sockets
 client adapter -> public AHP SDK + tools
 ```
@@ -34,11 +43,20 @@ The raw WebSocket server remains session-agnostic. The contained AHP binding own
 
 ```text
 loadEnv -> createBaselineSessionApplication
-        -> createAHPServer({ sessions: { providers: [mockProvider], application } })
-        -> start -> installShutdownHandlers
+        -> createAgentWorkOptions(config)        # undefined, or auth + managed provider
+        -> createAHPServer({ sessions, agentWork? })
+        -> start -> installShutdownHandlers -> host-owned provider disposal
 ```
 
 Importing the entrypoint or application module is inert: it does not bind ports. Each host owns its session factory, sequence, catalogues, transport and cleanup. Shutdown is terminal and best-effort; signal-handler failures set `process.exitCode = 1`.
+
+The agent/work option is all-or-nothing. Without both a database URL and token
+map, the extension methods are not registered and no provider is selected. A
+provider selector alone is a configuration error. With both, the adapter
+registry resolves the configured provider (PostgreSQL by default), the
+transport authenticates the upgrade, and an authenticated AHP
+`createSession` binds the owner, and connection close releases live presence
+without deleting durable work.
 
 ## Typed session flow
 
@@ -54,22 +72,40 @@ native createSession / public createApplicationSession
   -> publish session action + root summary change
 ```
 
-The ordinary session snapshot lists full visible tool contracts under `_meta["x-ahp-application"]`. `getSessionToolManifest` is a detached, non-allocating read. `serverTools` remains absent because the host does not implement the listed tools. `activeClients` starts empty.
-
-A client advertises an exact subset through `session/activeClientSet`. Typed admission checks connection-derived origin against nested client ID, revision identity, name and full schema before the reducer. One mismatch rejects the entire update; accepted descriptors are normalized from the trusted catalogue. An untyped host preserves its documented legacy behavior.
+The canonical typed snapshot holds the pinned tool manifest. The protected
+public host projects native snapshots and actions per recipient and sends exact
+tool assignments through the private extension. Explicit activation of a
+published revision updates the exact live session and invalidates its tool views.
 
 ## Client execution boundary
 
-The namespaced `x-ahp/tools/*` extension connects discovery/advertisement to local client implementations. It is not a standard AHP tool-invocation method. The binding validates and routes a call; it does not execute the tool. Inputs/results are private rather than session broadcasts. See the [tool client contract and limitations](../../src/toolClient/README.md).
+The negotiated `x-ahp/tools/*` extension checks independent caller and executor
+authority before dispatching to a remote client or a trusted host registration.
+Inputs and results travel through owned private routes. Optional proposal and
+artifact ports enter the same protected session and assignment boundaries.
+The trusted security configuration is independent of durable work. Resource view
+authorization and tool grants use the same canonical registry with distinct
+purposes. See the [tool client contract](../../src/toolClient/README.md).
 
-The host still has no authenticated principal/session authorization layer. Type policy and exact connection correlation are consistency controls, not a claim that unauthenticated remote deployment is safe. Presence leases and automatic stale advertisement cleanup remain separate work.
+## Agent/work boundary
+
+`x-ahp/agents/*` and `x-ahp/work/*` are namespaced, versioned requests, separate
+from `x-ahp/tools/*`. Tool calls are short-lived client-to-client invocation.
+Work is a durable coordination record with an execution lease; the host never
+executes the stored task. Presence is memory-only and must be renewed on the
+authenticated connection. Work and registration rows survive a restart; sockets,
+subscriptions, and client tool advertisements do not.
+
+See [`agent-task-lifecycle.md`](agent-task-lifecycle.md) for the sequence, state
+machine, and failure cases.
 
 ## Deferred
 
-- Persistence, SQL/Redis adapters and replay.
-- Server-side tool functions, filesystem executors, model inference and Pi runtime.
+- Production identity/OIDC and cross-principal durable work.
+- Reconnect/replay and durable session hydration.
+- Filesystem executors, model inference and Pi runtime.
 - Chat/prompt streaming; `SessionBackend` still exposes disposal only.
-- Authentication and comprehensive session authorization.
+- Redis or a second coordination service.
 
 ## Related documentation
 

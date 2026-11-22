@@ -1,8 +1,13 @@
 import { AhpErrorCodes, JsonRpcErrorCodes, type ActionEnvelope } from "@microsoft/agent-host-protocol";
 import { parseUnknownJson } from "@jsonrpc";
 
-import { ACTION_TYPE_ROOT_ACTIVE_SESSIONS_CHANGED, ROOT_CHANNEL_URI } from "@sessions/constants";
-import { executeCreateSession } from "@sessions/createSession";
+import { ACTION_TYPE_ROOT_ACTIVE_SESSIONS_CHANGED, ACTION_TYPE_SESSION_META_CHANGED, ROOT_CHANNEL_URI } from "@sessions/constants";
+import { sameResource } from "@authorization/helpers/context";
+import type { ResourceRef } from "@authorization";
+import { APPLICATION_META_KEY, MAX_TOOLS_PER_TYPE, type ToolContractDefinition } from "@tools";
+import type { PublishedTool } from "@toolPolicy/helpers/admission";
+import { executeCreateSession, prepareCreateSession, publishCreatedSession, startSessionBackend } from "@sessions/createSession";
+import { captureCreationSecurity, createSessionAuthorization, freezeCreation, validateCreationRegistrations } from "@sessions/helpers/creation";
 import {
   BASELINE_UNSUPPORTED_ACTION_REASON,
   isBaselineSupportedSessionAction,
@@ -29,6 +34,7 @@ import type {
   SessionsDiagnostic,
   SessionsFactory,
   SessionsFactoryOptions,
+  SessionRecord,
   SessionSnapshot,
 } from "@sessions/types";
 
@@ -42,9 +48,17 @@ import type {
  * or JSON-RPC transport and can be composed behind any transport.
  */
 export function createSessionsFactory(options: SessionsFactoryOptions): SessionsFactory {
-  const providers = buildProviderMap(options.providers);
+  const creationSecurity = captureCreationSecurity(options.creationSecurity);
+  const providers = new Map(buildProviderMap(options.providers));
+  if (creationSecurity !== undefined) {
+    for (const [id, provider] of providers) {
+      providers.set(id, Object.freeze({ providerId: id, agentInfo: freezeCreation(structuredClone(provider.agentInfo)), startSession: provider.startSession.bind(provider),
+        ...(provider.config === undefined ? {} : { config: Object.freeze({ schema: freezeCreation(structuredClone(provider.config.schema)), parse: provider.config.parse.bind(provider.config) }) }),
+      }));
+    }
+  }
   const defaultProviderId = resolveDefaultProviderId(options, providers);
-  const application = captureSessionApplication(options.application);
+  const application = captureSessionApplication(options.application, creationSecurity !== undefined);
   if (application !== undefined) {
     for (const definition of application.catalogue.list()) {
       if (!providers.has(definition.providerId)) {
@@ -55,17 +69,95 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
       application.catalogue.resolveForCreation(application.defaultType);
     }
   }
+  if (creationSecurity === undefined && application?.catalogue.list().some((definition) => application.catalogue.resolveExisting(definition).policy !== undefined) === true) {
+    throw new Error("Policy-bearing session types require protected creation.");
+  }
+  if (creationSecurity !== undefined) validateCreationRegistrations(creationSecurity, application);
+  const toolAdmission = options.toolAdmission;
+  if (toolAdmission !== undefined) {
+    if (creationSecurity === undefined || application === undefined || !toolAdmission.usesRegistry(creationSecurity.originalRegistry)) {
+      throw new Error("Tool admission requires canonical protected creation.");
+    }
+    toolAdmission.reserveBase(application.catalogue.list().flatMap((entry) => application.catalogue.resolveExisting(entry).tools));
+  }
   const sessions = options.registryFactory === undefined
     ? createInMemorySessionRegistry()
     : options.registryFactory();
   const now = options.now ?? ((): Date => new Date());
   const sequence = resolveActionSequence(options);
-  const nextServerSeq = (): number => sequence.next();
+  let allocationRevision = 0;
+  const nextServerSeq = (): number => {
+    allocationRevision += 1;
+    return sequence.next();
+  };
 
   const catalogueListeners = new Set<(notification: CatalogueNotification) => void>();
   const envelopeListeners = new Set<(envelope: ActionEnvelope) => void>();
 
   let shutdown: Promise<void> | null = null;
+  let disposing = false;
+
+  const activated = new WeakMap<SessionRecord, { readonly revision: number; readonly tools: readonly PublishedTool[] }>();
+  const effectiveTools = (record: SessionRecord): readonly ToolContractDefinition[] => {
+    if (record.application === undefined || application === undefined) return [];
+    const base = application.catalogue.resolveExisting(record.application).tools;
+    const additions = activated.get(record)?.tools ?? [];
+    return [...base.filter((definition) => !additions.some(({ definition: added }) => added.key === definition.key)),
+      ...additions.map(({ definition }) => definition)];
+  };
+  const managedRecord = (ref: ResourceRef<"session">): SessionRecord | undefined => {
+    const record = sessions.get(ref.id);
+    return !disposing && record?.resource !== undefined && sameResource(ref, record.resource) ? record : undefined;
+  };
+  const managedTools: SessionsFactory["managedTools"] = toolAdmission === undefined || creationSecurity === undefined
+    ? undefined
+    : {
+        admission: toolAdmission,
+        revision(ref) {
+          const record = managedRecord(ref);
+          return record === undefined ? undefined : (activated.get(record)?.revision ?? 0);
+        },
+        registration(ref, contractId) {
+          const record = managedRecord(ref);
+          return record === undefined ? undefined : activated.get(record)?.tools.find(({ definition }) => definition.id === contractId);
+        },
+        async activate(input) {
+          const record = managedRecord(input.origin);
+          const binding = record?.application;
+          if (record === undefined || binding === undefined || record.backend === undefined) return undefined;
+          const previous = activated.get(record);
+          const revision = previous?.revision ?? 0;
+          if (revision !== input.expectedRevision || !Number.isSafeInteger(revision + 1)) return undefined;
+          const owned = (): boolean => managedRecord(input.origin) === record && record.application === binding && activated.get(record) === previous;
+          const prepared = await toolAdmission.prepareActivation({ ...input, sessionType: { key: binding.key, version: binding.version }, providerId: record.provider.providerId,
+            current: () => input.current() && owned(), fence: () => input.fence() && owned() }, input.proposalId);
+          if (prepared === undefined) return undefined;
+          const { definition } = prepared.tool;
+          if (binding.tools.some((ref) => ref.key === definition.key && ref.version === definition.version)) return undefined;
+          const refs = [...binding.tools.filter((ref) => ref.key !== definition.key), { key: definition.key, version: definition.version }];
+          if (refs.length > MAX_TOOLS_PER_TYPE) return undefined;
+          const definitions = [...effectiveTools(record).filter((entry) => entry.key !== definition.key), definition];
+          const manifest = projectSessionToolManifest({ id: binding.typeId, key: binding.key, version: binding.version }, definitions, refs);
+          if (new Set(manifest.toolContracts.map((tool) => tool.definition.name)).size !== manifest.toolContracts.length) return undefined;
+          const additions = [...(previous?.tools ?? []).filter((entry) => entry.definition.key !== definition.key), prepared.tool];
+          const action = { type: ACTION_TYPE_SESSION_META_CHANGED, _meta: { ...record.state._meta, [APPLICATION_META_KEY]: manifest } };
+          const modifiedAt = now().toISOString();
+          if (!prepared.current() || !owned()) return undefined;
+          const priorAllocation = allocationRevision;
+          const priorSequence = record.serverSeq;
+          const serverSeq = nextServerSeq();
+          if (!prepared.current() || !owned() || record.serverSeq !== priorSequence || allocationRevision !== priorAllocation + 1) return undefined;
+          try {
+            creationSecurity.originalRegistry.installTool(definition);
+          } catch {
+            return undefined;
+          }
+          record.application = Object.freeze({ ...binding, tools: Object.freeze(refs) });
+          activated.set(record, { revision: revision + 1, tools: Object.freeze(additions) });
+          deliver(envelopeListeners, applySessionAction(record, action, modifiedAt, () => serverSeq));
+          return { revision: revision + 1, tool: prepared.tool };
+        },
+      };
 
   const dependencies: SessionsDependencies = {
     providers,
@@ -92,12 +184,28 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
   };
 
   const dispose = (): Promise<void> => {
-    // Share one in-flight shutdown so concurrent callers await the same
-    // cleanup, then reset so a later dispose cleans a reused factory again.
-    shutdown ??= performDispose().finally(() => {
-      shutdown = null;
+    // Publish the barrier BEFORE synchronous cleanup can reenter dispose().
+    if (shutdown !== null) return shutdown;
+    disposing = true;
+    let complete = (): void => undefined;
+    let fail: (error: unknown) => void = () => undefined;
+    const completion = new Promise<void>((resolve, reject) => {
+      complete = () => {
+        resolve();
+      };
+      fail = (error) => {
+        reject(error instanceof Error ? error : new Error("Session factory shutdown failed.", { cause: error }));
+      };
     });
-    return shutdown;
+    const owned: Promise<void> = completion.finally(() => {
+      if (shutdown === owned) {
+        shutdown = null;
+        disposing = false;
+      }
+    });
+    shutdown = owned;
+    void performDispose().then(complete, fail);
+    return owned;
   };
 
   /**
@@ -112,22 +220,42 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
         type: ACTION_TYPE_ROOT_ACTIVE_SESSIONS_CHANGED,
         activeSessions: sessions.size,
       },
-      serverSeq: sequence.next(),
+      serverSeq: nextServerSeq(),
       origin: undefined,
     };
     deliver(envelopeListeners, envelope);
   };
 
+  const creation = creationSecurity === undefined
+    ? undefined
+    : createSessionAuthorization(dependencies, creationSecurity, {
+        prepare: (params) => prepareCreateSession(dependencies, params),
+        publish: (record) => {
+          publishCreatedSession(dependencies, record);
+        },
+        start: (prepared, beforeFailure) => startSessionBackend(dependencies, prepared.record, prepared.workingDirectories, prepared.config, beforeFailure),
+        changed: emitActiveSessionsChanged,
+        isStopping: () => disposing,
+      });
+
   async function performDispose(): Promise<void> {
+    creation?.cancelAll();
     const records = sessions.records();
+    const failures: unknown[] = [];
     sessions.clear();
+    for (const record of records) {
+      try {
+        creation?.teardown(record);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
     if (records.length > 0) {
       emitActiveSessionsChanged();
     }
     catalogueListeners.clear();
     envelopeListeners.clear();
 
-    const failures: unknown[] = [];
     for (const record of records) {
       // A record without a backend is still starting; its completion detects
       // the cleared registry and disposes itself without publishing.
@@ -150,15 +278,18 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
   }
 
   return {
-    createSession: (params: unknown): Promise<void> => {
+    ...(managedTools === undefined ? {} : { managedTools }),
+    ...(creation === undefined ? {} : { authorization: creation.authorization }),
+    createSession: (params: unknown, onRecordCreated?: (sessionUri: string) => void): Promise<void> => {
       // Disposal clears the registry and listeners and releases attached
       // backends; accepting a session now would register it after that
       // boundary. Reuse is allowed again once disposal settles.
-      if (shutdown !== null) {
+      if (disposing) {
         return Promise.reject(new SessionsDisposingError());
       }
+      if (creation !== undefined) return Promise.reject(new SessionsError(JsonRpcErrorCodes.InvalidRequest, "Trusted creation context required."));
       const previousCount = sessions.size;
-      return executeCreateSession(dependencies, params).then(() => {
+      return executeCreateSession(dependencies, params, onRecordCreated).then(() => {
         if (sessions.size !== previousCount) {
           emitActiveSessionsChanged();
         }
@@ -173,17 +304,13 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
       if (record?.application === undefined || application === undefined) {
         return undefined;
       }
-      const resolved = application.catalogue.resolveExisting({
-        key: record.application.key,
-        version: record.application.version,
-      });
       return structuredClone(projectSessionToolManifest(
         {
           id: record.application.typeId,
           key: record.application.key,
           version: record.application.version,
         },
-        resolved.tools,
+        effectiveTools(record),
         record.application.tools,
       ));
     },
@@ -199,6 +326,10 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
       const record = sessions.get(channel);
       if (record === undefined) {
         throw new SessionsError(AhpErrorCodes.SessionNotFound, `Session not found: ${channel}`);
+      }
+      if (creation !== undefined && record.resource !== undefined) {
+        await creation.authorization.disposeSession(record.resource);
+        return;
       }
       sessions.delete(record.sessionUri);
       dependencies.emitCatalogueNotification({
@@ -224,7 +355,7 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
     listAgents: () => [...providers.values()].map((provider) => structuredClone(provider.agentInfo)),
     onCatalogueNotification: (listener) => subscribe(catalogueListeners, listener),
     onSessionEnvelope: (listener) => subscribe(envelopeListeners, listener),
-    dispatchAction: ({ channel, clientSeq, action, clientId }) => {
+    dispatchAction: ({ channel, clientSeq, action, clientId, admission }) => {
       if (typeof channel !== "string" || channel.length === 0) {
         throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid dispatchAction channel");
       }
@@ -247,7 +378,7 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
         return {
           channel,
           action: toClientSessionAction(parsedAction),
-          serverSeq: sequence.next(),
+          serverSeq: nextServerSeq(),
           origin: { clientId, clientSeq: parsedClientSeq },
           rejectionReason: BASELINE_UNSUPPORTED_ACTION_REASON,
         } satisfies ActionEnvelope;
@@ -258,12 +389,13 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
         dependencies.application,
         parsedAction,
         clientId,
+        activated.has(record) ? effectiveTools(record) : undefined,
       );
       if ("rejectionReason" in admitted) {
         return {
           channel,
           action: toClientSessionAction(parsedAction),
-          serverSeq: sequence.next(),
+          serverSeq: nextServerSeq(),
           origin: { clientId, clientSeq: parsedClientSeq },
           rejectionReason: admitted.rejectionReason,
         } satisfies ActionEnvelope;
@@ -272,18 +404,35 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
         return {
           channel,
           action: toClientSessionAction(parsedAction),
-          serverSeq: sequence.next(),
+          serverSeq: nextServerSeq(),
           origin: { clientId, clientSeq: parsedClientSeq },
           rejectionReason: BASELINE_UNSUPPORTED_ACTION_REASON,
         } satisfies ActionEnvelope;
       }
 
       const before = buildSessionSummary(record);
+      const priorSequence = record.serverSeq;
+      const priorAllocation = allocationRevision;
+      const modifiedAt = now().toISOString();
+      // Resolve injected callbacks before the last synchronous admission check.
+      const serverSeq = nextServerSeq();
+      let allowed: unknown = true;
+      try {
+        if (admission !== undefined) allowed = admission();
+      } catch {
+        allowed = false;
+      }
+      if (allowed !== true) void Promise.resolve(allowed).catch(() => undefined);
+      if (allowed !== true || disposing || sessions.get(channel) !== record || record.serverSeq !== priorSequence
+        || allocationRevision !== priorAllocation + 1) {
+        return { channel, action: toClientSessionAction(parsedAction), serverSeq: nextServerSeq(),
+          origin: { clientId, clientSeq: parsedClientSeq }, rejectionReason: "Action admission is no longer current." } satisfies ActionEnvelope;
+      }
       const envelope = applySessionAction(
         record,
         toSupportedSessionAction(admitted.accepted),
-        now().toISOString(),
-        nextServerSeq,
+        modifiedAt,
+        () => serverSeq,
       );
       const stamped = {
         ...envelope,

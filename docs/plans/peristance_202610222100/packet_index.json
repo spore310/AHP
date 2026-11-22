@@ -1,0 +1,191 @@
+[
+  {
+    "id": "P00",
+    "title": "Pin the checkout, inventory consumers, and characterize current behavior",
+    "deps": [],
+    "ids": [
+      "B01",
+      "B02",
+      "B03"
+    ]
+  },
+  {
+    "id": "P01",
+    "title": "Freeze the shared provider contract and public API migration",
+    "deps": [
+      "P00"
+    ],
+    "ids": [
+      "C01",
+      "C02",
+      "C03"
+    ]
+  },
+  {
+    "id": "P02",
+    "title": "Create the neutral portable-text policy without loosening admission",
+    "deps": [
+      "P01"
+    ],
+    "ids": [
+      "V01",
+      "V02",
+      "V03",
+      "V04"
+    ]
+  },
+  {
+    "id": "P03",
+    "title": "Move PostgreSQL connection, transaction and error mechanics",
+    "deps": [
+      "P01"
+    ],
+    "ids": [
+      "PG01",
+      "PG02",
+      "PG03"
+    ]
+  },
+  {
+    "id": "P04",
+    "title": "Move PostgreSQL registrations and session projections",
+    "deps": [
+      "P03"
+    ],
+    "ids": [
+      "PG04",
+      "PG05",
+      "PG06",
+      "D01"
+    ]
+  },
+  {
+    "id": "P05",
+    "title": "Move the work repository as intact transactional operations",
+    "deps": [
+      "P04"
+    ],
+    "ids": [
+      "W01",
+      "W02",
+      "W03",
+      "W04",
+      "W05",
+      "PG07",
+      "PG08"
+    ]
+  },
+  {
+    "id": "P06",
+    "title": "Compose the PostgreSQL provider and lazy selection boundary",
+    "deps": [
+      "P05"
+    ],
+    "ids": [
+      "S01",
+      "S02",
+      "S03",
+      "L01",
+      "L02"
+    ]
+  },
+  {
+    "id": "P07",
+    "title": "Implement a shared neutral operation and disposal scope",
+    "deps": [
+      "P01"
+    ],
+    "ids": [
+      "L03",
+      "L04",
+      "L05",
+      "E01",
+      "E02"
+    ]
+  },
+  {
+    "id": "P08",
+    "title": "Replace neutral helpers with contract-consuming facades",
+    "deps": [
+      "P02",
+      "P06",
+      "P07"
+    ],
+    "ids": [
+      "C04",
+      "L06",
+      "E03"
+    ]
+  },
+  {
+    "id": "P09",
+    "title": "Migrate agents, work and protocol consumers to the neutral boundary",
+    "deps": [
+      "P08"
+    ],
+    "ids": [
+      "V05",
+      "I01",
+      "I02",
+      "I03"
+    ]
+  },
+  {
+    "id": "P10",
+    "title": "Make executable composition select and own a common persistence provider",
+    "deps": [
+      "P09"
+    ],
+    "ids": [
+      "S05",
+      "S06",
+      "S07",
+      "I04",
+      "L07",
+      "C05",
+      "S04"
+    ]
+  },
+  {
+    "id": "P11",
+    "title": "Prove substitution and preserve adapter semantics",
+    "deps": [
+      "P10"
+    ],
+    "ids": [
+      "T01",
+      "T02",
+      "T03",
+      "T04",
+      "T05",
+      "T06",
+      "T07",
+      "T08"
+    ]
+  },
+  {
+    "id": "P12",
+    "title": "Update scoped documentation and run integrated gates",
+    "deps": [
+      "P11"
+    ],
+    "ids": [
+      "D02",
+      "D03",
+      "D04",
+      "T09"
+    ]
+  },
+  {
+    "id": "P13",
+    "title": "Double-review the final candidate and hand off",
+    "deps": [
+      "P12"
+    ],
+    "ids": [
+      "R01",
+      "R02",
+      "R03"
+    ]
+  }
+]

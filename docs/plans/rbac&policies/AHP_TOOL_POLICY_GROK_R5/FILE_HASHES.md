@@ -1,0 +1,45 @@
+# File integrity manifest
+
+SHA-256 hashes of the Markdown files, excluding this manifest itself.
+
+| File | SHA-256 |
+| --- | --- |
+| `CONTRACT_CARD.md` | `1d50c49ce82964803141702168987f199207cb11f2af69dd59f0eb37461b12bf` |
+| `DELIVERY_VALIDATION.md` | `4d3d3aa377f34ea7ff07784b9593b317c85a11d5bdc8b79a69a5ef81184580f5` |
+| `GROK_PROMPT.md` | `c26729461359c9e3fca74e99c3ffaf41c94c45a30c396f7d3641e2a9beb627e6` |
+| `INTENT_AND_DECISIONS.md` | `86eed6ad994b3b058ff12a3b6b4751cecd33217d1d08d00942e6bd0d8035942b` |
+| `MASTER_PLAN.md` | `7ab37c93ceb79ad4f560480ce0057ade04909f7a61ae297c9f90e1e9612d5ecd` |
+| `README.md` | `81705318bf506522b334b8d7d97687cdb636181a004c5d304480111a7fad437c` |
+| `SCENARIOS.md` | `8092f93f11bffc0aff44a5cb486c56575ac98021ffca3002b2269985acb369ee` |
+| `SOURCE_EVIDENCE.md` | `75bd9f5c3062b7a512094ae83af06c66d0a72149c2d35eb60fffded0fd4d6c5a` |
+| `START_HERE.md` | `15a23d1b460ff747e19f48641db9259e35106c2070008f89172ebe1d4b6b64fd` |
+| `TEST_COVERAGE.md` | `bbb26e1e8a08c2884a93136060050ee89e5ccbcf385de7ba242eafd8a40bd49d` |
+| `TEST_RUNBOOK.md` | `7f166799c0f1fbaec6aa2b7fe93737902f7f6695b72e9df39a64024953eb9754` |
+| `contracts/AUTHORITY.md` | `46b62faff70324770f30e33d6b788836d3c2c7f9b26c45abd2b5dc0e6e5893f7` |
+| `contracts/DELIVERY_WIRE.md` | `f7157105dbada7a181abb07794adf70ae2981b6da4556cae579302589f695381` |
+| `contracts/EXECUTION.md` | `9c5634e3ebe3cef7d74db968e9d265d8db34c874af782831540dd3c60d2a3169` |
+| `contracts/INTEGRATION.md` | `484b446e19fba0a216c66f799064543ff4ee8998f7847c5d219f80283bfac156` |
+| `contracts/POLICY_FACTORY.md` | `17eebf2513848d43c740f570b8ec6e921506aec7f4582b4ea0f215fb80c2293f` |
+| `packets/P00.md` | `624898124a6b23329d6a8a64645e503d237798cafefcb90d4da248c8fa780e2a` |
+| `packets/P01.md` | `6ef6d91920a3eb36ff7f2eaa6e4529dc784b5a10b20070fc7e102e95e8bba717` |
+| `packets/P02.md` | `8aea00ca117eae8eed04e02f0133485ae757f5632795a585d6d0f532e2e56aff` |
+| `packets/P03.md` | `cd7168121a4289c8a377f4d5ac592c1f6150363d50bc49726bd2b86da23eb381` |
+| `packets/P04.md` | `f6477eb8a037ef6e69170c05dced314806cbdf02956a02301ea3ddbcde076e5d` |
+| `packets/P05.md` | `29adb1ecec64d94b8160b53d337fcf0cac06f44b45422e93b1a41cddf1e2a7c6` |
+| `packets/P06.md` | `2b92b38d511d274bef53a3a3578676ebd51b9c942dbf4afaa4fd9a45c42a8ab0` |
+| `packets/P07.md` | `697d4f79cfd9a0bdc45c5b967c1ef8ae71e5bdc2adf4db6915946cef38c769e1` |
+| `packets/P08.md` | `8101b170be8e8c566296ee57bbb2f2dbc4904913e42597bc349e2cdc676a4f34` |
+| `packets/P09.md` | `839e2858477cc42131d25b335c62268cbccd8e827c40e71f35650442edb62a6b` |
+| `packets/P10.md` | `3a3f41cc23601626ad4945fd7b4c8ae678b1c1531c2c45fc3a12c2d8a478057d` |
+| `packets/P11.md` | `fa46f449d1c2d2202e37580fefb0a1fc4b73118cf5947f0e518826f84a098dbe` |
+| `packets/P12.md` | `9eff668bbc27aef35257a9910b09b85f6f9ba9455060ec5563363cfcbd0214e9` |
+| `packets/P13.md` | `f202d88ac496856beb40a58b246c7d4b7e362c544f3982b1e4da74b2d79a4ef7` |
+| `packets/P14.md` | `cc9595a1c75280c7c3f8165226cef51fcf1fa0aad0bff00844562d15fc0abb65` |
+| `packets/P15.md` | `2d2a4b3d870aa2996d5e1a403b32bead3b62ba57e1109a035a3745767dea2694` |
+| `packets/P16.md` | `010a8a36086d45b6816c8260435f1374c08b186f340a57576d8553d520247184` |
+| `packets/P17.md` | `a508841bfde4826f26718069ec13076dcc90db4880f998527417d0ce1c29f807` |
+| `packets/P18.md` | `741121b826a5514759ffac95556843081bb8d5c61ad26254e771925015090250` |
+| `packets/P19.md` | `8f9811a1d952430e4689e403d276da25117ebcacaa33a654e7a397f69cccfe93` |
+| `templates/ACCEPTANCE_EVIDENCE.md` | `2a8b754d1ec395ca1af46885e51cc5a824e6e2156e08ce479c8278cd2f6fa2ba` |
+| `templates/HANDOFF.md` | `301ae5009ee7ab95f036e0163839f081609c83bb86106325296955623c57246d` |
+| `templates/LEDGER.md` | `8354b908c97a3e17f59109f1ae027931fbad510741a916e4f1b4fd33f03ada0a` |

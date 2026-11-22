@@ -20,6 +20,12 @@ describe("environment configuration", () => {
     expect(config.AGENT_HOSTING_PROTOCOL_WEBSOCKET_PORT).toBe(8080);
   });
 
+  it("accepts an optional provider name without embedding a database enum", () => {
+    expect(loadEnv({ AGENT_HOSTING_PROTOCOL_PERSISTENCE_PROVIDER: "custom-provider" })
+      .AGENT_HOSTING_PROTOCOL_PERSISTENCE_PROVIDER).toBe("custom-provider");
+    expect(loadEnv({}).AGENT_HOSTING_PROTOCOL_PERSISTENCE_PROVIDER).toBeUndefined();
+  });
+
   it("rejects a port above the valid range without echoing the value", () => {
     let message = "";
     try {

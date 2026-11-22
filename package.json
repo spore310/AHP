@@ -26,6 +26,7 @@
   "dependencies": {
     "@microsoft/agent-host-protocol": "1.0.0",
     "ajv": "8.20.0",
+    "pg": "8.23.1",
     "ws": "8.22.0",
     "zod": "4.6.5"
   },
@@ -33,6 +34,7 @@
     "@eslint/js": "10.0.1",
     "@stylistic/eslint-plugin": "5.10.0",
     "@types/node": "24.9.1",
+    "@types/pg": "8.23.1",
     "@types/ws": "8.18.2",
     "eslint": "10.11.0",
     "globals": "16.4.0",

@@ -32,7 +32,23 @@ import { createSessionParamsSchema } from "./types";
 export async function executeCreateSession(
   dependencies: SessionsDependencies,
   rawParams: unknown,
+  onRecordCreated?: (sessionUri: string) => void,
 ): Promise<void> {
+  const prepared = prepareCreateSession(dependencies, rawParams);
+  const { record } = prepared;
+  dependencies.sessions.add(record);
+  try {
+    onRecordCreated?.(record.sessionUri);
+  } catch (error) {
+    if (dependencies.sessions.get(record.sessionUri) === record) dependencies.sessions.delete(record.sessionUri);
+    throw error;
+  }
+  publishCreatedSession(dependencies, record);
+  await startSessionBackend(dependencies, record, prepared.workingDirectories, prepared.config);
+}
+
+/** Internal pure preparation shared by legacy and contextual creation. No registration or publication. */
+export function prepareCreateSession(dependencies: SessionsDependencies, rawParams: unknown) {
   const parsed = createSessionParamsSchema.safeParse(rawParams);
   if (!parsed.success) {
     throw new SessionsError(
@@ -92,13 +108,14 @@ export async function executeCreateSession(
     ...(prepared.binding === undefined ? {} : { application: prepared.binding }),
   };
 
-  dependencies.sessions.add(record);
+  return { record, workingDirectories, config };
+}
+
+export function publishCreatedSession(dependencies: SessionsDependencies, record: SessionRecord): void {
   dependencies.emitCatalogueNotification({
     method: "root/sessionAdded",
     params: { channel: ROOT_CHANNEL_URI, summary: buildSessionSummary(record) },
   });
-
-  await startBackend(dependencies, record, workingDirectories, config);
 }
 
 function resolveProvider(
@@ -152,12 +169,14 @@ function parseSessionConfig(
   }
 }
 
-async function startBackend(
+export async function startSessionBackend(
   dependencies: SessionsDependencies,
   record: SessionRecord,
   workingDirectories: readonly string[],
   config: Readonly<Record<string, unknown>>,
+  beforeFailure?: () => void,
 ): Promise<void> {
+  if (dependencies.sessions.get(record.sessionUri) !== record) return;
   let action: SessionAction;
   try {
     const backend = await record.provider.startSession({
@@ -194,6 +213,7 @@ async function startBackend(
     return;
   }
 
+  if (action.type === ACTION_TYPE_SESSION_CREATION_FAILED) beforeFailure?.();
   const envelope = applySessionAction(
     record,
     action,

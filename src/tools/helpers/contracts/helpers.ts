@@ -32,6 +32,13 @@ const DEFINITION_KEYS = new Set([
  * not stored on the definition.
  */
 export function defineToolContract(input: unknown): ToolContractDefinition {
+  const definition = captureToolDefinition(input);
+  admitSchemas(definition);
+  return definition;
+}
+
+/** Capture shape and budgets without compiling an untrusted proposal. */
+export function captureToolDefinition(input: unknown): ToolContractDefinition {
   const data = readPlainObject(input, 0, new WeakSet<object>());
   rejectUnknownKeys(data);
   const definition = captureDefinition(data);
@@ -39,7 +46,6 @@ export function defineToolContract(input: unknown): ToolContractDefinition {
   if (serialized > MAX_TOOL_DEFINITION_BYTES) {
     throw new ToolContractError("invalid-definition", "Tool contract definition is too large.");
   }
-  admitSchemas(definition);
   return freezeDeep(definition);
 }
 

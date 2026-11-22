@@ -1,0 +1,31 @@
+# P04 P1-1 resolution — explicit protocol-metadata authorization
+
+**ACCEPTED narrow amendment / source correction authorized by lead after Luna's PASS direction recheck (`P04-sequence-plan-recheck.md`).** Sol is the sole correction writer after handing off or explicitly pausing its P05 plan task. Original candidate is retained as historical evidence; P04 is not yet accepted. Native wire sequence semantics must not be fabricated to conceal activity.
+
+## Verified installed constraints
+
+Installed `@microsoft/agent-host-protocol@1.0.0`:
+
+- `dist/types/common/commands.d.ts:214–241`: `InitializeResult.serverSeq: number` is required and documented as the **current server sequence**, even with no initialSubscriptions and `snapshots: []`.
+- `dist/client/client.js:178–188,516–527`: low-level initialize forwards the result; accepting missing values at runtime is not protocol conformance.
+- `dist/client/hosts/runtime.js:508–516,573–578`: host runtime reads/advances its cursor from initialize independently of snapshots. Local initial zero is not a server sentinel.
+- `dist/client/state-mirror.js`: state mirror does not certify sequence semantics merely because an empty snapshots array does nothing.
+- Repository `sessions/helpers/sequence/helpers.ts`: current is genuinely zero only before allocation; `sessions/helpers/factory/helpers.ts:getCurrentServerSeq` reads that shared port. Zero after mutations would not be the current sequence.
+
+Therefore neither omission nor constant zero is an acceptable silent fix. Minimal native handshake can expose host-wide activity without disclosing any particular descriptor. That scalar needs explicit permission if native initialization is offered on this shared sequence.
+
+## Accepted smallest safe behavior
+
+1. Add optional `allowGlobalSequence?: boolean` to the existing trusted `PreparedInitialScopes` result, default **false**. Require an actual boolean when present (never truthiness or a promise). It is an application-established authorization fact for the shared host activity cursor, not a wire field, role, P03 grant or permission to read resources/tools. Capture it immutably with the prepared scope facts.
+2. Carry captured `allowGlobalSequence: boolean` in `ConnectionSecuritySnapshot`. The existing pure synchronous `isCurrent`, expiry and release obligation covers this permission as well as the scope facts. No second authenticator or public unsafe flag; only the already trusted initial authority adapter can supply it after verified identity/actor resolution.
+3. Public initialize requires a live/current validated setup whose captured permission is exactly true **before entering the canonical kernel or reading its sequence getter**. No security, missing/false approval, invalid identity or revoked setup yields a generic denied request, not a successful InitializeResult. No protected getter/state/subscription/sequence access occurs. Authentication or a session-local grant alone is insufficient.
+4. For explicitly permitted setup, keep the exact native current serverSeq, empty initial snapshots, native protocol version/ready-reply semantics and safe ping. This is an intentional authorization to observe host-wide cursor advancement, not a claim that the counter becomes scoped/private. All resource/list/tool routes remain denied under P04.
+5. No anonymous-native-success fallback. AUTHORITY A10 says safe native setup *may* be public, not that anonymous successful initialize is mandatory. Tighten the earlier P04 plan's unauthenticated-positive choice in light of the pinned protocol requirement. Document that consumers need explicit shared-cursor permission to use native initialize; preserve public deny behavior and an explicit authorized minimal-setup positive. Do not weaken root/resource-count privacy or pretend this enables protected views.
+
+## Required regression and scope
+
+Before the fix, reproduce a public no-authority initialize disclosing a nonzero cursor after trusted server-side session mutations. After the fix, assert denial and zero sequence-getter calls for no security, no approval and false approval; wire-supplied approval cannot affect it. Preserve a genuine configured actor/authority control with explicit permission, exact current canonical serverSeq and no snapshots. Mutation after capture, expiry/revocation and Promise/nonboolean values cannot authorize it. Readiness must not commit on denied initialize; protocol-valid denial may be retried only after a new valid setup as applicable.
+
+P04 local security types/capture, safe facade, new P04 tests, and owning README/plan/handoff are affected. Additional exact fixture amendment: `src/tests/websocket/agentWork.transport.test.ts` remains REAL PUBLIC coverage, not private-kernel migration. Its setup may use the existing genuine connection-setup adapter with the exact legacy authenticator bridge, verified subject/actor, empty scopes and explicit cursor permission. Do not fabricate a ready context or add a second authenticator. Preserve held-frame, throwing-authenticator, valid-user/principal and side-effect assertions. Its existing anonymous branch currently expects successful initialize: replace that now-invalid expectation with exact early initialization denial, then denial of subsequent work/agent requests before effects; preserve the final registration-count/work-call assertions. This is a specifically authorized stricter security expectation, not an unchanged-assertion claim. All other assertions stay intact. No change to the private kernel, global allocator, upstream types, P01–P03, old canonical assertions or generic transport sequencing. Existing P04 public tests should install the explicit permission for their positive setup/bridge fixtures, and replace the now-invalid anonymous success expectation with the stronger default-deny regression. This is a security tightening, not an allow-all fixture or skipped functionality.
+
+Lead accepted this amendment and assigned the bounded correction to Sol. Update scoped source/tests/README together; record RED/GREEN and rerun the full DB-safe gate. Preserve the private kernel, canonical sequence and seven migrated assertion bodies unchanged. Freeze and notify lead for exact-candidate validation and Luna's narrow recheck. P05 remains plan-only until corrected P04 is reviewed and accepted.

@@ -1,2 +1,2 @@
 export { createAHPServer } from "./helpers";
-export type { AHPServerHandle, AHPServerOptions } from "./types";
+export type { AHPServerAgentWorkOptions, AHPServerHandle, AHPServerOptions } from "./types";

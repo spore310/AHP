@@ -88,19 +88,77 @@ assertion; do not widen it.
 
 ## Application tool extension
 
-Typed session snapshots carry the server-authored visible contract manifest
+Trusted canonical typed session snapshots carry the server-authored contract manifest
 under `_meta["x-ahp-application"]`. This does not extend AHP's top-level state or
 claim the host implements `serverTools`. Client advertisements use the standard
 `session/activeClientSet` action with exact revision metadata under each tool's
 `_meta["x-ahp-tool-contract"]`; full schemas survive parsing for comparison.
 
-Actual client execution uses explicitly non-standard namespaced methods:
-`x-ahp/tools/call` is a request, `x-ahp/tools/invoke` is a private server
-notification, and `x-ahp/tools/complete` is a client notification. Ordinary
-`AhpClient` users need the [tool client adapter](../../src/toolClient/README.md)
-for this extension. The server validates and routes; a registered local client
-implementation executes. These operations add no persistence or server-side
-filesystem/model runtime. Authentication remains deferred.
+The public host negotiates project-owned tool protocol v2 separately from native
+AHP 1.0.0. `x-ahp/tools/assigned`, `advertise`, `dispatch`, `status`, `resume`, and
+`cancel` use exact private envelopes. Remote execution uses correlated host
+`invoke` and client `complete` notifications. Host-registered actions use the same
+dispatcher and settle locally. The [tool client adapter](../../src/toolClient/README.md)
+owns this exchange. The compatibility kernel's unversioned `call` stays private.
+
+A separate `x-ahp/tools/extensions` request preserves the base v2 reply shape.
+Negotiated `manage` carries propose, approve and publish operations. Negotiated
+`artifact` carries authorized exact artifact metadata and bounded bytes in one
+private response. The host keeps activation as an in-process session operation.
+
+## Protected native read projection
+
+Explicit host `protectedViews` configuration admits resource-read policies from
+the canonical registry/compiler. Selected discover/reveal plus actual bindings
+and mandatory constraints grants resource content, including authored text; it
+does not grant tool execution. The transport separately requires global-sequence
+consent. Initial subscription batches are atomic, and final reply/send guards
+recheck current authority, resource incarnation and subscription ownership.
+
+Protected snapshots/actions empty structured active-client/server tools and
+application metadata. Root provider catalogue is empty without separate authority;
+session counts and list pages are filtered before pagination. List cursors are
+opaque, recipient/basis-bound and short lived. Private proof stamps and canonical
+basis refs never appear in the response. Canonical state remains unchanged.
+
+Projected native actions retain actual serverSeq/fromSeq semantics. The pinned SDK
+reducers are exercised for session metadata, active clients, server tools and root
+counts. Unsupported transitions and permission-only membership changes close the
+view; canonical additions use genuine catalogue/count events. No new native version,
+replacement sequence or guessed resnapshot action is introduced. Advertisers
+receive exact acknowledgements through the negotiated private tool API.
+
+## Authenticated agent/work extension
+
+The optional extension is also namespaced and versioned. Every method is a
+request using `version: 1`:
+
+- `x-ahp/agents/register`, `renew`, `unregister` — durable registration plus a
+  live in-memory presence binding.
+- `x-ahp/work/submit`, `claim`, `renew`, `complete`, `fail`, `cancel`, `get` —
+  durable work and its current execution lease.
+
+Only `x-ahp/work/claim` returns a lease token, and only to the current claimant.
+`get` redacts lease-holder and token fields. A client cannot supply a principal,
+agent ID, connection ID, or presence generation in request JSON; those come from
+the authenticated connection and live directory. The work extension is separate
+from `x-ahp/tools/*`: tools are short-lived private invocation, while work is a
+durable record that survives a disconnect.
+
+Registration text and work payload trees also pass the application's
+portable-text profile before reaching a repository. It rejects NUL and unpaired
+UTF-16 surrogates so accepted values are consistent across storage adapters;
+this is application policy, not a claim that JSON itself cannot represent those
+values. The profile does not replace request schemas, authorization, or payload
+size checks. See the [persistence contract](../../src/persistence/README.md#portable-text-profile-v1).
+
+When configured, the upgrade may carry `Authorization: Bearer <token>`; the
+resolved subject is attached to the connection before AHP dispatch. Missing or
+unknown credentials leave the connection unauthenticated, so agent/work methods
+fail closed. Supported native initialization independently requires trusted
+global-sequence consent, and protected reads require resource-view configuration.
+`initialize.clientId` is never identity. See
+[`../architecture/agent-task-lifecycle.md`](../architecture/agent-task-lifecycle.md).
 
 ## Gotchas
 

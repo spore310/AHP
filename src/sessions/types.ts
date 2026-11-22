@@ -10,9 +10,12 @@ import type {
 } from "@microsoft/agent-host-protocol";
 import { z } from "zod";
 
+import type { ResourceRef } from "@authorization";
+import type { SessionCreationSecurityOptions, SessionFactoryAuthorization } from "./helpers/creation/types";
 import { SESSION_URI_PREFIX } from "./constants";
 import type { SessionApplicationBinding, SessionApplicationOptions } from "./helpers/application";
 import type { SessionToolManifest } from "./helpers/application/manifest";
+import type { PublishedTool, ToolAdmission, ToolAdmissionScope } from "@toolPolicy/helpers/admission";
 import type { ActionSequence } from "./helpers/sequence";
 
 /**
@@ -112,6 +115,7 @@ export type CatalogueNotification
 
 /** One live session owned by the factory. */
 export interface SessionRecord {
+  readonly resource?: ResourceRef<"session">;
   readonly sessionUri: string;
   readonly provider: SessionProvider;
   /** Creation timestamp (ISO 8601). */
@@ -196,6 +200,8 @@ export interface SessionSnapshot {
 
 /** Construction options for {@link SessionsFactory}. */
 export interface SessionsFactoryOptions {
+  readonly toolAdmission?: ToolAdmission;
+  readonly creationSecurity?: SessionCreationSecurityOptions;
   /** Session types this host can create sessions with. At least one is required. */
   readonly providers: readonly SessionProvider[];
   /** Provider used when `createSession.provider` is omitted. Defaults to the first registered. */
@@ -235,16 +241,35 @@ export interface SessionsFactoryOptions {
 
 /** Transport-agnostic session factory: the host's only way to create sessions. */
 export interface SessionsFactory {
+  readonly authorization?: SessionFactoryAuthorization;
+  readonly managedTools?: {
+    readonly admission: ToolAdmission;
+    revision(resource: ResourceRef<"session">): number | undefined;
+    registration(resource: ResourceRef<"session">, contractId: string): PublishedTool | undefined;
+    activate(input: Omit<ToolAdmissionScope, "sessionType" | "providerId"> & {
+      readonly proposalId: string;
+      readonly expectedRevision: number;
+    }): Promise<{ readonly revision: number; readonly tool: PublishedTool } | undefined>;
+  };
   /**
    * Creates a session at the client-chosen URI. Validates params, enforces the
    * create-session contract, registers the session, emits `root/sessionAdded`,
    * then settles its lifecycle with `session/ready` or `session/creationFailed`.
    *
+   * `onRecordCreated` is invoked synchronously at the moment this call attaches
+   * its session record — before the backend is started and before the record
+   * can be removed again — so identity-scoped installers (for example owner
+   * bindings) can never outlive their own record: a create whose record is
+   * disposed while its backend is still starting resolves without re-binding.
+   *
    * Rejects with a {@link SessionsError} carrying the AHP/JSON-RPC error code.
    * While {@link dispose} is in flight, creation is rejected with
    * `SessionsDisposingError` rather than registered after the disposal boundary.
    */
-  createSession(params: unknown): Promise<void>;
+  createSession(
+    params: unknown,
+    onRecordCreated?: (sessionUri: string) => void,
+  ): Promise<void>;
   /** Current snapshot for a session, or `undefined` when no such session exists. */
   getSessionSnapshot(sessionUri: string): SessionSnapshot | undefined;
   /**
@@ -281,6 +306,8 @@ export interface SessionsFactory {
     readonly clientSeq: unknown;
     readonly action: unknown;
     readonly clientId: string;
+    /** Trusted synchronous veto after structural validation; never supplies authority. */
+    readonly admission?: () => boolean;
   }): ActionEnvelope;
   /** Subscribes to root catalogue events. Returns an unsubscribe function. */
   onCatalogueNotification(listener: (notification: CatalogueNotification) => void): () => void;
