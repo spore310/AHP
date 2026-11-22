@@ -56,6 +56,7 @@ export interface PrivateToolCallEntry {
   cancelled: boolean;
   finished: boolean;
   resultSeen: boolean;
+  deniedBeforeAdmission: boolean;
   continuationId?: string;
   resuming?: boolean;
 }

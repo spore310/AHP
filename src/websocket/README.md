@@ -439,8 +439,9 @@ fences follow authority callbacks. Foreign leases return safe absence. The exact
 selected connection alone can complete a v2 invocation. Host-to-executor cancel
 notifications carry its exact correlation without input and request cooperative
 cancellation; unresolved work remains draining until actual completion/settlement.
-No public legacy alias or unnegotiated completion bypass is enabled. Resume remains
-unsupported until P13. Approved source identity is not remote code attestation.
+The public route requires private negotiation and exact completion correlation.
+Resume requires an explicitly configured challenge adapter. Approved source
+identity establishes the trusted registration used for dispatch.
 
 | File | Responsibility |
 | --- | --- |
@@ -501,3 +502,17 @@ server-only/mixed configurations, exact identities and revisions, mandatory rout
 constraints, challenge resume, cancellation, forged metadata/completion, revocation,
 recipient raw-wire canaries and native sequencing. Packet acceptance and P19 final
 integrated validation are recorded separately in the R5 execution area.
+
+### Proposal management and artifact transfer
+
+`x-ahp/tools/extensions` negotiates optional management and artifact support after
+the base private v2 negotiation. `x-ahp/tools/manage` accepts bounded proposals and
+exact proposal ID/revision operations. The host configures the admission service
+on its session factory. The session owner of the manifest applies a separately
+authorized in-process activation and keeps the pinned native reducer consistent.
+
+`x-ahp/tools/artifact` uses an exact scoped assignment view revision. The host
+checks the current advertise and execute proofs before reading bytes and at reply
+enqueue. Advertisement requires recorded authorized delivery for that artifact
+assignment. Artifact bytes and publisher metadata travel only in the authorized
+request's private reply.

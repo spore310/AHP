@@ -27,6 +27,7 @@ export const AGENT_WORK_REQUEST_METHODS: ReadonlySet<string> = new Set([
 export const TOOL_PRIVATE_REQUEST_METHODS: ReadonlySet<string> = new Set([
   "x-ahp/tools/capabilities", "x-ahp/tools/assigned", "x-ahp/tools/advertise",
   "x-ahp/tools/dispatch", "x-ahp/tools/status", "x-ahp/tools/cancel", "x-ahp/tools/resume",
+  "x-ahp/tools/extensions", "x-ahp/tools/manage", "x-ahp/tools/artifact",
 ]);
 
 /** AHP methods that must arrive as JSON-RPC requests. */

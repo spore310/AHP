@@ -2,7 +2,7 @@ import { WebSocketTransport } from "@microsoft/agent-host-protocol/ws";
 import { z } from "zod";
 import { createReferenceAuthorizer, type SecurityComposition, type TrustedRequestContext, type ResourceRef, type ReferenceAuthorizer, type PolicyActorRef } from "@authorization";
 import type { ToolAssignmentRecord } from "@authorization/helpers/evaluate";
-import { createToolPolicyFactory, type ToolOperation } from "@toolPolicy";
+import { createToolAdmission, createToolPolicyFactory, type ToolOperation } from "@toolPolicy";
 import { createSessionConfig, createSessionTypeCatalogue, defineApplicationSession, ToolAccessLevel } from "@sessions";
 import { createMockProvider } from "@sessions/mock";
 import { createToolCatalogue, type ToolContractDefinition } from "@tools";
@@ -11,13 +11,19 @@ import type { ClientToolBrokerOptions, ClientToolRegistration, ClientToolRoute }
 import type { ToolPolicyRegistration, ToolPolicyResolutionRequest } from "@toolExecution/helpers/policy";
 import type { ServerToolBrokerOptions } from "@toolExecution/server";
 import type { CompiledToolPolicy } from "@toolPolicy/helpers/factory";
+import { createExamplePolicyAdmission } from "@application";
+import type { SessionsFactoryOptions } from "@sessions/types";
 
 export const toolPolicyChannel = "ahp-session:/capacity";
 export const connectPolicyTransport = (url: string, token = "fixture") => WebSocketTransport.connect(url, { protocols: "r5-" + token });
 
 /** Real credential validation, canonical sessions/assignments and SDK transport. Only historical suites explicitly substitute the internal kernel. */
 export async function createToolPolicyHost(definitions: readonly ToolContractDefinition[], options: {
-  readonly roles?: Readonly<Record<string, readonly ToolOperation[]>>;
+  readonly roles?: Readonly<Record<string, readonly string[]>>;
+  readonly management?: { readonly allowSelfApproval?: boolean; readonly now?: () => number };
+  readonly artifacts?: ClientToolBrokerOptions["artifacts"];
+  readonly admissionMode?: "direct" | "namespace";
+  readonly sequence?: SessionsFactoryOptions["sequence"];
   readonly permission?: () => Promise<"allow" | "deny">;
   readonly challenge?: boolean;
   readonly dispatcher?: ClientToolBrokerOptions["dispatcher"];
@@ -46,18 +52,31 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
   const roles = options.roles ?? { fixture: ["invoke", "advertise", "execute"] };
   const policy = { id: "fixture.tools", revision: 1 };
   const invokePolicy = options.invokeChallenge === true ? { id: "fixture.invoke-challenge", revision: 1 } : policy;
-  const admitted = options.invokeChallenge === true ? [policy, invokePolicy] : [policy];
+  const activationPolicy = { id: "fixture.activate", revision: 1 };
+  const admitted = [policy, ...(options.invokeChallenge === true ? [invokePolicy] : []), ...(options.management === undefined ? [] : [activationPolicy])];
   const sessionType = options.sessionType ?? { key: "test.echo-session", version: 1 };
-  const rules = { admitted: { policies: admitted, namespaces: [] }, mandatory: [] };
-  const policies = createToolPolicyFactory({ policies: [{ ...policy, operations: Object.fromEntries(["discover", "invoke", "advertise", "execute"].map((operation) => [operation,
+  const definitionsForAdmission: readonly CompiledToolPolicy[] = [{ ...policy, operations: Object.fromEntries(["discover", "invoke", "advertise", "execute", "propose", "approve", "publish"].map((operation) => [operation,
     { actor: { mode: "roles", actors: { user: { anyOf: [operation] }, ...(options.actors === undefined ? {} : { agent: { anyOf: [operation] } }) } }, ...(operation === "discover" ? { reveal: true } : {}), ...(options.permission === undefined ? {} : { requiredPermissions: ["fixture-check"] }) }])),
   challenge: { required: options.challenge ?? false } }, ...(options.invokeChallenge === true
     ? [{ ...invokePolicy,
         operations: { invoke: { actor: { mode: "roles" as const, actors: { user: { anyOf: ["invoke"] }, agent: { anyOf: ["invoke"] } } } } },
         challenge: { required: true } }]
-    : []), ...(options.additionalPolicies ?? [])], bindings: [{ sessionType, providerId: "mock", ...rules }] });
+    : []), ...(options.management === undefined
+    ? []
+    : [{ ...activationPolicy, challenge: { required: false },
+        operations: { publish: { actor: { mode: "roles" as const, actors: { user: { anyOf: ["activate"] } } } } } }]),
+  ];
+  const { admitted: ceiling, namespaces } = createExamplePolicyAdmission(options.admissionMode ?? "direct", definitionsForAdmission);
+  const rules = { admitted: ceiling, mandatory: [] };
+  const policies = createToolPolicyFactory({ policies: [...definitionsForAdmission, ...options.additionalPolicies ?? []], namespaces,
+    bindings: [{ sessionType, providerId: "mock", ...rules }] });
   const registry = createReferenceAuthorizer({ policies, now: options.registryNow ?? Date.now,
     permissionEvaluators: { ...options.permissionEvaluators, ...(options.permission === undefined ? {} : { "fixture-check": options.permission }) } });
+  const toolAdmission = options.management === undefined
+    ? undefined
+    : createToolAdmission({ registry, policies, activationPolicies: [activationPolicy],
+        ...(options.management.now === undefined ? {} : { now: options.management.now }),
+        ...(options.management.allowSelfApproval === undefined ? {} : { allowSelfApproval: () => options.management?.allowSelfApproval === true }) });
   const registrations = options.registrations ?? definitions.map((definition) => ({ definition, revision: 1, source: { id: "fixture-source-" + definition.key, revision: 1 },
     implementation: { location: "client" as const, suppliedBy: "client" as const, implementation: "client-owned" as const, implementationId: "fixture-implementation-" + definition.key } }));
   for (const definition of definitions) registry.installTool(definition);
@@ -122,8 +141,13 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
       ? { protectedViews: { registry, policies, admitted: [policy],
           resolve: ({ resource }: { resource: import("@authorization").ResourceRef }) => options.route?.(resource) ?? ({ route: { origin: resource, targets: [resource] } }) } }
       : {}),
-    sessions: { providers: [createMockProvider()], application: { catalogue: createSessionTypeCatalogue({ tools: createToolCatalogue({ definitions }), types: [type.registration] }), defaultType: sessionType }, creationSecurity: { registry, policies } },
-    ...(options.clientExecution === false ? {} : { toolExecution: { registry, policies, registrations, resolve, dispatcher } }),
+    sessions: { providers: [createMockProvider()], application: { catalogue: createSessionTypeCatalogue({ tools: createToolCatalogue({ definitions }), types: [type.registration] }), defaultType: sessionType },
+      creationSecurity: { registry, policies }, ...(toolAdmission === undefined ? {} : { toolAdmission }),
+      ...(options.sequence === undefined ? {} : { sequence: options.sequence }) },
+    ...(options.clientExecution === false
+      ? {}
+      : { toolExecution: { registry, policies, registrations, resolve, dispatcher,
+          ...(options.artifacts === undefined ? {} : { artifacts: options.artifacts }) } }),
     ...(options.server === undefined ? {} : { serverToolExecution: { ...options.server, registry, policies, resolve, dispatcher: options.server.dispatcher ?? dispatcher } }),
     security: { composition, ...(options.securityNow === undefined ? {} : { now: options.securityNow }), initialAuthority: { prepare: ({ context, fence }) => {
       const releaseSignal = Promise.withResolvers<undefined>();

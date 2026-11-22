@@ -1,5 +1,9 @@
 # R5 execution continuation
 
+P16–P19 are verified on the integrated working-tree candidate. The
+[P19 handoff](P19-handoff.md) records its scope and final acceptance. The
+checkpoint history below records the earlier P06–P15 execution.
+
 Execute mode. P06-P15 accepted. Full P06-P19 goal ACTIVE; P15 checkpoint finalization then P16.
 P06 pushed bd46480bed27477b6262b0e8b63179aec74c05fa; P07 pushed
 e3dafe4b215d42a5c8223316b209389ae3f52747; P08 pushed

@@ -10,6 +10,16 @@ Inert example session policy for the default host. It lists allowed tool contrac
 | `helpers.ts` | Baseline session catalogue and bounded in-memory host action registration. |
 | `index.ts` | Public exports. |
 
+`createScopedToolPolicyExample("direct")` creates direct-policy admission.
+The `"namespace"` form selects the same policy through an included namespace.
+Both examples use the application's `maintainer`, `reader`, and `triage` roles for
+the senior owner, junior agent, and PM, respectively. Importing or creating the
+example leaves bindings and assignments empty. An authorized host supplies the
+actor's exact scoped binding and any separate tool assignment. The mandatory
+`example-provider-consent` evaluator can deny invocation independently of the
+local role. The example and public namespace loopback are exercised by
+[`applicationPolicyExamples.test.ts`](../tests/applicationPolicyExamples.test.ts).
+
 ## API
 
 `createBaselineSessionApplication()` returns a fresh `SessionApplicationOptions`. The default type is `code-review@1`, which lists `workspace.read-file@1` and `workspace.search@1`. `coding@1` also lists `workspace.write-file@1`. Language settings stay in the application config. The mock provider still receives `{}`.

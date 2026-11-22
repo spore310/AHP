@@ -1,5 +1,10 @@
 # R5 test coverage — 100 required criteria
 
+The [verified P19 handoff](execution/P19-handoff.md) reconciles this design matrix
+with the final candidate's executed evidence. The packet ledger links each
+criterion group to its handoff. Status cells below preserve the original plan
+baseline.
+
 **Status:** test specification only. Every row begins **NOT RUN**. No AHP code was executed in preparing this package. Rows are behavioral acceptance criteria, not a fabricated count of implemented tests. Several scenarios may share one parameterized suite, and one criterion may require several tests.
 
 Use the exact packet test targets as the initial suite map. Record actual test names and commands in the handoff and ledger. A mock pass proves only the mocked boundary; actual Microsoft SDK client/reducer tests prove the stated protocol integration, not real MFA, filesystem, database locking or runtime attestation.

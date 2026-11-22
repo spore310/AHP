@@ -26,21 +26,22 @@ export function createToolExecutorPolicy<TLocation extends ToolExecutionLocation
   const validateCohort = registry.validateAuthorityCohort.bind(registry);
   const readBindings = registry.readBindings.bind(registry);
   const getContract = registry.getContract.bind(registry);
-  const registrations = options.registrations.map((raw): ToolPolicyRegistration<TLocation> => {
+  const captureRegistration = (raw: ToolPolicyRegistration<TLocation>): ToolPolicyRegistration<TLocation> => {
     const definition = defineToolContract(raw.definition);
     const implementation = toolExecutionBindingSchema.parse(raw.implementation);
     if (implementation.location !== location || !Number.isSafeInteger(raw.revision) || raw.revision < 1
       || !Number.isSafeInteger(raw.source.revision) || raw.source.revision < 1) throw new TypeError("Invalid tool policy registration.");
     const source = Object.freeze({ id: schemas.identifierSchema.parse(raw.source.id), revision: raw.source.revision });
     return Object.freeze({ definition, implementation: Object.freeze(implementation) as ToolPolicyRegistration<TLocation>["implementation"], revision: raw.revision, source });
-  });
+  };
+  const registrations = options.registrations.map(captureRegistration);
   const identities = new Set<string>();
   for (const entry of registrations) {
     const key = JSON.stringify([entry.definition.id, entry.implementation, entry.revision]);
     if (identities.has(key)) throw new TypeError("Duplicate tool policy registration.");
     identities.add(key);
   }
-  const issued = new Set(registrations);
+  const issued = new WeakSet(registrations);
   const issuedProofs = new WeakMap<ToolExecutorProof, { readonly authorization: AssignmentAuthorization; readonly actor: TrustedRequestContext; readonly signal: AbortSignal }>();
   const captureRequest = (request: ToolPolicyResolutionRequest<TLocation>): ToolPolicyResolutionRequest<TLocation> => {
     if (!issued.has(request.registration) || request.signal.aborted) return deny();
@@ -56,6 +57,15 @@ export function createToolExecutorPolicy<TLocation extends ToolExecutionLocation
 
   return Object.freeze({
     registrations: Object.freeze(registrations),
+    /** Runtime registration is issued only from the host-owned, activated manifest. */
+    registerRuntime(raw: ToolPolicyRegistration<TLocation>): ToolPolicyRegistration<TLocation> {
+      const registered = getContract(raw.definition.id);
+      if (registered === undefined || !canonicalJsonEqual(registered, raw.definition)
+        || registrations.some((entry) => entry.definition.id === raw.definition.id)) return deny();
+      const captured = captureRegistration(raw);
+      issued.add(captured);
+      return captured;
+    },
     current(proofs: readonly ToolExecutorProof[], resourceAuthority?: ResourceOperationAuthority): boolean {
       if (resourceAuthority !== undefined && resourceAuthority.registry !== registry) return false;
       const candidate: unknown = proofs;

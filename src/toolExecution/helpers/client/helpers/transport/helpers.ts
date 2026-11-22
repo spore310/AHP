@@ -8,6 +8,7 @@ import type { ActiveToolRegistration, StagedToolRegistration } from "./types";
 
 /** One reader owns private messages and forwards ordinary frames to the pinned SDK. */
 export class ToolInvocationTransport implements AhpTransport {
+  private assignmentEpoch: object = {};
   private readonly implementations = new Map<string, ActiveToolRegistration>();
   private readonly staged = new Map<string, { readonly channel: string; readonly registration: StagedToolRegistration }>();
   private readonly queued: ToolInvoke[] = [];
@@ -96,6 +97,7 @@ export class ToolInvocationTransport implements AhpTransport {
       if (parsed.method === "x-ahp/tools/assignmentsChanged") {
         try {
           const change = parseToolWire(toolAssignmentsChangedSchema, parsed.params);
+          this.assignmentEpoch = {};
           this.implementations.delete(change.channel);
           for (const [token, entry] of this.staged) if (entry.channel === change.channel) this.discard(change.channel, token);
         } catch { /* Invalid hints do not change registrations. */ }
@@ -125,6 +127,11 @@ export class ToolInvocationTransport implements AhpTransport {
 
   private isClosed(): boolean {
     return this.closed;
+  }
+
+  captureAssignmentFence(): () => boolean {
+    const epoch = this.assignmentEpoch;
+    return () => !this.closed && this.assignmentEpoch === epoch;
   }
 
   private assertOpen(): void {

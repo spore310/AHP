@@ -40,6 +40,14 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
     entry.admission.resolve({ status: "denied" });
     if (!entry.finished) cancelWork(entry);
   };
+  const retireDenied = (entry: Entry): void => {
+    if (entry.finished && entry.deniedBeforeAdmission) remove(entry);
+  };
+  const denyAdmission = (entry: Entry): void => {
+    entry.deniedBeforeAdmission = true;
+    entry.admission.resolve({ status: "denied" });
+    retireDenied(entry);
+  };
   const dispose = (): void => {
     if (closed) return;
     closed = true;
@@ -107,7 +115,7 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
       const callId = randomUUID();
       const admission = Promise.withResolvers<ToolDispatchAdmission>();
       const entry: Entry = { callId, owner, expiresAt: time + limits.ttlMs, admission,
-        status: Object.freeze({ version: 2, callId, status: "waiting" }), bytes: 0, cancelled: false, finished: false, resultSeen: false };
+        status: Object.freeze({ version: 2, callId, status: "waiting" }), bytes: 0, cancelled: false, finished: false, resultSeen: false, deniedBeforeAdmission: false };
       entries.set(callId, entry);
       entry.timer = setTimeout(() => {
         remove(entry);
@@ -118,6 +126,10 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
         entry.handle = handle;
         if (!owned(entry)) cancelWork(entry);
         void handle.admitted.then((allowed) => {
+          if (allowed.status === "denied") {
+            denyAdmission(entry);
+            return;
+          }
           if (!live(entry) || entry.cancelled || entry.resultSeen) {
             admission.resolve({ status: "denied" });
             return;
@@ -127,14 +139,10 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
             admission.resolve(allowed);
             return;
           }
-          if (allowed.status !== "ready") {
-            admission.resolve({ status: "denied" });
-            return;
-          }
           state(entry, "running");
           admission.resolve({ status: "ready" });
         }, () => {
-          admission.resolve({ status: "denied" });
+          denyAdmission(entry);
         });
         void handle.result.then((outcome) => {
           acceptResult(entry, outcome);
@@ -147,11 +155,13 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
         });
         void handle.settled.then((outcome) => {
           entry.finished = true;
+          retireDenied(entry);
           if (!owned(entry)) return;
           acceptResult(entry, outcome);
           if (entry.status.status === "draining") state(entry, entry.cancelled ? "cancelled" : "failed");
         }, () => {
           entry.finished = true;
+          retireDenied(entry);
           if (owned(entry)) state(entry, entry.cancelled ? "cancelled" : "failed");
           admission.resolve({ status: "denied" });
         });

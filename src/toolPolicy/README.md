@@ -1,6 +1,9 @@
 # Tool policy contracts
 
-R5 declarations for generic tool roles, execution bindings, and serializable namespace manifests. The P01 contract boundary is accepted; later changes require an explicit amendment. This module compiles exact direct policies and namespace closures. Compilation is not a grant, and empty role branches still admit nobody only when a later evaluator reads them.
+This module compiles exact direct policies and namespace closures for
+application-defined roles and execution bindings. The canonical evaluator
+requires a scoped actor binding and denies empty role branches. The proposal
+service records immutable approved tool definitions and provenance.
 
 ## Files
 
@@ -20,6 +23,9 @@ R5 declarations for generic tool roles, execution bindings, and serializable nam
 | `helpers/assignments/types.ts` | Admitted tool projection input. |
 | `helpers/assignments/helpers.ts` | `projectAssignedDescriptors` calls `toAhpToolDefinition` only after `validateAssignments`. |
 | `helpers/assignments/index.ts` | Assignment exports. |
+| `helpers/admission/index.ts` | Proposal and publication service exports. |
+| `helpers/admission/types.ts` | Trusted session scope, proposal transition, and approved provenance contracts. |
+| `helpers/admission/helpers.ts` | Bounded proposal store and independently authorized approval, publication, and activation preparation. |
 | `index.ts` | Public exports, including the authorization `PolicyDecision` re-export. |
 
 ## Public names
@@ -29,6 +35,18 @@ Types: `ToolActorPolicy`, `ToolActorRule`, `ToolOperation`, `ToolOperationRule`,
 Values: `TOOL_OPERATIONS`, `DIRECT_GRANT_ACTOR_KINDS`, `createToolPolicySchemas`, `roleNameSchema`, `toolActorPolicySchema`, `toolActorRuleSchema`, `toolOperationRuleSchema`, `toolExecutionPolicyManifestSchema`, `toolExecutionBindingSchema`, `toolPolicyNamespaceManifestSchema`, `boundedExtensionSchema`, `policyDecisionSchema`, `defineToolPolicyNamespace`, `createToolPolicyFactory`, `ToolPolicyFactoryError`. `defineToolPolicyNamespace` accepts an optional second `PolicyLimits` argument when a declaration needs a validated budget other than the defaults.
 
 ## Assignment descriptors
+
+`createToolAdmission` uses the same canonical authorizer and policy factory as
+protected session creation. Propose, approve, and publish use independent policy
+operations. The host may explicitly allow an authorized proposer to approve their
+own proposal. Pending proposals expire after five minutes with eight per principal
+and 64 per host, within 128 total records. The service reserves immutable contract
+identity and keeps the proposer, scope, and provenance server-owned.
+
+The trusted review method reads a detached candidate under approval authority.
+Publication makes the approved revision available to the host. Live session
+activation additionally requires a separate policy in `activationPolicies` and
+an expected manifest revision. Execute and invoke assignments are separate grants.
 
 `projectAssignedDescriptors(view, authorization, currentCaller, purpose)` consumes an authorizer-issued assignment projection. Pass the original caller's current trusted context even for execute delivery: the executor has its own captured identity and registration fence. Replacing the caller context with the executor's context does not validate that authority.
 

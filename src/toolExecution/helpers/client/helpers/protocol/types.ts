@@ -2,6 +2,7 @@ import { z } from "zod";
 import { resourceRefSchema, identifierSchema } from "@authorization/helpers/validation";
 import { toolExecutionBindingSchema } from "@toolPolicy/helpers/validation";
 import { challengePresentationSchema } from "@toolExecution/types";
+import { approvedArtifactSchema, MAX_ARTIFACT_ENCODING } from "@toolExecution/helpers/artifacts/types";
 
 const version = z.literal(2);
 const channel = z.string().min(1).max(2048);
@@ -25,6 +26,21 @@ const view = { version, channel, resource: resourceRefSchema, connection, viewRe
 export const toolCapabilitiesRequestSchema = z.strictObject({ version });
 export const toolCapabilitiesReplySchema = z.strictObject({ version, assignments: z.literal(true),
   dispatch: z.literal(true), continuation: z.boolean() });
+export const toolExtensionsReplySchema = z.strictObject({ version, management: z.boolean(), artifacts: z.boolean() });
+export const toolManagementRequestSchema = z.discriminatedUnion("operation", [
+  z.strictObject({ version, channel, operation: z.literal("propose"), definition: json }),
+  z.strictObject({ version, channel, operation: z.literal("approve"), proposalId: revision, revision: positive }),
+  z.strictObject({ version, channel, operation: z.literal("publish"), proposalId: revision, revision: positive }),
+]);
+export const toolManagementReplySchema = z.union([
+  z.strictObject({ version, status: z.literal("unavailable") }),
+  z.strictObject({ version, status: z.enum(["proposed", "approved", "published"]), proposalId: revision, revision: positive }),
+]);
+export type ToolManagementReply = z.infer<typeof toolManagementReplySchema>;
+export const toolArtifactRequestSchema = z.strictObject({ version, channel, viewRevision: revision, contract: toolContractSelectorSchema });
+export const toolArtifactReplySchema = z.union([z.strictObject({ version, status: z.literal("unavailable") }),
+  z.strictObject({ version, status: z.literal("available"), artifact: approvedArtifactSchema,
+    encoded: z.string().min(4).max(MAX_ARTIFACT_ENCODING) })]);
 export const toolAssignedRequestSchema = z.strictObject({ version, channel });
 export const toolAssignedReplySchema = z.strictObject({ ...view, tools: z.array(assignedToolSchema).max(128) });
 export const toolAdvertiseRequestSchema = z.strictObject({ version, channel, viewRevision: revision,

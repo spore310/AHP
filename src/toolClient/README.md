@@ -26,3 +26,8 @@ try {
 A compatible authenticated endpoint with private v2 support is required. Both import surfaces use minimal native initialization, private assignments/advertisement and dispatch/status. Legacy call envelopes have no public fallback. The client also exports typed pending/challenge errors and receipt/status DTOs. Public SDK execution is covered separately from the frozen internal P09 compatibility fixture.
 
 For injected SDK transports, ownership, framing, shutdown and trust limits, see the owning module README. A supplied authenticated endpoint may keep credentials in its adapter. Neither entry creates query-token authentication, arbitrary browser headers, or remote code attestation.
+
+The same client exposes `proposeTool`, `approveTool`, `publishTool` and
+`loadApprovedTool` when the host advertises the corresponding opt-in extension.
+`loadApprovedTool` takes an explicit runtime verifier and loader. Standard
+`joinSession` accepts the ordinary client-owned implementation path.

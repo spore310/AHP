@@ -43,6 +43,38 @@ function pending() {
   return { admitted, result, settled, cancel, handle };
 }
 
+it.each(["admission-first", "settlement-first"] as const)("Z02 releases only settled never-admitted retention, %s", async (order) => {
+  const store = createPrivateToolCalls({ limits: { maxRecords: 1 } });
+  try {
+    const owner = {}, work = pending();
+    const record = store.start(owner, () => work.handle);
+    if (record === undefined) throw new Error("Missing provisional record.");
+    const failure: ToolDispatchOutcome<unknown> = { status: "failed", code: "denied", phase: "authorize", effectPossible: false, cleanupFailures: 0 };
+    const settle = async (): Promise<void> => {
+      work.result.resolve(failure);
+      work.settled.resolve(failure);
+      await work.settled.promise;
+    };
+    const deny = async (): Promise<void> => {
+      work.admitted.resolve(false);
+      await work.handle.admitted;
+    };
+    if (order === "admission-first") await deny();
+    else await settle();
+    expect(store.stats().records).toBe(1);
+    expect(store.start(owner, () => pending().handle)).toBeUndefined();
+    if (order === "admission-first") await settle();
+    else await deny();
+    expect(await record.admitted).toEqual({ status: "denied" });
+    expect(store.read(record.callId, owner)).toBeUndefined();
+    expect(store.stats()).toEqual({ records: 0, retainedBytes: 0 });
+    expect(work.cancel).not.toHaveBeenCalled();
+    expect(store.start(owner, () => pending().handle)).toBeDefined();
+  } finally {
+    store.dispose();
+  }
+});
+
 it.each(["expired", "invalid", "disposed"] as const)("does not publish delayed admission after a %s logical clock", async (condition) => {
   let time = 0;
   let onClock = () => undefined;

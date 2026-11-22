@@ -2,12 +2,14 @@ import type { ExecutorRevision, TrustedRequestContext } from "@authorization";
 import type { ToolActionContext } from "@toolExecution/types";
 import type { ToolDispatcherOptions } from "@toolExecution/helpers/dispatcher";
 import type { ToolPolicyRegistration, ToolPolicyRoute, ToolPolicyResolutionRequest, ToolExecutorPolicyOptions, ToolExecutorPolicyRequest, ToolExecutorProof } from "@toolExecution/helpers/policy";
+import type { ApprovedArtifactSource } from "@toolExecution/helpers/artifacts";
 
 export type ClientToolRegistration = ToolPolicyRegistration<"client">;
 export type ClientToolRoute = ToolPolicyRoute;
 export type ClientToolResolutionRequest = ToolPolicyResolutionRequest<"client">;
 export interface ClientToolBrokerOptions extends ToolExecutorPolicyOptions<"client"> {
   readonly dispatcher?: ToolDispatcherOptions;
+  readonly artifacts?: ApprovedArtifactSource;
 }
 export type ClientToolPolicyRequest = ToolExecutorPolicyRequest<"client">;
 export type ClientToolProof = ToolExecutorProof;

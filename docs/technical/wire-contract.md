@@ -94,14 +94,17 @@ claim the host implements `serverTools`. Client advertisements use the standard
 `session/activeClientSet` action with exact revision metadata under each tool's
 `_meta["x-ahp-tool-contract"]`; full schemas survive parsing for comparison.
 
-The private compatibility kernel uses explicitly non-standard namespaced methods:
-`x-ahp/tools/call` is a request, `x-ahp/tools/invoke` is a private server
-notification, and `x-ahp/tools/complete` is a client notification. Ordinary
-`AhpClient` users need the [tool client adapter](../../src/toolClient/README.md)
-for this extension. The server validates and routes; a registered local client
-implementation executes. The supported public host keeps this legacy tool wire
-closed pending private assignment/dispatch negotiation. These operations add no persistence or server-side
-filesystem/model runtime.
+The public host negotiates project-owned tool protocol v2 separately from native
+AHP 1.0.0. `x-ahp/tools/assigned`, `advertise`, `dispatch`, `status`, `resume`, and
+`cancel` use exact private envelopes. Remote execution uses correlated host
+`invoke` and client `complete` notifications. Host-registered actions use the same
+dispatcher and settle locally. The [tool client adapter](../../src/toolClient/README.md)
+owns this exchange. The compatibility kernel's unversioned `call` stays private.
+
+A separate `x-ahp/tools/extensions` request preserves the base v2 reply shape.
+Negotiated `manage` carries propose, approve and publish operations. Negotiated
+`artifact` carries authorized exact artifact metadata and bounded bytes in one
+private response. The host keeps activation as an in-process session operation.
 
 ## Protected native read projection
 
@@ -122,9 +125,8 @@ Projected native actions retain actual serverSeq/fromSeq semantics. The pinned S
 reducers are exercised for session metadata, active clients, server tools and root
 counts. Unsupported transitions and permission-only membership changes close the
 view; canonical additions use genuine catalogue/count events. No new native version,
-replacement sequence or guessed resnapshot action is introduced. Advertisers do
-not receive raw descriptor broadcasts; exact private acknowledgement remains part
-of the later negotiated tool API.
+replacement sequence or guessed resnapshot action is introduced. Advertisers
+receive exact acknowledgements through the negotiated private tool API.
 
 ## Authenticated agent/work extension
 

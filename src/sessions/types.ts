@@ -15,6 +15,7 @@ import type { SessionCreationSecurityOptions, SessionFactoryAuthorization } from
 import { SESSION_URI_PREFIX } from "./constants";
 import type { SessionApplicationBinding, SessionApplicationOptions } from "./helpers/application";
 import type { SessionToolManifest } from "./helpers/application/manifest";
+import type { PublishedTool, ToolAdmission, ToolAdmissionScope } from "@toolPolicy/helpers/admission";
 import type { ActionSequence } from "./helpers/sequence";
 
 /**
@@ -199,6 +200,7 @@ export interface SessionSnapshot {
 
 /** Construction options for {@link SessionsFactory}. */
 export interface SessionsFactoryOptions {
+  readonly toolAdmission?: ToolAdmission;
   readonly creationSecurity?: SessionCreationSecurityOptions;
   /** Session types this host can create sessions with. At least one is required. */
   readonly providers: readonly SessionProvider[];
@@ -240,6 +242,15 @@ export interface SessionsFactoryOptions {
 /** Transport-agnostic session factory: the host's only way to create sessions. */
 export interface SessionsFactory {
   readonly authorization?: SessionFactoryAuthorization;
+  readonly managedTools?: {
+    readonly admission: ToolAdmission;
+    revision(resource: ResourceRef<"session">): number | undefined;
+    registration(resource: ResourceRef<"session">, contractId: string): PublishedTool | undefined;
+    activate(input: Omit<ToolAdmissionScope, "sessionType" | "providerId"> & {
+      readonly proposalId: string;
+      readonly expectedRevision: number;
+    }): Promise<{ readonly revision: number; readonly tool: PublishedTool } | undefined>;
+  };
   /**
    * Creates a session at the client-chosen URI. Validates params, enforces the
    * create-session contract, registers the session, emits `root/sessionAdded`,

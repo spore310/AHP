@@ -488,3 +488,21 @@ it("E05 a live host assignment cannot bypass an invoke-only mandatory provider d
   await expect(caller.client.callTool(channel, f.selector, { path: "provider-restored" })).resolves.toHaveProperty("value");
   expect(f.read.execute).toHaveBeenCalledOnce();
 });
+
+it("Z02 settled public denials release disclosure capacity before an authorized call", async () => {
+  const armed = { value: true };
+  const decide = vi.fn(() => Promise.resolve("deny" as const));
+  const f = await fixture({ providerBarrier: { armed, reached: () => undefined, decide } });
+  const caller = await f.connect(f.caller);
+  const before = f.host.sessions.getSessionSnapshot(channel);
+  for (let index = 0; index < 257; index += 1) {
+    expect(await caller.client.dispatchTool(channel, f.selector, { path: "P19-denied" })).toEqual({ version: 2, status: "denied", code: "unavailable" });
+  }
+  expect(decide).toHaveBeenCalledTimes(257);
+  expect(f.host.sessions.getSessionSnapshot(channel)).toEqual(before);
+  expect(f.read.prepare).not.toHaveBeenCalled();
+  expect(f.read.execute).not.toHaveBeenCalled();
+  armed.value = false;
+  await expect(caller.client.callTool(channel, f.selector, { path: "P19-control" })).resolves.toEqual({ value: "P15-HOST-RESULT:coding.read:P19-control:junior-agent" });
+  expect(f.read.execute).toHaveBeenCalledOnce();
+});

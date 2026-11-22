@@ -1,6 +1,6 @@
 # Tool execution contracts
 
-R5 action/challenge contracts and a local action dispatcher. Importing this module does not load a transport, database or platform executor. The dispatcher owns bounded in-memory challenge continuations; there is no artifact verifier. The local dispatcher is trusted host wiring; public transport admission remains separate.
+R5 action/challenge contracts and a local action dispatcher. Importing this module does not load a transport, database or platform executor. The dispatcher owns bounded in-memory challenge continuations. Approved artifact delivery uses an explicit source, publisher check, verifier, and client runtime loader.
 
 The existing `ToolAction` class and presentation schemas remain the contract. Optional `prepare` means `execute` receives `TPrepared | undefined`. Validation has one canonical input, not a separate validated argument. `executor` is an `ExecutorRevision`, not only an actor ref.
 
@@ -19,6 +19,9 @@ The existing `ToolAction` class and presentation schemas remain the contract. Op
 | `helpers/action/index.ts` | Action registration exports and the existing ToolAction class. |
 | `helpers/action/types.ts` | Trusted schema/action registration and compatibility JSON capture type exports. |
 | `helpers/action/helpers.ts` | Captured schema/implementation registration and compatibility bounded JSON capture export. |
+| `helpers/artifacts/index.ts` | Approved artifact exports. |
+| `helpers/artifacts/types.ts` | Exact approved metadata, byte bounds, source, and loader contracts. |
+| `helpers/artifacts/helpers.ts` | Immutable trusted registration, bounded source reads, exact byte verification, and explicit loader handoff. |
 | `helpers/challenge/index.ts` | Internal challenge coordinator exports. |
 | `helpers/challenge/types.ts` | Bounded adapter options, ownership handles and strict result schemas. |
 | `helpers/challenge/helpers.ts` | Atomic one-attempt continuation, presentation approval, deadlines and adapter draining. |
@@ -62,7 +65,30 @@ Registration/dispatcher types: `ToolActionRegistration`, `ToolActionRegistration
 
 ## Omissions
 
-No artifact transport. The separate `@toolExecution/server` entrypoint provides host-controlled action registration and dispatch. The separate client entry uses the private v2 protocol. Root imports do not load a transport or session factory; resource-view cursors use Node crypto.
+The separate `@toolExecution/server` entrypoint provides host-controlled action registration and dispatch. The separate client entry uses the private v2 protocol. Root imports remain transport-free. Resource-view cursors use Node crypto.
+
+## Approved artifact delivery
+
+The host creates `createApprovedArtifactSource({ approve, read })`, registers the
+exact contract, source revision, publisher and artifact metadata, and supplies it
+as `toolExecution.artifacts`. A published client proposal can use this binding
+when the host registers its approved artifact against the exact proposal source
+before the session selects that implementation. The source uses an opaque local
+reference and returns at most 256 KiB of decoded bytes.
+
+`loadApprovedTool(channel, contract, loader)` uses a current private assignment
+to request delivery. The server verifies the assigned recipient, publisher
+approval, and digest. After delivery the SDK client verifies the contract, source,
+implementation, runtime/platform, SHA-256 digest and application verifier before
+calling the loader with the verified bytes. The resulting handler uses the normal
+advertise, challenge, invoke and result validation lifecycle. The host records
+delivery on the exact view before accepting its advertisement. The application
+owns artifact format, trust and runtime isolation. The binding establishes
+approved delivery and local SDK verification, with remote runtime attestation
+outside this contract.
+
+`loadApprovedTool` advertises a single handler and uses the same per-connection,
+per-session replacement semantics as `joinSession`.
 
 ## Private protocol
 

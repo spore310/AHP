@@ -5,9 +5,10 @@ import { z } from "zod";
 import { JsonRpcErrorCodes, type ActionEnvelope, type ToolDefinition } from "@microsoft/agent-host-protocol";
 import { jsonRpcParamsSchema, JSONRPC_VERSION, parseUnknownJson, RpcError, type JsonRpcMessage } from "@jsonrpc";
 import type { SessionsFactory } from "@sessions/types";
-import { ACTION_TYPE_SESSION_ACTIVE_CLIENT_SET, ACTION_TYPE_SESSION_ACTIVE_CLIENT_REMOVED } from "@sessions/constants";
+import { ACTION_TYPE_SESSION_ACTIVE_CLIENT_SET, ACTION_TYPE_SESSION_ACTIVE_CLIENT_REMOVED, ACTION_TYPE_SESSION_META_CHANGED } from "@sessions/constants";
 import { canonicalJsonEqual, toAhpToolDefinition, TOOL_CONTRACT_META_KEY } from "@tools";
 import type { ExecutorRevision, ResourceRef } from "@authorization";
+import type { PublishedTool } from "@toolPolicy/helpers/admission";
 import { createClientToolDispatcher, type ClientToolBrokerOptions, type ClientToolProof, type ClientToolRegistration } from "@toolExecution/helpers/client/helpers/broker";
 import type { ToolDispatchHandle } from "@toolExecution/helpers/dispatcher";
 import { parseToolWire, toolCorrelation, assignedToolSchema, toolAssignedReplySchema, toolInvokeSchema, toolCompleteSchema, toolExecutorCancelSchema } from "@toolExecution/helpers/client/helpers/protocol";
@@ -40,6 +41,7 @@ interface Advertisement {
   readonly advertisementId?: string;
   readonly clientId: string;
   readonly origin: ResourceRef<"session">;
+  readonly manifestRevision: number | undefined;
   readonly setup: ConnectionSecuritySnapshot;
   readonly entries: readonly { readonly registration: ClientToolRegistration; readonly executor: ExecutorRevision }[];
 }
@@ -83,13 +85,33 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
   const dispatcherOptions = options?.dispatcher ?? serverOptions?.dispatcher;
   const lifecycle = configuration === undefined ? undefined : createToolDispatcher(dispatcherOptions);
   const dispatcher = options === undefined ? undefined : createClientToolDispatcher(options, lifecycle);
+  const artifactSource = options?.artifacts;
   const serverDispatcher = serverOptions === undefined ? undefined : createServerToolDispatcher(serverOptions, lifecycle);
+  factory.managedTools?.admission.reserveBase([...options?.registrations ?? [], ...serverOptions?.registrations ?? []].map(({ definition }) => definition));
   if (dispatcher !== undefined && serverDispatcher !== undefined && dispatcher.policy.registrations.some((client) => serverDispatcher.policy.registrations.some((server) => server.definition.id === client.definition.id))) throw new Error("Client and server tool contracts overlap.");
   const advertisements = new Map<string, Map<string, Advertisement>>();
+  const runtimeRegistrations = new WeakMap<PublishedTool, ClientToolRegistration>();
+  const manifestRevision = (origin: ResourceRef<"session">): number | undefined => factory.managedTools?.revision(origin);
+  const registrationsFor = (origin: ResourceRef<"session">, contractId: string): readonly ClientToolRegistration[] => {
+    if (dispatcher === undefined) return [];
+    const entry = factory.managedTools?.registration(origin, contractId);
+    if (entry === undefined) return dispatcher.policy.registrations.filter((candidate) => candidate.definition.id === contractId);
+    const existing = runtimeRegistrations.get(entry);
+    if (existing !== undefined) return [existing];
+    const { id, key, version } = entry.definition;
+    const artifact = artifactSource?.find({ id, key, version }, entry.source);
+    const registration = dispatcher.policy.registerRuntime({ definition: entry.definition, source: entry.source,
+      revision: artifact?.descriptor.implementationRevision ?? entry.source.revision,
+      implementation: artifact === undefined
+        ? { location: "client", suppliedBy: "client", implementation: "client-owned", implementationId: entry.source.id }
+        : { location: "client", suppliedBy: "server", implementation: "approved-artifact", artifactRef: artifact.descriptor.artifactId } });
+    runtimeRegistrations.set(entry, registration);
+    return [registration];
+  };
   let privateAdvertisementEpoch: object = {};
   const privateAdvertisementEpochs = new WeakMap<Advertisement, object>();
-  const advertisementReady = (advertisement: Advertisement): boolean => advertisement.advertisementId === undefined
-    || privateAdvertisementEpochs.get(advertisement) === privateAdvertisementEpoch;
+  const advertisementReady = (advertisement: Advertisement): boolean => manifestRevision(advertisement.origin) === advertisement.manifestRevision
+    && (advertisement.advertisementId === undefined || privateAdvertisementEpochs.get(advertisement) === privateAdvertisementEpoch);
   const sessionTokens = new Map<string, ResourceRef<"session">>();
   const stagedAdvertisements = new Set<StagedAdvertisement>();
   const stagedPrivateAdvertisements = new Set<object>();
@@ -119,7 +141,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
     const providerId = factory.getSessionSnapshot(channel)?.state.provider;
     if (origin === undefined || manifest === undefined || typeof providerId !== "string" || authorization?.isReady(origin) !== true) return unavailable();
     sessionTokens.set(channel, origin);
-    return { origin, manifest, providerId, sessionType: { key: manifest.sessionType.key, version: manifest.sessionType.version } };
+    return { origin, manifest, manifestRevision: manifestRevision(origin), providerId, sessionType: { key: manifest.sessionType.key, version: manifest.sessionType.version } };
   };
   const liveSession = (origin: ResourceRef<"session">): boolean => authorization?.isReady(origin) === true && authorization.getResource(origin.id) === origin;
   const ownAdvertisement = (peer: AHPPeer, channel: string, ad: Advertisement): boolean => livePeer(peer, ad.setup)
@@ -174,7 +196,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
       if (dispatcher === undefined) continue;
       const permitted: Array<{ readonly tool: AssignedTool; readonly registration: ClientToolRegistration;
         readonly executor: ExecutorRevision; readonly proofs: ClientToolProof[]; }> = [];
-      for (const registration of dispatcher.policy.registrations.filter((candidate) => candidate.definition.id === contract.id)) {
+      for (const registration of registrationsFor(facts.origin, contract.id)) {
         const selectedExecutor = { ...executor, registrationRevision: registration.revision };
         const base = { caller: setup.context, origin: facts.origin, sessionType: facts.sessionType, providerId: facts.providerId,
           registration, input: null, signal };
@@ -213,12 +235,35 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
       resource: facts.origin, connection: { id: context.connectionId, generation: setup.fence.connectionGeneration }, tools });
     const fence = (): boolean => !signal.aborted && epoch() && ownedPeer(peer, setup)
       && peer.subscriptions.has(channel) && sessionTokens.get(channel) === facts.origin
+      && manifestRevision(facts.origin) === facts.manifestRevision
       && (!includesServer || serverDispatcher?.executorFence() === true);
     const current = (): boolean => !signal.aborted && livePeer(peer, setup) && liveSession(facts.origin)
       && (!includesServer || serverDispatcher?.executorCurrent() === true)
       && (proofs.length === 0 || configuration.registry.validateAssignmentCohort(proofs.map((proof) => ({ authorization: proof.authorization, actor: setup.context })))) && fence();
     if (!current()) return unavailable();
+    const deliveredArtifacts = new Set<ClientToolRegistration>();
     return { value, current, fence,
+      async artifact(contract, requestSignal) {
+        if (artifactSource === undefined || dispatcher === undefined || !current()) return undefined;
+        const entry = entries.find((candidate) => canonicalJsonEqual(candidate.tool.contract, contract));
+        if (entry?.registration.implementation.implementation !== "approved-artifact" || entry.tool.execution === undefined) return undefined;
+        const artifact = artifactSource.find(contract, entry.registration.source);
+        if (artifact === undefined || artifact.descriptor.artifactId !== entry.registration.implementation.artifactRef
+          || artifact.descriptor.implementationRevision !== entry.registration.revision) return undefined;
+        const base = { caller: setup.context, origin: facts.origin, sessionType: facts.sessionType, providerId: facts.providerId,
+          registration: entry.registration, input: null, signal: requestSignal };
+        const resolution = await dispatcher.policy.resolve(base);
+        const advertise = await dispatcher.policy.authorize({ ...base, resolution, operation: "advertise" });
+        const execute = await dispatcher.policy.authorize({ ...base, resolution, operation: "execute", executor: entry.executor, executorContext: setup.context });
+        if (advertise.challengeRequired || execute.challengeRequired) return undefined;
+        const live = (): boolean => !requestSignal.aborted && current() && dispatcher.policy.current([advertise, execute]) && fence();
+        if (!live()) return undefined;
+        const encoded = await artifactSource.read(artifact, requestSignal, live);
+        if (encoded === undefined || !live()) return undefined;
+        return { artifact, encoded, current: live, recordDelivery: () => {
+          if (live()) deliveredArtifacts.add(entry.registration);
+        } };
+      },
       advertise(contracts, advertisementId) {
         if (!current() || stagedPrivateAdvertisements.size >= 64) return unavailable();
         const selected: typeof entries = [];
@@ -227,11 +272,12 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
           const entry = entries.find((candidate) => candidate.tool.contract.id === contract.id
             && candidate.tool.contract.key === contract.key && candidate.tool.contract.version === contract.version);
           if (entry === undefined || entry.tool.execution === undefined || seen.has(contract.id)) return unavailable();
+          if (entry.registration.implementation.implementation === "approved-artifact" && !deliveredArtifacts.has(entry.registration)) return unavailable();
           seen.add(contract.id);
           selected.push(entry);
         }
         const previous = advertisements.get(context.connectionId)?.get(channel);
-        const advertisement: Advertisement = { advertisementId, clientId: peer.clientId ?? "", origin: facts.origin, setup,
+        const advertisement: Advertisement = { advertisementId, clientId: peer.clientId ?? "", origin: facts.origin, manifestRevision: facts.manifestRevision, setup,
           entries: selected.map((entry) => ({ registration: entry.registration, executor: entry.executor })) };
         const token = {};
         stagedPrivateAdvertisements.add(token);
@@ -296,7 +342,8 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
           if (contract === undefined || seen.has(contract.id)) return denied;
           seen.add(contract.id);
           const allowed: Advertisement["entries"][number][] = [];
-          for (const registration of dispatcher.policy.registrations.filter((entry) => entry.definition.id === contract.id)) {
+          for (const registration of registrationsFor(facts.origin, contract.id)) {
+            if (registration.implementation.implementation === "approved-artifact") continue;
             if (!sameDescriptor(tool, toAhpToolDefinition(registration.definition))) continue;
             const executor = { actor: setup.context.actor, connectionId: peer.context.connectionId,
               generation: setup.fence.connectionGeneration, registrationRevision: registration.revision };
@@ -314,12 +361,13 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
           if (allowed.length !== 1 || allowed[0] === undefined) return denied;
           entries.push(allowed[0]);
         }
-        const advertisement: Advertisement = { clientId: peer.clientId ?? "", origin: facts.origin, setup, entries };
+        const advertisement: Advertisement = { clientId: peer.clientId ?? "", origin: facts.origin, manifestRevision: facts.manifestRevision, setup, entries };
         const staged: StagedAdvertisement = { channel, clientId: advertisement.clientId,
           tools: entries.map((entry) => toAhpToolDefinition(entry.registration.definition)), matches: false };
         if (controller.signal.aborted) return denied;
         stagedAdvertisements.add(staged);
         const current = (): boolean => !controller.signal.aborted && livePeer(peer, setup) && liveSession(facts.origin)
+          && manifestRevision(facts.origin) === facts.manifestRevision
           && dispatcher.policy.current(proofs) && ownsClientId() && ownedPeer(peer, setup)
           && sessionTokens.get(channel) === facts.origin && stagedAdvertisements.has(staged);
         return { current, release: () => {
@@ -362,8 +410,10 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
       const serverRegistration = serverDispatcher?.policy.registrations.find((entry) => entry.definition.id === contract.id);
       if (serverDispatcher !== undefined && serverRegistration !== undefined) {
         const controller = new AbortController();
-        const current = () => livePeer(caller, setup) && caller.subscriptions.has(request.channel) && liveSession(facts.origin);
-        const fence = () => ownedPeer(caller, setup) && caller.subscriptions.has(request.channel) && sessionTokens.get(request.channel) === facts.origin;
+        const current = () => livePeer(caller, setup) && caller.subscriptions.has(request.channel) && liveSession(facts.origin)
+          && manifestRevision(facts.origin) === facts.manifestRevision;
+        const fence = () => ownedPeer(caller, setup) && caller.subscriptions.has(request.channel) && sessionTokens.get(request.channel) === facts.origin
+          && manifestRevision(facts.origin) === facts.manifestRevision;
         const handle = serverDispatcher.dispatch({ caller: setup.context, origin: facts.origin, sessionType: facts.sessionType, providerId: facts.providerId,
           registration: serverRegistration, input: request.input, signal: controller.signal, callId, current, fence });
         calls.set(callId, { caller: context, channel: request.channel, handle });
@@ -485,6 +535,17 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
     ? undefined
     : createPrivateToolProtocol({
         continuation: dispatcherOptions?.challenge !== undefined,
+        artifacts: artifactSource !== undefined,
+        ...(factory.managedTools === undefined
+          ? {}
+          : { async manage(context, request, signal) {
+              const peer = requirePeer(context), setup = context.security;
+              if (setup === undefined || !livePeer(peer, setup) || !peer.subscriptions.has(request.channel)) return undefined;
+              const facts = session(request.channel);
+              const fence = (): boolean => ownedPeer(peer, setup) && peer.subscriptions.has(request.channel) && liveSession(facts.origin);
+              return factory.managedTools?.admission.manage({ ...facts, actor: setup.context, signal, fence,
+                current: () => livePeer(peer, setup) && fence() }, request);
+            } }),
         ready: (context) => {
           const peer = peers.get(context.connectionId), setup = context.security;
           return peer !== undefined && setup !== undefined && livePeer(peer, setup);
@@ -508,6 +569,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
     negotiated: (context: WebSocketConnectionContext) => privateProtocol?.negotiated(context) === true,
     observeEnvelope(envelope: ActionEnvelope): void {
       const action = envelope.action;
+      if (action.type === ACTION_TYPE_SESSION_META_CHANGED && factory.managedTools !== undefined) privateProtocol?.invalidate(envelope.channel);
       if (action.type !== ACTION_TYPE_SESSION_ACTIVE_CLIENT_SET && action.type !== ACTION_TYPE_SESSION_ACTIVE_CLIENT_REMOVED) return;
       const clientId = action.type === ACTION_TYPE_SESSION_ACTIVE_CLIENT_SET ? action.activeClient.clientId : action.clientId;
       for (const staged of stagedAdvertisements) {

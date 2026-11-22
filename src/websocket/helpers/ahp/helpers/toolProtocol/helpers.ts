@@ -6,7 +6,7 @@ import type { PrivateToolCallHandle } from "@toolExecution/helpers/calls";
 import {
   parseToolWire, toolCapabilitiesRequestSchema, toolAssignedRequestSchema, toolAssignedReplySchema,
   toolAdvertiseRequestSchema, toolAdvertiseReplySchema, toolDispatchRequestSchema, toolCallSelectorSchema,
-  toolResumeRequestSchema,
+  toolResumeRequestSchema, toolManagementRequestSchema, toolArtifactRequestSchema, toolArtifactReplySchema,
 } from "@toolExecution/helpers/client/helpers/protocol";
 import type { JsonRpcInvocation, WebSocketConnectionContext } from "@websocket/types";
 import type { PrivateProtocolCall, PrivateProtocolView, PrivateToolProtocol, PrivateToolProtocolPorts } from "./types";
@@ -22,6 +22,7 @@ export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): Priv
   const assignment = ports.assignment.bind(ports), dispatch = ports.dispatch.bind(ports);
   const peers = new Set<WebSocketConnectionContext>();
   const negotiating = new Set<WebSocketConnectionContext>();
+  const extensions = new WeakSet<WebSocketConnectionContext>();
   const views = new Map<WebSocketConnectionContext, Map<string, PrivateProtocolView>>();
   const calls = createPrivateToolCalls();
   const access = new WeakMap<PrivateToolCallHandle, Pick<PrivateProtocolCall, "current" | "refresh">>();
@@ -67,16 +68,53 @@ export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): Priv
       clearTimeout(timer);
     }
   };
-  const unsubscribe = ports.onInvalidate(() => {
+  const invalidate = (channel?: string): void => {
     for (const ownViews of [...views.values()]) for (const view of [...ownViews.values()]) {
+      if (channel !== undefined && channel !== view.channel) continue;
       drop(view);
       if (!live(view.context)) continue;
       view.context.send({ jsonrpc: JSONRPC_VERSION, method: "x-ahp/tools/assignmentsChanged",
         params: { version: 2, channel: view.channel, viewRevision: randomUUID() } }, () => owned(view.context));
     }
+  };
+  const unsubscribe = ports.onInvalidate(() => {
+    invalidate();
   });
   return {
     handlers: {
+      "x-ahp/tools/extensions": (params, context, invocation) => {
+        requireLive(context, invocation);
+        parseToolWire(toolCapabilitiesRequestSchema, params);
+        invocation.guardReply?.(() => live(context) && owned(context));
+        invocation.onReplySettled((settlement) => {
+          if (settlement.outcome === "success" && settlement.responseSent && owned(context)) extensions.add(context);
+        });
+        return { version: 2, management: ports.manage !== undefined, artifacts: ports.artifacts === true };
+      },
+      "x-ahp/tools/manage": async (params, context, invocation) => {
+        requireLive(context, invocation);
+        const request = parseToolWire(toolManagementRequestSchema, params);
+        if (!extensions.has(context) || ports.manage === undefined) return absent;
+        const result = await bounded(async (signal) => ports.manage?.(context, request, signal));
+        if (result === undefined || !result.current() || !owned(context)) return absent;
+        invocation.guardReply?.(() => result.current() && owned(context));
+        return { version: 2, ...result.receipt };
+      },
+      "x-ahp/tools/artifact": async (params, context, invocation) => {
+        requireLive(context, invocation);
+        const request = parseToolWire(toolArtifactRequestSchema, params);
+        const view = views.get(context)?.get(request.channel);
+        if (!extensions.has(context) || ports.artifacts !== true || view === undefined || view.revision !== request.viewRevision || !view.ticket.current()) return absent;
+        const result = await bounded(async (signal) => view.ticket.artifact?.(request.contract, signal));
+        const current = (): boolean => result?.current() === true && live(context)
+          && views.get(context)?.get(request.channel) === view && view.ticket.current() && owned(context) && view.ticket.fence();
+        if (result === undefined || !current()) return absent;
+        invocation.guardReply?.(current);
+        invocation.onReplySettled((settlement) => {
+          if (settlement.outcome === "success" && settlement.responseSent && current()) result.recordDelivery();
+        });
+        return parseToolWire(toolArtifactReplySchema, { version: 2, status: "available", artifact: result.artifact, encoded: result.encoded });
+      },
       "x-ahp/tools/capabilities": (params, context, invocation) => {
         parseToolWire(toolCapabilitiesRequestSchema, params);
         if (closed || invocation.kind !== "request" || invocation.guardReply === undefined || !ready(context)
@@ -267,6 +305,7 @@ export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): Priv
       },
     },
     negotiated: (context) => owned(context),
+    invalidate,
     forget(context, channel) {
       for (const view of [...(views.get(context)?.values() ?? [])]) if (channel === undefined || view.channel === channel) drop(view);
       if (channel === undefined) {

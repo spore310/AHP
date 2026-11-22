@@ -29,3 +29,6 @@ export type { ToolChallengeOptions, ToolChallengeLimits } from "./helpers/challe
 
 export { createToolResultProjection } from "./helpers/projection";
 export type { ToolProjectionRequest, ToolProjectionOptions, ToolResultProjection } from "./helpers/projection";
+
+export { createApprovedArtifactSource } from "./helpers/artifacts";
+export type { ApprovedArtifact, ApprovedArtifactLoader, ApprovedArtifactSource, ArtifactSourceOptions } from "./helpers/artifacts";

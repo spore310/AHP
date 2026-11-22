@@ -10,8 +10,10 @@ How Agent Hosting Protocol composes. Module READMEs contain the public contracts
 | Tools | `src/tools/` | [README](../../src/tools/README.md) | Immutable exact tool contracts, trusted-schema validation, detached descriptor projection. |
 | Sessions | `src/sessions/` | [README](../../src/sessions/README.md) | Provider registry, in-memory sessions, type/visible-tool policy, manifests, advertisement admission, reducer and sequence. |
 | WebSocket | `src/websocket/` | [README](../../src/websocket/README.md) | Raw transport, connection-bound AHP state, subscriptions, private invocation routing and composed host lifecycle. |
-| Application | `src/application/` | [README](../../src/application/README.md) | Fresh baseline `code-review`/`coding` policy. Descriptors only; no filesystem executor. |
-| Tool client | `src/toolClient/` | [README](../../src/toolClient/README.md) | Public SDK adapter for local tool implementations and application-extension calls. |
+| Application | `src/application/` | [README](../../src/application/README.md) | Baseline session types, scoped policy examples and an inert host action registration. |
+| Tool policy | `src/toolPolicy/` | [README](../../src/toolPolicy/README.md) | Direct policy, namespace admission, and bounded proposal and publication lifecycle. |
+| Tool execution | `src/toolExecution/` | [README](../../src/toolExecution/README.md) | Scoped client/server lifecycle, private results, challenge handling, and approved artifact delivery. |
+| Tool client | `src/toolClient/` | [README](../../src/toolClient/README.md) | Compatibility entry for the tool execution client. |
 | Agents | `src/agents/` | [README](../../src/agents/README.md) | Static bearer authentication, durable registration, and in-memory generation-fenced presence. |
 | Persistence | `src/persistence/` | [README](../../src/persistence/README.md) | Neutral durable ports/facades, lazy allowlisted provider selection, and the PostgreSQL adapter. No SQL in the session engine. |
 | Work | `src/work/` | [README](../../src/work/README.md) | Session-owner authorization, bounded validation, and work-lease coordination. |
@@ -70,20 +72,20 @@ native createSession / public createApplicationSession
   -> publish session action + root summary change
 ```
 
-The ordinary session snapshot lists full visible tool contracts under `_meta["x-ahp-application"]`. `getSessionToolManifest` is a detached, non-allocating read. `serverTools` remains absent because the host does not implement the listed tools. `activeClients` starts empty.
-
-A client advertises an exact subset through `session/activeClientSet`. Typed admission checks connection-derived origin against nested client ID, revision identity, name and full schema before the reducer. One mismatch rejects the entire update; accepted descriptors are normalized from the trusted catalogue. An untyped host preserves its documented legacy behavior.
+The canonical typed snapshot holds the pinned tool manifest. The protected
+public host projects native snapshots and actions per recipient and sends exact
+tool assignments through the private extension. Explicit activation of a
+published revision updates the exact live session and invalidates its tool views.
 
 ## Client execution boundary
 
-The namespaced `x-ahp/tools/*` extension connects discovery/advertisement to local client implementations. It is not a standard AHP tool-invocation method. The binding validates and routes a call; it does not execute the tool. Inputs/results are private rather than session broadcasts. See the [tool client contract and limitations](../../src/toolClient/README.md).
-
-The optional extension adds a principal/session-authorization layer for work and
-agent registration. It does not make baseline AHP subscription/action methods
-private: like the baseline protocol, they remain scoped by the host's deployment
-policy, not by per-session access control. The static token map is a POC adapter,
-not production identity. Type policy and exact connection correlation remain
-consistency controls, not a claim that unauthenticated remote deployment is safe.
+The negotiated `x-ahp/tools/*` extension checks independent caller and executor
+authority before dispatching to a remote client or a trusted host registration.
+Inputs and results travel through owned private routes. Optional proposal and
+artifact ports enter the same protected session and assignment boundaries.
+The trusted security configuration is independent of durable work. Resource view
+authorization and tool grants use the same canonical registry with distinct
+purposes. See the [tool client contract](../../src/toolClient/README.md).
 
 ## Agent/work boundary
 
@@ -99,10 +101,9 @@ machine, and failure cases.
 
 ## Deferred
 
-- Production identity/OIDC, cross-principal grants, and comprehensive session
-  authorization.
+- Production identity/OIDC and cross-principal durable work.
 - Reconnect/replay and durable session hydration.
-- Server-side tool functions, filesystem executors, model inference and Pi runtime.
+- Filesystem executors, model inference and Pi runtime.
 - Chat/prompt streaming; `SessionBackend` still exposes disposal only.
 - Redis or a second coordination service.
 

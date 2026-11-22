@@ -1,7 +1,8 @@
 import type { AhpTransport } from "@microsoft/agent-host-protocol/client";
 
 import type { ToolContractDefinition } from "@tools";
-import type { ToolInvoke, ToolDispatchReply, ToolStatusReply } from "./helpers/protocol";
+import type { ApprovedArtifactLoader } from "../artifacts/types";
+import type { ToolInvoke, ToolDispatchReply, ToolStatusReply, ToolManagementReply } from "./helpers/protocol";
 
 /** A local, client-executed implementation pinned to one contract. */
 export interface LocalToolImplementation {
@@ -34,6 +35,11 @@ export interface ToolClient {
   statusTool(callId: string): Promise<ToolStatusReply>;
   cancelTool(callId: string): Promise<ToolStatusReply>;
   resumeTool(continuationId: string, proofRef: string): Promise<ToolDispatchReply>;
+  proposeTool(channel: string, definition: ToolContractDefinition): Promise<ToolManagementReply>;
+  approveTool(channel: string, proposalId: string, revision: number): Promise<ToolManagementReply>;
+  publishTool(channel: string, proposalId: string, revision: number): Promise<ToolManagementReply>;
+  /** Verify and load one approved artifact, then advertise it on the same assignment. */
+  loadApprovedTool(channel: string, contract: ToolInvoke["contract"], loader: ApprovedArtifactLoader): Promise<void>;
   shutdown(): Promise<void>;
 }
 

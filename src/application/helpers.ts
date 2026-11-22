@@ -1,5 +1,7 @@
 import type { SessionConfigSchema } from "@microsoft/agent-host-protocol";
 import { z } from "zod";
+import type { PolicyAdmission } from "@authorization";
+import { createToolPolicyFactory, defineToolPolicyNamespace, type ToolExecutionPolicyBase, type ToolPolicyNamespace } from "@toolPolicy";
 
 import {
   createSessionConfig,
@@ -34,6 +36,41 @@ const objectSchema = {
   properties: { path: { type: "string", minLength: 1 } },
   required: ["path"],
 } as const;
+
+export function createExamplePolicyAdmission(mode: "direct" | "namespace", definitions: readonly ToolExecutionPolicyBase[]): {
+  readonly admitted: PolicyAdmission;
+  readonly namespaces: readonly ToolPolicyNamespace[];
+} {
+  const refs = definitions.map(({ id, revision }) => ({ id, revision }));
+  if (mode === "direct") return { admitted: { policies: refs, namespaces: [] }, namespaces: [] };
+  const shared = defineToolPolicyNamespace({ name: "example.shared", revision: 1, policies: definitions, resolve: () => refs });
+  const triage = defineToolPolicyNamespace({ name: "example.triage", revision: 1, policies: [],
+    includes: [{ name: shared.name, revision: shared.revision }], resolve: () => refs });
+  return { admitted: { policies: [], namespaces: [{ name: triage.name, revision: triage.revision }] }, namespaces: [shared, triage] };
+}
+
+/** Explicit application vocabulary and mandatory provider consent, with empty initial grants. */
+export function createScopedToolPolicyExample(mode: "direct" | "namespace") {
+  const tools = { id: "example.tools", revision: 1, challenge: { required: false }, operations: {
+    discover: { actor: { mode: "roles", actors: { user: { anyOf: ["maintainer", "triage"] }, agent: { anyOf: ["reader"] } } }, reveal: true },
+    invoke: { actor: { mode: "roles", actors: { user: { anyOf: ["maintainer"] }, agent: { anyOf: ["reader"] } } } },
+  } } satisfies ToolExecutionPolicyBase;
+  const provider = { id: "example.provider", revision: 1, challenge: { required: false }, operations: {
+    discover: { actor: { mode: "direct-grant", actors: ["user", "agent"] }, reveal: true },
+    invoke: { actor: { mode: "direct-grant", actors: ["user", "agent"] }, requiredPermissions: ["example-provider-consent"] },
+  } } satisfies ToolExecutionPolicyBase;
+  const { admitted, namespaces } = createExamplePolicyAdmission(mode, [tools]);
+  const sessionType = { key: "example.triage", version: 1 };
+  const providerId = "mock";
+  const mandatory = [{ id: provider.id, revision: provider.revision }];
+  return { sessionType, providerId, admitted, mandatory,
+    policies: createToolPolicyFactory({ policies: [tools, provider], namespaces, bindings: [{ sessionType, providerId, admitted, mandatory }] }),
+    seniorOwner: { domainId: "example", subject: "senior" },
+    juniorAgent: { kind: "agent" as const, principal: { domainId: "example", subject: "junior" }, agentId: "junior-agent" },
+    projectManager: { kind: "user" as const, principal: { domainId: "example", subject: "pm" } },
+    roles: { senior: ["maintainer"], juniorAgent: ["reader"], projectManager: ["triage"] },
+  };
+}
 
 /** Pure bounded example. Registration grants no authority and installs no runtime. */
 export function createInMemoryEchoRegistration(): ServerToolRegistration {

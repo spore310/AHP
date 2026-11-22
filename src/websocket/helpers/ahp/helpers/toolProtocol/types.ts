@@ -1,6 +1,8 @@
 import type { z } from "zod";
 import type { PrivateToolCallHandle } from "@toolExecution/helpers/calls";
-import type { ToolAssignedReply, toolAdvertiseRequestSchema, toolDispatchRequestSchema } from "@toolExecution/helpers/client/helpers/protocol";
+import type { ToolAssignedReply, toolAdvertiseRequestSchema, toolArtifactRequestSchema, toolDispatchRequestSchema, toolManagementRequestSchema } from "@toolExecution/helpers/client/helpers/protocol";
+import type { ApprovedArtifact } from "@toolExecution/helpers/artifacts";
+import type { ToolProposalReceipt } from "@toolPolicy";
 import type { JsonRpcHandlers, WebSocketConnectionContext } from "@websocket/types";
 
 /** Trusted broker preparation; never supplied by a wire client. */
@@ -9,6 +11,12 @@ export interface PrivateAssignmentTicket {
   current(): boolean;
   fence(): boolean;
   advertise(contracts: z.infer<typeof toolAdvertiseRequestSchema>["contracts"], advertisementId: string): PrivateAdvertisementTicket;
+  artifact?(contract: z.infer<typeof toolArtifactRequestSchema>["contract"], signal: AbortSignal): Promise<{
+    readonly artifact: ApprovedArtifact;
+    readonly encoded: string;
+    current(): boolean;
+    recordDelivery(): void;
+  } | undefined>;
 }
 export interface PrivateAdvertisementTicket {
   readonly tools: ToolAssignedReply["tools"];
@@ -23,6 +31,8 @@ export interface PrivateProtocolCall extends PrivateToolCallHandle {
 }
 export interface PrivateToolProtocolPorts {
   readonly continuation?: boolean;
+  readonly artifacts?: boolean;
+  manage?(context: WebSocketConnectionContext, request: z.infer<typeof toolManagementRequestSchema>, signal: AbortSignal): Promise<{ readonly receipt: ToolProposalReceipt; current(): boolean } | undefined>;
   ready(context: WebSocketConnectionContext): boolean;
   fence(context: WebSocketConnectionContext): boolean;
   assignment(context: WebSocketConnectionContext, channel: string, signal: AbortSignal): Promise<PrivateAssignmentTicket>;
@@ -32,6 +42,7 @@ export interface PrivateToolProtocolPorts {
 export interface PrivateToolProtocol {
   readonly handlers: JsonRpcHandlers;
   negotiated(context: WebSocketConnectionContext): boolean;
+  invalidate(channel: string): void;
   forget(context: WebSocketConnectionContext, channel?: string): void;
   removeSession(channel: string): void;
   dispose(): void;

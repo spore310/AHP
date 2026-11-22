@@ -232,6 +232,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
 
   const hostedSessions: SessionsFactory = {
     ...(hostedAuthorization === undefined ? {} : { authorization: hostedAuthorization }),
+    ...(sessions.managedTools === undefined ? {} : { managedTools: sessions.managedTools }),
     createSession: (params: unknown): Promise<void> => {
       if (stopped) {
         return Promise.reject(new Error(HOST_SESSIONS_STOPPED));
@@ -300,6 +301,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
       return;
     }
     stopped = true;
+    sessions.managedTools?.admission.dispose();
     sessionOwners?.clear();
     const failures: unknown[] = [];
     // Protected in-process callers must be cancelled synchronously too, before socket shutdown awaits.

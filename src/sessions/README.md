@@ -212,6 +212,21 @@ Errors: `SessionsError`, `SessionsDisposingError`, `SessionConfigError`,
 `SessionStartError`. Sequence: `createActionSequence`, `createSequenceAllocator`.
 Schema: `sessionUriSchema`, `createSessionParamsSchema`.
 
+### Published tool activation
+
+Set `SessionsFactoryOptions.toolAdmission` with the protected creation registry.
+Trusted applications use `managedTools.revision(resource)` and
+`managedTools.activate(...)` with the exact resource instance, expected revision,
+published proposal ID and current `TrustedRequestContext`. The activation policy
+is explicit. A successful activation replaces the exact version pinned for that
+tool key, updates the canonical manifest through `session/metaChanged`, and
+invalidates that instance's tool views. Publication and activation grant no
+invocation or executor assignments. Protected metadata remains recipient-filtered.
+
+`SessionApplicationOptions.role` is the legacy baseline catalogue filter.
+Protected creation uses the configured policy admission arrays and scoped
+actor bindings. Session ownership remains a separate resource fact.
+
 ## 5-Minute Usage
 
 Create a factory with the built-in mock provider and create one session:
