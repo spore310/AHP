@@ -3,8 +3,8 @@
 > **Historical review.** This report evaluates candidate `ff95b99`; its
 > "open" findings are not a statement about current `develop`. The findings
 > were carried into
-> [`ProvidersPlan-Milestone1-FIX-TASKPLAN.md`](../plans/ProvidersPlan-Milestone1-FIX-TASKPLAN.md)
-> and subsequent commits. See [`ProvidersPlan.md`](../plans/ProvidersPlan.md)
+> [`ProvidersPlan-Milestone1-FIX-TASKPLAN.md`](../../plans/ProvidersPlan-Milestone1-FIX-TASKPLAN.md)
+> and subsequent commits. See [`ProvidersPlan.md`](../../../plans/ProvidersPlan.md)
 > for current milestone status.
 
 ## Scope and evidence
@@ -17,7 +17,7 @@
   written after that review.
 - Scope: `src/websocket/helpers/ahp.ts`, its connection context, sessions
   factory/action reducer, the host composition root, and Milestone 1 of
-  [`ProvidersPlan.md`](../plans/ProvidersPlan.md).
+  [`ProvidersPlan.md`](../../../plans/ProvidersPlan.md).
 - Protocol authority: pinned `@microsoft/agent-host-protocol@1.0.0`.
 - Runtime evidence: temporary tests used the actual `AhpClient` and
   `WebSocketTransport` against a live local WebSocket server; test harnesses
@@ -45,7 +45,7 @@ passes but does not cover these protocol acceptance failures.
 ### R1 — Subscribed clients miss broadcasts
 
 - Priority/status: P1; open.
-- Location: [`ahp.ts`](../../src/websocket/helpers/ahp.ts), connection
+- Location: `src/websocket/helpers/ahp.ts` at the reviewed revision, connection
   tracking around `createAHPHandlers`.
 - Contract: subscribed connections must remain registered for catalogue and
   session fan-out for their lifetime.
@@ -65,7 +65,7 @@ passes but does not cover these protocol acceptance failures.
 ### R2 — Dispatching client receives duplicate action envelopes
 
 - Priority/status: P1; open.
-- Location: [`ahp.ts`](../../src/websocket/helpers/ahp.ts), `dispatchAction`
+- Location: `src/websocket/helpers/ahp.ts` at the reviewed revision, `dispatchAction`
   and the session-envelope listener.
 - Contract: one accepted action produces one `action` notification for each
   subscribed connection, including the origin connection.
@@ -85,8 +85,8 @@ passes but does not cover these protocol acceptance failures.
 not enforced
 
 - Priority/status: P1; open.
-- Location: [`ahp.ts`](../../src/websocket/helpers/ahp.ts), `initialize`,
-  `ping`, and method dispatch; [`types.ts`](../../src/websocket/types.ts),
+- Location: `src/websocket/helpers/ahp.ts` at the reviewed revision, `initialize`,
+  `ping`, and method dispatch; [`types.ts`](../../../../src/websocket/types.ts),
   `WebSocketConnectionContext`.
 - Contract: `initialize` must be the first request; a rejected protocol
   negotiation must return `UnsupportedProtocolVersion` with supported versions
@@ -107,7 +107,7 @@ not enforced
 ### R4 — Dispatch action payloads are not fully validated
 
 - Priority/status: P1; open; source-inferred risk, not separately reproduced.
-- Location: [`ahp.ts`](../../src/websocket/helpers/ahp.ts),
+- Location: `src/websocket/helpers/ahp.ts` at the reviewed revision,
   `dispatchAction`.
 - Contract: the AHP boundary must validate `DispatchActionParams` and the
   selected action payload before reducer application.
@@ -127,7 +127,7 @@ not enforced
 ### R5 — Missing-session action dispatch maps to Internal Error
 
 - Priority/status: P2; open; source-inferred risk, not separately reproduced.
-- Location: [`helpers.ts`](../../src/sessions/helpers/factory/helpers.ts),
+- Location: [`helpers.ts`](../../../../src/sessions/helpers/factory/helpers.ts),
   `dispatchAction`.
 - Contract: an unknown target session should return the AHP session-not-found
   error, not JSON-RPC Internal Error.
@@ -156,10 +156,10 @@ not enforced
 
 Scoped documentation was updated with approval during the review:
 
-- [`ProvidersPlan.md`](../plans/ProvidersPlan.md) now says Milestone 1 is
+- [`ProvidersPlan.md`](../../../plans/ProvidersPlan.md) now says Milestone 1 is
   partially implemented but acceptance-incomplete, and records the reproduced
   SDK behavior instead of describing the old ping-only wiring.
-- [`src/sessions/README.md`](../../src/sessions/README.md) now includes the
+- [`src/sessions/README.md`](../../../../src/sessions/README.md) now includes the
   new snapshot, sequence-cursor, and action-dispatch APIs.
 
 ## Required next action

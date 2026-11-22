@@ -9,48 +9,34 @@ independently and execute work in their own environment.
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    participant A as Planner / Client A
-    participant H as AHP Host
-    participant DB as PostgreSQL
-    participant B as Agent B / Worker
+    participant O as Session owner
+    participant H as AHP host
+    participant W as Worker
+    participant R as Work store
 
-    A->>H: Submit work (session, requestKey, kind, target B)
-    H->>H: Authenticate, authorize, validate + deduplicate
-    H->>DB: INSERT queued work (idempotent)
-    DB-->>H: Durable workId
-    H-->>A: Work accepted (workId)
+    O->>H: Submit work
+    H->>R: Insert or find request key
+    R-->>H: Work ID
+    H-->>O: Work ID
 
-    B->>H: Authenticate, register/reclaim agent identity
-    H->>H: Bind live presence lease to actual connection
-    H-->>B: agentId + presence expiry
-    Note over H,B: v1 has no work-available push; the worker claims explicitly
+    W->>H: Register and bind presence
+    W->>H: Claim eligible work
+    H->>R: Claim atomically
+    R-->>H: Work and lease
+    H-->>W: Work and lease token
+    W->>W: Execute locally
 
-    B->>H: Claim eligible work in authorized session
-    H->>H: Verify principal, session, kind and live presence
-    H->>DB: Atomic claim/reclaim (FOR UPDATE SKIP LOCKED)
-    DB-->>H: Work + new fenced leaseToken + expiry
-    H-->>B: Claimed work and lease
-
-    B->>B: Execute within its own isolated environment
-    B->>H: Renew work lease (workId, token)
-    H->>DB: Conditional update: current holder + unexpired token
-    DB-->>H: New expiry (or no match)
-    H-->>B: Lease renewed (or rejected)
-
-    B->>H: Complete (workId, token, bounded result)
-    H->>H: Verify current presence, authorization and result shape
-    H->>DB: Atomic fenced completion update
-    alt Lease still valid and current
-        DB-->>H: Completed row committed
-        H-->>B: Completion accepted
-        H-->>A: Result available via x-ahp/work/get
-    else Expired, revoked or superseded lease
-        DB-->>H: No matching current lease
-        H-->>B: Stale/unauthorized completion rejected
-        H-->>A: Result remains unchanged
-    end
+    W->>H: Complete with lease token
+    H->>R: Commit under current lease
+    R-->>H: Committed or stale
+    H-->>W: Completion reply
+    O->>H: Read work result
+    H-->>O: Current work record
 ```
+
+Workers claim explicitly. The host publishes no work-available push. A worker
+can renew its lease during execution. The host checks the live worker binding
+and lets the repository enforce the current token and deadline on each write.
 
 ## What each step means
 
@@ -85,31 +71,29 @@ sequenceDiagram
 | Work row | PostgreSQL `work_items` | Durable | No; a queued row is not assigned |
 | Work lease | `work_items` token + deadline | 60 s default TTL | Yes, while current and unexpired |
 
-An AHP `initialize.clientId` is never an identity. Request JSON cannot supply an
-agent ID, principal, connection ID, or presence generation; the wire adapter
-derives those from the live, authenticated connection.
+An AHP `initialize.clientId` labels the connection. A work request can select
+a target agent, but the wire adapter derives the caller's principal, executing
+agent, connection ID, and presence generation from the live binding.
 
 ## Work state machine
 
 ```mermaid
 stateDiagram-v2
-    [*] --> queued: authenticated submission
-    queued --> leased: authorized atomic claim
-    leased --> leased: renew valid lease
-    leased --> leased: reclaim after expiry, new token/attempt
-    leased --> queued: retryable failure, attempts remain
-    leased --> completed: current holder commits result
-    leased --> failed: terminal failure or attempts exhausted
-    queued --> cancelled: authorized cancellation
-    leased --> cancelled: authorized cancellation
-    completed --> [*]
-    failed --> [*]
-    cancelled --> [*]
+    [*] --> queued : submit
+    queued --> leased : claim
+    leased --> queued : retry
+    leased --> completed : complete
+    leased --> failed : fail
+    queued --> cancelled : cancel
+    leased --> cancelled : cancel
 ```
 
-Claiming an expired lease is a retry, not a second copy of the work. The same
-work ID remains, `attempt_count` increases, and the token rotates. A stale token
-cannot renew, complete, or fail the newer attempt.
+Renew and reclaim both keep the `leased` status. Renewal extends the deadline
+for the current holder. Reclaim requires an expired lease and an available
+attempt. It keeps the work ID, increments `attempt_count`, and rotates the
+token. The old token cannot renew, complete, or fail the new attempt. A
+retryable failure with attempts left returns to `queued`. Terminal failures and
+expired leases with an exhausted attempt budget end in `failed`.
 
 ## Database model
 
@@ -133,6 +117,10 @@ contract. The adapter registry currently defaults to PostgreSQL and owns the
 adapter selection and cleanup. The provider contract and in-memory conformance
 tests demonstrate substitution; they do not prove real database lock, rollback,
 or database-clock behavior.
+
+Run the [advanced review example](../guides/advanced.md) for the owner and
+worker flow over loopback. Use [PostgreSQL conformance](../guides/postgresql.md)
+to verify a local adapter against the real database.
 
 ## Failure cases
 
@@ -162,8 +150,9 @@ or database-clock behavior.
   identity system. Tokens are supplied through environment configuration and are
   never logged or echoed. Use `wss` behind a trusted TLS terminator; the plain
   `ws` examples bind loopback only.
-- The POC authorization rule is same-principal ownership of the session. There is
-  no cross-principal grant model yet.
+- Durable work is restricted to the session owner's principal, including any
+  targeted worker. The separate [tool authorization model](../../src/authorization/README.md)
+  supports scoped participant grants for private tool calls and resource access.
 - Lease fencing prevents an old worker from committing a result; it does not
   provide OS isolation. Concurrent code-editing attempts must run in separate
   workspaces, and a trusted evaluator must decide promotion.
@@ -179,13 +168,11 @@ versioned `x-ahp/agents/*` and `x-ahp/work/*` methods, bounded work service,
 database-neutral persistence contracts/facades, the PostgreSQL adapter,
 migrations, and unit/protocol tests.
 
-**Verification status:** `pnpm validate` is the repository gate. The PostgreSQL
-schema and race/fencing behavior are **not runtime-verified** in this workspace
-because the user instructed that the migration scripts must not be applied yet.
-The scripts are written and reviewed, but no database was migrated or queried.
-Treat the SQL acceptance gates as **BLOCKED**, not passed.
+**Verification:** `pnpm validate` exercises service and wire behavior with local
+fixtures and checks PostgreSQL query shape offline. The [PostgreSQL guide](../guides/postgresql.md)
+describes the separate database run required to test SQL behavior.
 
-**Not implemented:** production identity/OIDC, cross-principal sharing, durable
+**Not implemented:** production identity/OIDC, cross-principal durable work, durable
 presence, event replay, server-side execution, workflow DAGs, and automatic
 wind-down of a worker that lost its lease. Work-kind eligibility is host-global
 in V1 — one configurable allow-list shared by every agent; per-agent kind grants
@@ -198,8 +185,7 @@ state), so a retain/cancel-and-archive policy is required before production use.
 
 - [`docs/plans/ProvidersPlan.md`](../plans/ProvidersPlan.md) — M2 identity /
   presence and M4 coordination boundaries.
-- [`database/M2_AGENT_WORK_DATABASE_SCHEMA.md`](../../database/M2_AGENT_WORK_DATABASE_SCHEMA.md)
-  — ERD, DDL intent, state machine, and invariants.
+- [Durable relationships and schema invariants](../../database/M2_AGENT_WORK_DATABASE_SCHEMA.md)
 - [`src/work/README.md`](../../src/work/README.md) — application service.
 - [`src/agents/README.md`](../../src/agents/README.md) — authentication and
   presence.

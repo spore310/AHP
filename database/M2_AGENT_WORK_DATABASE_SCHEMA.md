@@ -1,103 +1,27 @@
 # Agent Registration and Work-Lease Schema
 
-> **Status:** DDL written, not applied. This document describes the PostgreSQL
-> schema in [`database/migrations/`](migrations/). The user instructed that the
-> scripts must not be executed yet, so no migration or database test has run.
-
-PostgreSQL is the POC's proposed durable dialect. The executable SQL is
-authoritative over this prose. The broader design rationale remains in
-[`docs/plans/agent tasks and identity/M2_AGENT_WORK_DATABASE_SCHEMA.md`](../docs/plans/agent%20tasks%20and%20identity/M2_AGENT_WORK_DATABASE_SCHEMA.md);
-this page records the implemented shape and its invariants.
+The [migrations](migrations/README.md) define the PostgreSQL adapter's durable
+schema. This page explains its relationships and invariants. For a local run,
+see [PostgreSQL setup and conformance](../docs/guides/postgresql.md). The original
+design rationale is in the [archive](../docs/archive/plans/agent%20tasks%20and%20identity/M2_AGENT_WORK_DATABASE_SCHEMA.md).
 
 ## Entity relationship diagram
 
 ```mermaid
 erDiagram
-    HOST_STATE {
-        text host_id PK
-        bigint server_seq
-        timestamptz updated_at
-    }
-
-    SESSION_TYPES {
-        uuid id PK
-        text type_key
-        integer version
-        text provider_id
-        text display_name
-        jsonb config_schema
-        boolean creation_enabled
-        timestamptz created_at
-    }
-
-    TOOLS {
-        uuid id PK
-        text tool_key
-        integer version
-        text display_name
-        text description
-        text schema_dialect
-        jsonb input_schema
-        jsonb output_schema
-        timestamptz created_at
-    }
-
-    SESSIONS {
-        text session_uri PK
-        uuid session_type_id FK
-        text provider_id
-        text owner_principal_subject
-        timestamptz created_at
-        timestamptz modified_at
-        bigint last_server_seq
-        jsonb durable_state
-    }
-
-    SESSION_TYPE_TOOLS {
-        uuid session_type_id PK, FK
-        uuid tool_id PK, FK
-    }
-
-    AGENT_REGISTRATIONS {
-        uuid id PK
-        text principal_subject
-        text agent_key
-        text display_name
-        boolean enabled
-        timestamptz created_at
-    }
-
-    WORK_ITEMS {
-        uuid id PK
-        text session_uri FK
-        text request_key
-        text kind
-        jsonb input
-        text status
-        uuid target_agent_id FK
-        uuid lease_agent_id FK
-        uuid lease_token
-        timestamptz lease_expires_at
-        integer attempt_count
-        integer max_attempts
-        jsonb result
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    SESSION_TYPES ||--o{ SESSIONS : "defines revision"
-    SESSION_TYPES ||--o{ SESSION_TYPE_TOOLS : "assigns"
-    TOOLS ||--o{ SESSION_TYPE_TOOLS : "pinned revision"
-    SESSIONS ||--o{ WORK_ITEMS : "owns durable work"
-    AGENT_REGISTRATIONS o|--o{ WORK_ITEMS : "optional target"
-    AGENT_REGISTRATIONS o|--o{ WORK_ITEMS : "optional lease holder"
+    direction TB
+    SESSION_TYPES o|--o{ SESSIONS : "pins revision"
+    SESSION_TYPES ||--o{ SESSION_TYPE_TOOLS : "defines"
+    TOOLS ||--o{ SESSION_TYPE_TOOLS : "assigns revision"
+    SESSIONS ||--o{ WORK_ITEMS : "anchors"
+    AGENT_REGISTRATIONS o|--o{ WORK_ITEMS : "targets or leases"
 ```
 
-`host_state` is a checkpoint and is not a foreign-key parent of `sessions`.
-`session_types.provider_id` points at provider code registered in the
-application, not another table. The two `agent_registrations` relationships are
-different: `target_agent_id` is the intended worker, while `lease_agent_id` is
-the current execution-rights holder.
+Each edge represents a foreign key. The agent edge covers two nullable keys.
+`target_agent_id` identifies the intended worker and `lease_agent_id` identifies
+the current lease holder. `sessions.session_type_id` is nullable. The application
+resolves `session_types.provider_id` to registered provider code. The independent
+`host_state` table stores the sequence checkpoint.
 
 ## What is durable and what is not
 
@@ -182,26 +106,14 @@ reclaim with a new token.
 
 ## State machine
 
-```mermaid
-stateDiagram-v2
-    [*] --> queued: authenticated submission
-    queued --> leased: authorized claim
-    leased --> leased: renew
-    leased --> leased: expired reclaim, new token and attempt
-    leased --> queued: retryable failure, attempts remain
-    leased --> completed: fenced result commit
-    leased --> failed: terminal failure or attempts exhausted
-    queued --> cancelled: authorized cancellation
-    leased --> cancelled: authorized cancellation
-    completed --> [*]
-    failed --> [*]
-    cancelled --> [*]
-```
+The [work state machine](../docs/architecture/agent-task-lifecycle.md#work-state-machine)
+shows the client-visible transitions. The adapter stores the state, attempt
+budget, and current lease on one row.
 
 ## Operational caveats
 
-- Apply `0001` then `0002` to an empty database only after approval. There is no
-  automatic rollback for durable work.
+- Apply `0001` then `0002` to an empty test database. The migration set contains
+  forward SQL only.
 - The adapter uses `statement_timestamp()` for leases. Do not compare deadlines
   with a Node clock.
 - A work row is a coordination record, not proof of side effects. Execution is
@@ -209,10 +121,9 @@ stateDiagram-v2
   evaluation before promotion.
 - No background scheduler is included. Claim selects expired rows; callers may
   invoke reconciliation.
-- No cross-principal grant model exists yet. Targeted work must be for the same
-  principal as the session owner; that invariant is enforced by
-  `WorkService.submit` at write time, not by this DDL (an FK cannot express it
-  across tables).
+- `WorkService.submit` requires the targeted agent to share the session owner's
+  principal. The foreign keys check that the session and agent exist. The
+  service checks their ownership relationship.
 - A submission whose repository write settles after its live session was
   disposed is best-effort reconciled: the work service cancels the just-recorded
   row (a failed cancel is tolerated) and reports a conflict to the caller. The
@@ -222,8 +133,7 @@ stateDiagram-v2
 
 ## Related documentation
 
-- [`database/migrations/README.md`](migrations/README.md) — apply order and
-  current no-apply status.
+- [Migration files and apply order](migrations/README.md)
 - [`docs/architecture/agent-task-lifecycle.md`](../docs/architecture/agent-task-lifecycle.md)
   — end-to-end sequence and failure cases.
 - [`src/persistence/README.md`](../src/persistence/README.md) — adapter behavior.

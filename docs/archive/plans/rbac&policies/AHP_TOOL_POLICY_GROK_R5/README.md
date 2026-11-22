@@ -1,6 +1,11 @@
 # Agent Hosting Protocol — tool policy implementation packets for Grok
 
-**Revision:** R5. **Status:** PLAN READY / implementation NOT STARTED.
+> **Archived planning bundle.** The status below refers to the pinned planning
+> base. Read the [P19 acceptance handoff](execution/P19-handoff.md) for later
+> implementation evidence and the [SDK walkthrough](../../../../guides/advanced.md)
+> for current usage.
+
+**Revision:** R5. **Status at the pinned base:** Plan ready, implementation pending.
 **Repository:** `spore310/AHP`, branch `agentIdentity`.
 **Pinned base:** `22fa7955b8e43839e041228f647f26e00762ebbe`.
 **Base commit:** `fix: close persistence review findings` (2026-10-23).
@@ -13,7 +18,7 @@ were performed in preparing this bundle.
 ## Start
 
 Read [START_HERE.md](START_HERE.md), then assign **P00 only** using
-[GROK_PROMPT.md](GROK_PROMPT.md). The [packet map](MASTER_PLAN.md) controls order.
+[PROMPT.md](PROMPT.md). The [packet map](MASTER_PLAN.md) controls order.
 The executor should load the [contract card](CONTRACT_CARD.md), its assigned
 packet, linked contract sections, and the necessary source—not the entire bundle
 on every turn. Use [the handoff template](templates/HANDOFF.md) after each packet.

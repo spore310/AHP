@@ -1,92 +1,68 @@
-# Application
+# Application composition
 
-Inert example session policy for the default host. It lists allowed tool contracts. It does not read files, write files, or run a model.
+This module builds typed session catalogues and example policies. The host uses
+the catalogue at creation time to resolve the session type, validate its config,
+and pin allowed tool revisions. Session providers, identity, and executor grants
+are supplied by the embedding application.
 
 ## Files
 
 | File | Responsibility |
-| ---- | -------------- |
-| `constants.ts` | Stable revision ids and session-type keys. |
-| `helpers.ts` | Baseline session catalogue and bounded in-memory host action registration. |
-| `index.ts` | Public exports. |
+| --- | --- |
+| [constants.ts](constants.ts) | Stable revision IDs and session-type keys. |
+| [helpers.ts](helpers.ts) | Baseline catalogue, direct and namespace policy examples, and the in-memory host action. |
+| [index.ts](index.ts) | Public application exports. |
 
-`createScopedToolPolicyExample("direct")` creates direct-policy admission.
-The `"namespace"` form selects the same policy through an included namespace.
-Both examples use the application's `maintainer`, `reader`, and `triage` roles for
-the senior owner, junior agent, and PM, respectively. Importing or creating the
-example leaves bindings and assignments empty. An authorized host supplies the
-actor's exact scoped binding and any separate tool assignment. The mandatory
-`example-provider-consent` evaluator can deny invocation independently of the
-local role. The example and public namespace loopback are exercised by
-[`applicationPolicyExamples.test.ts`](../tests/applicationPolicyExamples.test.ts).
+## Five-minute example
 
-## API
-
-`createBaselineSessionApplication()` returns a fresh `SessionApplicationOptions`. The default type is `code-review@1`, which lists `workspace.read-file@1` and `workspace.search@1`. `coding@1` also lists `workspace.write-file@1`. Language settings stay in the application config. The mock provider still receives `{}`.
-
-Importing this module does not open a port. `src/index.ts` calls this factory for the CLI host; callers may still compose an explicitly untyped host by omitting `application`.
-
-## Usage
-
-```ts
-import { createBaselineSessionApplication } from "@application";
-import { createApplicationSession } from "@sessions";
-import { mockProvider } from "@sessions/mock";
-import { createAHPServer } from "@websocket";
-
-const host = createAHPServer({
-  host: "127.0.0.1",
-  port: 0,
-  sessions: {
-    providers: [mockProvider],
-    application: createBaselineSessionApplication(),
-  },
-});
-await host.start();
-// Native create with no selector uses code-review@1.
-await host.sessions.createSession({ channel: "ahp-session:/review" });
-// Application creation uses the server-authored header string, never an object.
-await createApplicationSession(host.sessions, {
-  channel: "ahp-session:/coding",
-  type: "coding",
-  config: { language: "typescript" },
-});
-const allowed = host.sessions.getSessionToolManifest("ahp-session:/coding");
-console.log(allowed?.toolContracts.map((contract) => contract.definition.name));
-await host.stop();
+```sh
+pnpm exec vite-node examples/quickstart.ts
 ```
 
-A native SDK client selects the same type with `config: { "x-ahp-session-type": "coding" }`. Its ordinary session snapshot carries `_meta["x-ahp-application"]`. `serverTools` stays absent; no client is advertised until that client registers tools.
+The script creates a `code-review@1` session on a loopback host, checks that its
+mock provider reached `ready`, and shuts down. The trusted in-process create
+call is the smallest useful application path. [Walkthrough](../../docs/guides/quickstart.md)
 
-For registering a local implementation and calling it from another client, use the [public tool client adapter](../toolClient/README.md). Discovering a descriptor alone does not install a filesystem implementation.
+## Advanced example
 
-## Testing
-
-[`src/tests/application.test.ts`](../tests/application.test.ts) covers fresh catalogues, separate application/provider config, two running hosts with different defaults and the same session URI, and terminal stop behavior.
-
-## In-memory host action
-
-`createInMemoryEchoRegistration()` returns an inert `ServerToolRegistration` for
-`example.echo@1`. It accepts `{ text: string }` (at most 4096 characters) and returns
-`{ value: text }`, with strict object schemas, registration/source revision 1 and
-server/host implementation `application.echo.v1`. It has no optional preparation
-or external effects. The baseline application does not install this registration.
-
-```ts
-import { createInMemoryEchoRegistration } from "@application";
-import type { ServerToolBrokerOptions } from "@toolExecution/server";
-
-// These ports are application-owned canonical authority, never request data.
-const registration = createInMemoryEchoRegistration();
-const serverTools: ServerToolBrokerOptions = {
-  registry, policies, executor, resolve, registrations: [registration],
-};
-// Add registration.definition to the authorized session catalogue, install
-// caller invoke and exact host execute grants, then pass serverTools as
-// createAHPServer({ ...hostOptions, serverToolExecution: serverTools }).
+```sh
+pnpm exec vite-node examples/advanced/index.ts
 ```
 
-The embedding application supplies `registry`, `policies`, `executor`, `resolve`
-and `hostOptions`. Registration alone creates no permissions or network listeners.
-The executor requires an explicit trusted identity, generation and current/pure
-fence callbacks. See [tool execution](../toolExecution/README.md#host-controlled-actions).
+Follow the same review session through authenticated SDK connections, scoped
+tool execution, challenge handling, a projected host result, proposal and
+artifact delivery, and a work lease. `-- --direct` runs the same example with
+direct policy admission. [Walkthrough](../../docs/guides/advanced.md)
+
+## Public factories
+
+| Factory | What it gives the host |
+| --- | --- |
+| `createBaselineSessionApplication()` | Fresh `code-review@1` and `coding@1` types. Review lists read and search contracts. Coding also lists write. Application language configuration stays separate from the mock provider config. |
+| `createScopedToolPolicyExample(mode)` | A policy factory for `direct` or `namespace` admission, application role names, and example actors. Bindings and assignments start empty. |
+| `createExamplePolicyAdmission(mode, definitions)` | The admission and namespace configuration used by the runnable application with the supplied definitions. |
+| `createInMemoryEchoRegistration()` | `example.echo@1` with host-controlled input/output schemas and a bounded text echo. It can become callable when the host installs its exact registration and independent grants. |
+
+### In-memory host action
+
+Pass the echo registration in `serverToolExecution.registrations`. Give the
+exact revision a host-executor assignment and authorize callers separately.
+The [advanced example](../../docs/guides/advanced.md#follow-one-review) also
+projects one successful result into the title using its own resource operation.
+
+## Session configuration
+
+An application selects a type with the server-authored `x-ahp-session-type`
+string. Protected factories use independently verified actors and resource
+bindings. In a protected SDK connection the tool manifest is projected through
+private assignment views. [Session composition](../sessions/README.md) ·
+[Authorization](../authorization/README.md) · [Tool client](../toolClient/README.md)
+
+## Verification
+
+- [Application tests](../tests/application.test.ts) cover fresh catalogues,
+  separate config, independent hosts, and terminal stop.
+- [Policy example tests](../tests/applicationPolicyExamples.test.ts) exercise
+  both admission modes, empty initial grants, and real namespace loopback.
+
+[Documentation index](../../docs/README.md)

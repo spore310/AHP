@@ -11,6 +11,7 @@ How Agent Hosting Protocol composes. Module READMEs contain the public contracts
 | Sessions | `src/sessions/` | [README](../../src/sessions/README.md) | Provider registry, in-memory sessions, type/visible-tool policy, manifests, advertisement admission, reducer and sequence. |
 | WebSocket | `src/websocket/` | [README](../../src/websocket/README.md) | Raw transport, connection-bound AHP state, subscriptions, private invocation routing and composed host lifecycle. |
 | Application | `src/application/` | [README](../../src/application/README.md) | Baseline session types, scoped policy examples and an inert host action registration. |
+| Authorization | `src/authorization/` | [README](../../src/authorization/README.md) | Trusted actor context, scoped bindings, resource operations, proof, and invalidation. |
 | Tool policy | `src/toolPolicy/` | [README](../../src/toolPolicy/README.md) | Direct policy, namespace admission, and bounded proposal and publication lifecycle. |
 | Tool execution | `src/toolExecution/` | [README](../../src/toolExecution/README.md) | Scoped client/server lifecycle, private results, challenge handling, and approved artifact delivery. |
 | Tool client | `src/toolClient/` | [README](../../src/toolClient/README.md) | Compatibility entry for the tool execution client. |
@@ -37,7 +38,11 @@ sessions -> tools + JSON decoding; never sockets
 client adapter -> public AHP SDK + tools
 ```
 
-The raw WebSocket server remains session-agnostic. The contained AHP binding owns connection identity and delivery. Sessions own business policy; no socket enters the session engine. Schema compilation is for trusted application definitions, never for client tool advertisements. `jsonrpc` does no I/O.
+The raw WebSocket server owns framing and connection lifecycle. The AHP binding
+owns identity, subscriptions, and delivery. The session engine accepts domain
+inputs and owns reducer state. Advertisement admission compares descriptors to
+an exact approved contract. An authorized proposal uses a separate, bounded
+validation and publication path. `jsonrpc` owns message shapes and error values.
 
 ## Process composition
 
@@ -112,4 +117,5 @@ machine, and failure cases.
 - [Source overview](../../src/README.md)
 - [Wire contract](../technical/wire-contract.md)
 - [Runtime lifecycles](../technical/runtime-lifecycles.md)
-- [Application capacity follow-up](../plans/tools%20and%20session%20types/APPLICATION_CAPACITY.md)
+- [Archived application capacity proposal](../archive/plans/tools%20and%20session%20types/APPLICATION_CAPACITY.md)
+- [Documentation index](../README.md)

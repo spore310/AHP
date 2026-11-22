@@ -160,20 +160,20 @@ One row = one durable unit of requested work. A task remains independently ident
 
 ```mermaid
 stateDiagram-v2
-    [*] --> queued: authenticated submission
-    queued --> leased: authorized atomic claim
-    leased --> leased: renew valid lease
-    leased --> leased: reclaim after expiry, new token/attempt
-    leased --> queued: retryable failure, attempts remain
-    leased --> completed: current holder commits result
-    leased --> failed: terminal failure or attempts exhausted
-    queued --> cancelled: authorized cancellation
-    leased --> cancelled: authorized cancellation
-    queued --> failed: exhausted retry budget after recovery
-    completed --> [*]
-    failed --> [*]
-    cancelled --> [*]
+    [*] --> queued : submit
+    queued --> leased : claim
+    leased --> queued : retry
+    leased --> completed : commit
+    leased --> failed : fail
+    queued --> cancelled : cancel
+    leased --> cancelled : cancel
+    queued --> failed : exhausted
 ```
+
+The proposal kept both renewal and reclaim in `leased`. Reclaim replaced the
+token and consumed an attempt. The proposed recovery rule also allowed an
+exhausted queued item to move to `failed`. See the
+[implemented state machine](../../../architecture/agent-task-lifecycle.md#work-state-machine) for current behavior.
 
 A work item is **not simultaneously queued and leased**. For M2, allow one active execution lease per work item, not parallel executions. Retry is *at-least-once execution*, **not** exactly-once external side effects; stale results are fenced from commit, but a stale process may continue running unless sandbox controls stop it.
 

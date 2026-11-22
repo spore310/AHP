@@ -3,7 +3,7 @@
 Status: **Superseded.** The shipped schema is
 `database/migrations/0001_session_tool_baseline.sql` with the durable
 session shape documented in
-[`database/M2_AGENT_WORK_DATABASE_SCHEMA.md`](M2_AGENT_WORK_DATABASE_SCHEMA.md):
+[`database/M2_AGENT_WORK_DATABASE_SCHEMA.md`](../../../database/M2_AGENT_WORK_DATABASE_SCHEMA.md):
 `owner_principal_subject` ownership, `last_server_seq`, and a JSONB
 `durable_state` projection. The `title/status/lifecycle/state` shape proposed
 here — along with `action_sequence` and `session_active_clients` — was superseded
@@ -14,7 +14,7 @@ inside the body — including "disposed sessions are deleted" — describe the
 original proposal: shipped behavior keeps durable rows, with retention
 explicitly deferred — the retain/cancel-and-archive policy is recorded as
 "not implemented" in
-[`docs/architecture/agent-task-lifecycle.md`](../docs/architecture/agent-task-lifecycle.md).
+[`docs/architecture/agent-task-lifecycle.md`](../../architecture/agent-task-lifecycle.md).
 
 This document is the table design for storing a session as the server holds it today. When scripts are added, the raw SQL in `database/` is authoritative. `src/persistance/` may use Drizzle, Prisma, or another client, but it must follow these tables. It must not invent a second schema.
 
@@ -61,52 +61,24 @@ The persistence adapter loads and saves rows. It does not apply `sessionReducer`
 
 ```mermaid
 erDiagram
-    ACTION_SEQUENCE ||--o{ SESSIONS : "host cursor, not a foreign key"
-    SESSIONS ||--o{ SESSION_ACTIVE_CLIENTS : "has"
-
-    ACTION_SEQUENCE {
-        text id PK
-        bigint current_value
-    }
-
-    SESSIONS {
-        text session_uri PK
-        text provider_id
-        text title
-        integer status
-        text lifecycle
-        timestamptz created_at
-        timestamptz modified_at
-        bigint server_seq
-        jsonb creation_error
-        text[] working_directories
-        jsonb state
-    }
-
-    SESSION_ACTIVE_CLIENTS {
-        text session_uri PK
-        text client_id PK
-        text display_name
-        integer position
-        jsonb tools
-        jsonb customizations
-    }
+    direction TB
+    SESSIONS ||--o{ SESSION_ACTIVE_CLIENTS : "stores clients"
 ```
+
+The proposal stored the host cursor separately in `action_sequence`. The
+column tables below describe all three proposed tables.
 
 ### Write path
 
 ```mermaid
 sequenceDiagram
-    participant Client
-    participant Sessions
-    participant Persistance
-    participant Database
-
-    Client->>Sessions: createSession / dispatchAction / disposeSession
-    Sessions->>Sessions: validate and reduce in memory
-    Sessions->>Persistance: save or delete the resulting record
-    Persistance->>Database: SQL from the database scripts
-    Sessions->>Client: snapshot, action, or root/sessionRemoved
+    participant C as Client
+    participant S as Sessions
+    participant P as Persistence
+    C->>S: Create, dispatch, or dispose
+    S->>S: Validate and reduce
+    S->>P: Save or delete record using SQL
+    S-->>C: Snapshot or notification
 ```
 
 A database failure must not be reported as a successful protocol mutation. The sessions module remains the authority for the protocol result. Persistence is the durability step for that result.

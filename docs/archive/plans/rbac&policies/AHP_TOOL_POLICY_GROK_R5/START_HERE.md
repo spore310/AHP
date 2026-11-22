@@ -2,7 +2,7 @@
 
 ## First assignment
 
-Give Grok [GROK_PROMPT.md](GROK_PROMPT.md) and [P00](packets/P00.md). P00 verifies
+Give Grok [PROMPT.md](PROMPT.md) and [P00](packets/P00.md). P00 verifies
 the checkout, instructions, baseline gates and import/delivery map. It does not
 rewrite production code. Record the actual HEAD and all relevant uncommitted work.
 

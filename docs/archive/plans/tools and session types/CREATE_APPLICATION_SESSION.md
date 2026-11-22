@@ -1,6 +1,8 @@
 # createApplicationSession
 
-Status: **Current behavior.** `defineApplicationSession` and `createApplicationSession` exist. Authentication does not.
+> **Archived API checkpoint.** This page records the original typed creation
+> slice before remote authorization. The [current composition guide](../../../../src/application/README.md)
+> covers the supported SDK examples and security wiring.
 
 ## What a caller writes
 

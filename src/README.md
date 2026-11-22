@@ -16,8 +16,11 @@ Start here, then read the README of the capability you are changing.
 | `sessions/` | [`sessions/README.md`](sessions/README.md) | The session engine: provider registry, session store, state reducer, sequencing, and lifecycle. AHP-aware but transport-agnostic. |
 | `websocket/` | [`websocket/README.md`](websocket/README.md) | Raw transport, AHP subscriptions/publication, handshake authentication, and the composed host. |
 | `tools/` | [`tools/README.md`](tools/README.md) | Immutable exact-revision contracts, schema validation and descriptor projection. |
-| `application/` | [`application/README.md`](application/README.md) | Fresh baseline policy for `code-review` and `coding` sessions. |
-| `toolClient/` | [`toolClient/README.md`](toolClient/README.md) | Public SDK adapter for local implementations and namespaced tool invocation. |
+| `application/` | [`application/README.md`](application/README.md) | Baseline session types, scoped namespaces and policy examples. |
+| `authorization/` | [`authorization/README.md`](authorization/README.md) | Trusted actors, connection grants, resource policy and authorization proofs. |
+| `toolPolicy/` | [`toolPolicy/README.md`](toolPolicy/README.md) | Exact-revision assignment, scoped policy and proposal publication. |
+| `toolExecution/` | [`toolExecution/README.md`](toolExecution/README.md) | Private tool invocation, authorization checks and executor routing. |
+| `toolClient/` | [`toolClient/README.md`](toolClient/README.md) | SDK client for assignments, local implementations and private calls. |
 | `agents/` | [`agents/README.md`](agents/README.md) | Static bearer authentication, durable agent registration, and in-memory generation-fenced presence. |
 | `persistence/` | [`persistence/README.md`](persistence/README.md) | Database-neutral durable ports/facades, lazy allowlisted provider selection, and a PostgreSQL adapter. No SQL in the live session engine. |
 | `work/` | [`work/README.md`](work/README.md) | Principal/session authorization, bounded work validation, and the work-lease application service. |
@@ -50,7 +53,10 @@ Exported from `src/index.ts`:
   `createBaselineSessionApplication()`, optionally enables the authenticated
   agent/work extension, starts the AHP server and logs its address.
 
-## 5-Minute Usage
+## Run the CLI host
+
+For application code that opens a session and waits for `ready`, start with the
+[five-minute SDK example](../docs/guides/quickstart.md).
 
 Run the host as a process:
 
@@ -63,7 +69,7 @@ pnpm start
 The address comes from the validated environment (see
 [`env/README.md`](../env/README.md)); the defaults bind `127.0.0.1:12345`.
 
-## Intermediate Usage
+## Embed the host
 
 Import the module without starting a server. Importing `src/index.ts` has no
 side effects; `main()` only runs when the file is the process entrypoint.
@@ -83,11 +89,11 @@ void main; // only call main() when you actually want the default wiring
 
 ## Caveats
 
-- **The default host is typed.** Native creation without a selector uses
-  `code-review@1`; `config["x-ahp-session-type"] = "coding"` selects the larger
-  contract set. Initialize, create, subscribe, list/dispose and the supported
-  session actions are wired. Chat/model execution is not implemented. The
-  server lists contracts; client implementations execute tools.
+- **The CLI loads a typed catalogue.** It starts a listener with the mock
+  provider and the baseline `code-review@1` and `coding@1` definitions. A remote
+  SDK session needs explicit security setup and cursor consent. Native creation
+  and protected reads have their own gates. The [advanced application](../docs/guides/advanced.md)
+  supplies the required host configuration.
 - **Import is inert.** The entrypoint guard compares `process.argv[1]` to this
   module's path, so importing `src/index.ts` from tests or tools never starts a
   listener. Running `vite-node src/index.ts` directly does **not** satisfy the
@@ -100,6 +106,8 @@ void main; // only call main() when you actually want the default wiring
   before provider selection rather than silently disabling authorization. The
   optional provider name is resolved by the allowlisted adapter registry; the
   default is PostgreSQL. After host construction, the host owns provider cleanup.
+  These CLI settings do not provide the remote SDK setup or scoped resource
+  policy configuration.
 - **Shutdown failures set `process.exitCode = 1`** instead of throwing from the
   signal handler, so a failed shutdown is observable without crashing the
   process.
@@ -111,3 +119,4 @@ void main; // only call main() when you actually want the default wiring
 - [`env/README.md`](../env/README.md) — configuration required before startup.
 - [`docs/technical/runtime-lifecycles.md`](../docs/technical/runtime-lifecycles.md)
   — session and server lifecycles.
+- [Documentation index](../docs/README.md)

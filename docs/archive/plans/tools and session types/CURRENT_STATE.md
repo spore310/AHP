@@ -1,6 +1,6 @@
 # Current Implementation State — Tool Contracts, Typed Sessions, Client Tool Invocation
 
-Status: **Current behavior.** Verified against `2f9900a65386f8ebc03feebc694c2c61c2b3c332`
+Status: **Historical checkpoint.** Verified against `2f9900a65386f8ebc03feebc694c2c61c2b3c332`
 (`develop`, 2026-10-18). The other documents in this directory are the
 original plan-ready handoff and remain useful as historical design input, but
 they are not the current work ledger.
@@ -71,9 +71,9 @@ they are not the current work ledger.
   and final evidence.
 - [createApplicationSession](CREATE_APPLICATION_SESSION.md) — current public
   typed-creation surface.
-- [Tool client README](../../../src/toolClient/README.md) — invocation
+- [Tool client README](../../../../src/toolClient/README.md) — invocation
   extension and its limits.
-- [Capability map](../../architecture/capabilities.md) — module ownership.
-- [Wire contract](../../technical/wire-contract.md) — protocol-facing rules.
+- [Capability map](../../../architecture/capabilities.md) — module ownership.
+- [Wire contract](../../../technical/wire-contract.md) — protocol-facing rules.
 - [Future persistence](FUTURE_PERSISTENCE.md) — deferred SQL target; not
   implemented in this repository.

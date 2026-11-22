@@ -75,16 +75,34 @@ assertion; do not widen it.
 
 ## Sequence and channel rules
 
-- One connection-wide action sequence, monotonic and gap-free for emitted
-  actions, allocated by the injected `nextServerSeq`.
+- The host allocates action sequence values in order across its sessions and
+  channels. A recipient can see gaps when intervening actions are outside its
+  subscriptions or current authority.
 - Catalogue notifications (`root/sessionAdded`, `root/sessionSummaryChanged`)
   target `ahp-root://` and **never** consume the action sequence.
 - Action envelopes target `ahp-session:/<id>` and carry the allocated
   `serverSeq`.
 - `initialize`/`subscribe` snapshots need the sequence current at snapshot time;
   the allocator mints the next value only, so a host must track the current
-  sequence rather than inventing one (see
-  [`docs/plans/ProvidersPlan.md`](../plans/ProvidersPlan.md)).
+  sequence. The snapshot cursor is `fromSeq`. See
+  [runtime lifecycles](runtime-lifecycles.md#action-sequence).
+
+```mermaid
+sequenceDiagram
+    participant C as SDK client
+    participant H as AHP host
+    C->>H: initialize
+    H-->>C: Version and initial snapshots
+    C->>H: createSession
+    H-->>C: Creation request accepted
+    C->>H: subscribe to session URI
+    H-->>C: Authorized snapshot with fromSeq
+    H-->>C: Later authorized actions with serverSeq
+```
+
+The order of subscription and backend readiness varies. A client can observe
+`ready` in the subscription snapshot or in a later action. Private tool replies
+and lifecycle events use the tool extension instead of the native reducer.
 
 ## Application tool extension
 
@@ -139,9 +157,9 @@ request using `version: 1`:
   durable work and its current execution lease.
 
 Only `x-ahp/work/claim` returns a lease token, and only to the current claimant.
-`get` redacts lease-holder and token fields. A client cannot supply a principal,
-agent ID, connection ID, or presence generation in request JSON; those come from
-the authenticated connection and live directory. The work extension is separate
+`get` redacts lease-holder and token fields. A submission may name a target
+agent. The requesting principal, executing agent, connection ID, and presence
+generation come from the authenticated connection and live directory. The work extension is separate
 from `x-ahp/tools/*`: tools are short-lived private invocation, while work is a
 durable record that survives a disconnect.
 
@@ -172,4 +190,5 @@ global-sequence consent, and protected reads require resource-view configuration
 
 - [`../../src/jsonrpc/README.md`](../../src/jsonrpc/README.md)
 - [`../../src/websocket/README.md`](../../src/websocket/README.md)
-- [`../plans/ProvidersPlan.md`](../plans/ProvidersPlan.md)
+- [Application walkthrough with SDK and WebSocket](../guides/advanced.md)
+- [Documentation index](../README.md)

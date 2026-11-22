@@ -35,15 +35,11 @@ own service credential is not the caller identity. The session owner remains S
 when J is authorized to read. Coverage: A06, S01, G05, X01, E04.
 
 ```mermaid
-flowchart LR
-  Harness[One coding harness definition] --> SA[Senior agent binding]
-  Harness --> JA[Junior agent binding]
-  Senior[Verified senior identity and delegation] --> SA
-  Junior[Verified junior identity and delegation] --> JA
-  SA --> SG[Scoped senior assignments]
-  JA --> JG[Scoped junior assignments]
-  SG --> Write[Read and explicitly authorized write]
-  JG --> Read[Read only]
+flowchart TB
+  H["Shared coding harness"] --> S["Verified senior binding"]
+  H --> J["Verified junior binding"]
+  S -->|Scoped grants| W["Read and authorized write"]
+  J -->|Scoped grants| R["Read only"]
 ```
 
 ## 2. PM in a production-fix session and triage chat
@@ -60,13 +56,11 @@ manufacture an assignment. An explicit policy might authorize U but not AU, even
 though the agent belongs to U. Coverage: A04, A05, T01, V02, X02, R01, R02.
 
 ```mermaid
-flowchart TD
-  Init[Verified PM user and separate agent context] --> Session[Prod-fix session admission]
-  Session --> Chat[Triage origin restrictions]
-  Chat --> Target[Actual workspace or terminal target]
-  Target --> Provider[Required resource provider constraints]
-  Provider --> Allowlist[SDK current assignments and reveal]
-  Allowlist --> Out[Only validated authorized descriptors]
+flowchart TB
+  A["Resolve PM and agent independently"] --> B["Check session and triage scope"]
+  B --> C["Check target and provider policy"]
+  C --> D["Check assignments and reveal"]
+  D --> E["Deliver authorized descriptors"]
 ```
 
 ## 3. Session owner is not a global administrator

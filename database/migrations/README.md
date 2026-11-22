@@ -1,23 +1,13 @@
 # Database Migrations
 
-Status: **Written, reviewed, and not applied.** PostgreSQL remains a proposed
-product dialect; this migration set is the authoritative DDL for the M2 POC.
-The user instructed that these scripts must not be executed yet, so no database
-was provisioned, migrated, or queried while producing this change.
+These two SQL files are the authoritative DDL for the implemented PostgreSQL
+adapter. Apply them in version order to an empty test database. The optional
+conformance runner expects migrations to have already been applied and writes
+its own repository fixtures. The routine validation suite runs offline. See
+[PostgreSQL setup and conformance](../../docs/guides/postgresql.md).
 
-Apply in order to an empty database only after an explicit rollout decision:
-
-```bash
-psql "$AHP_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f database/migrations/0001_session_tool_baseline.sql
-psql "$AHP_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f database/migrations/0002_agent_work.sql
-```
-
-There are no integration tests that execute these scripts yet. When a disposable
-database is approved, tests must own their tables, truncate only those tables,
-and never point at production. Do not run these scripts against a production
-database without a reviewed rollout and backup plan. There is deliberately no
-destructive automated rollback for persisted work; roll back by restoring the
-prior schema from a verified backup.
+The executable migration set contains forward SQL. A production rollout needs
+its own reviewed deployment and recovery plan.
 
 The canonical durable tables are `host_state`, `sessions`, `session_types`,
 `tools`, `session_type_tools`, `agent_registrations`, `work_items`, plus the

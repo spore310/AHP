@@ -33,9 +33,9 @@ ports and the live agent directory.
 - `cancel(principal, workId)` — terminalizes authorized queued or leased work.
 - `get(principal, workId)` — returns a view without `leaseToken` or
   `leaseAgentId`.
-- `assertSessionDisposable(sessionUri)` — refuses a session URI whose text the
-  portable-text profile (no repository access happens), then rejects
-  while any work row references the session.
+- `assertSessionDisposable(sessionUri)` checks the URI against the portable-text
+  profile before repository access. It rejects disposal while any work row
+  references that session.
 
 `WorkServiceOptions.sessions` requires only `SessionOwnerLookup.owner(uri)`.
 `SessionOwnerRegistry` extends that read-only interface with legacy bind/unbind/clear;

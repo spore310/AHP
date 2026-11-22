@@ -131,7 +131,7 @@ baseline `7038a08` and the candidate `65127f6`. Evidence type: direct git diff.
 ### R4 — `database/session-tables.md` retention citation — **CLOSED**
 
 - `database/session-tables.md:12-17` now cites
-  [`docs/architecture/agent-task-lifecycle.md`](../docs/architecture/agent-task-lifecycle.md)
+[`docs/architecture/agent-task-lifecycle.md`](../../../architecture/agent-task-lifecycle.md)
   for the deferred retention: "the retain/cancel-and-archive policy is recorded
   as 'not implemented' in ...". The relative path resolves from `database/`
   to `<repo>/docs/architecture/agent-task-lifecycle.md`, which exists.

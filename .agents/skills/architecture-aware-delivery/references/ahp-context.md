@@ -46,7 +46,7 @@ Do not downgrade a plan to current code or describe a target as already shipped.
 ## Stabilization and ProvidersPlan boundary
 
 When the stabilization task at
-[`docs/plans/AHP_STABILIZATION_AND_PROVIDERS_PREP_TASKPLAN.md`](../../../../docs/plans/AHP_STABILIZATION_AND_PROVIDERS_PREP_TASKPLAN.md)
+[`docs/archive/plans/AHP_STABILIZATION_AND_PROVIDERS_PREP_TASKPLAN.md`](../../../../docs/archive/plans/AHP_STABILIZATION_AND_PROVIDERS_PREP_TASKPLAN.md)
 is explicitly assigned, it authorizes lifecycle fixes, narrow
 sequencing-readiness checks, and preparation of
 [`docs/plans/ProvidersPlan.md`](../../../../docs/plans/ProvidersPlan.md). It does
@@ -69,4 +69,4 @@ from shape-only tests? Examine only the questions relevant to the current task.
 - Current-task user direction: Pi clients execute locally; the server has no model runtime.
 - Repository rules: `.agents/AGENTS.md`, `docs/CodingRules.md` at the stated baseline.
 - Existing review integration: `.agents/skills/code-review-documentation-drift/SKILL.md`.
-- Task plan: [`docs/plans/AHP_STABILIZATION_AND_PROVIDERS_PREP_TASKPLAN.md`](../../../../docs/plans/AHP_STABILIZATION_AND_PROVIDERS_PREP_TASKPLAN.md).
+- Historical task plan: [`docs/archive/plans/AHP_STABILIZATION_AND_PROVIDERS_PREP_TASKPLAN.md`](../../../../docs/archive/plans/AHP_STABILIZATION_AND_PROVIDERS_PREP_TASKPLAN.md).

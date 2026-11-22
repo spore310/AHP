@@ -76,7 +76,7 @@ allowed-kind checks remain with their callers.
 
 ## PostgreSQL behavior
 
-The explicit adapter entrypoint is
+The explicit [adapter entrypoint](helpers/adapters/postgres/README.md) is
 `@persistence/helpers/adapters/postgres`. It owns one pool for all repository
 constructors and releases it once. Work SQL keeps the database clock,
 transaction-client affinity, atomic `SKIP LOCKED` claims, lease-token rotation,
@@ -106,8 +106,8 @@ migrated, or queried for this work.
 
 The explicit real-database conformance runner is
 [`src/tests/persistence/adapters/postgres/conformance.ts`](../tests/persistence/adapters/postgres/conformance.ts).
-It requires an authorized, separately prepared test database and is not run by
-the ordinary test suite.
+The [PostgreSQL guide](../../docs/guides/postgresql.md) shows how to run it
+against a dedicated local database with the migrations already applied.
 
 ## Related Documentation
 

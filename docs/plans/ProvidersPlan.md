@@ -1,19 +1,15 @@
 # Providers & Client Connection Plan
 
-Status: **Agreed direction. Milestone 1 is implemented: an SDK client can
-initialize, subscribe, create a session, list sessions, dispose a session, and
-observe the same catalogue and accepted action as a second client. An
-independently authorized follow-up also added typed tool contracts and
-client-executed invocation (see
-[`CURRENT_STATE.md`](tools%20and%20session%20types/CURRENT_STATE.md)).
-Milestones 2–5 are not started. This is not authentication, a Pi extension,
-client-to-client conversation, or reconnect/replay.**
+**Status:** Accepted provider direction with a recorded Milestone 1 baseline and
+proposed client milestones. Later work added authenticated registration and work
+leases, scoped tool policy, and protected native views. Those changes have their
+own acceptance evidence and supersede the original public access assumptions.
+The [capability map](../architecture/capabilities.md) and [wire contract](../technical/wire-contract.md)
+describe the current host.
 
-This is a target-state plan for connecting independent AHP clients (Pi and
-others) to this server. It describes intended behavior, not current behavior;
-see "Current implementation" for what exists today. An implementation agent
-must not add a Pi runtime, model client, subprocess manager, or agent SDK to
-this repository.
+This plan covers independent AHP clients, including a proposed client-side Pi
+integration. The server stays responsible for session state and policy. Pi and
+model execution stay with the client.
 
 Terminology: on the server, *provider* already means an **agent backend**
 (`SessionProvider`). This plan adds no server-side `src/providers/` module;
@@ -53,7 +49,7 @@ Acceptance for Milestone 1: an `AhpClient` performs `initialize`, subscribes to
 catalogue notification and the echoed `ActionEnvelope` without touching raw
 frames.
 
-## Current implementation (server)
+## Recorded Milestone 1 implementation
 
 - `src/jsonrpc/` — JSON-RPC message parsing and validation, plus the owned
   `RpcError`.
@@ -90,10 +86,9 @@ frames.
   This is an application extension, not a native AHP method.
 - `src/application/` — the inert baseline `code-review@1` / `coding@1`
   policies used by the default host.
-- `src/tests/` — all tests. Tests are never colocated with source and never
-  live at a root `tests/` directory. The current baseline is 31 test files and
-  230 tests; see
-  [`CURRENT_STATE.md`](tools%20and%20session%20types/CURRENT_STATE.md) for
+- `src/tests/` — all tests. At this checkpoint, the suite contained 31 test
+  files and 230 tests. See
+  [`CURRENT_STATE.md`](../archive/plans/tools%20and%20session%20types/CURRENT_STATE.md) for
   coverage and limits.
 - `@microsoft/agent-host-protocol` is pinned at `1.0.0`. The sessions
   capability uses its types, literal mirrors, error codes, and runtime
