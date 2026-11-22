@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { expect } from "vitest";
 import type { AhpTransport } from "@microsoft/agent-host-protocol/client";
 import type { ResourceRef, PolicyActorRef } from "@authorization";
 import type { ClientToolRegistration, ClientToolRoute } from "@toolExecution/helpers/client/helpers/broker";
@@ -13,6 +14,13 @@ import { codingHarnessContracts, createCodingHarness } from "../toolExecution/fi
 export { channel, codingHarnessContracts, createCodingHarness };
 export const sourceEvidence = Object.freeze({ path: "src/tests/toolExecution/fixtures.ts", export: "createCodingHarness",
   candidate: createHash("sha256").update(readFileSync("src/tests/toolExecution/fixtures.ts")).digest("hex"), revision: 7 });
+
+export function expectNoDeniedDispatchFrames(frames: readonly unknown[], deniedPath: string, recipient?: string): void {
+  expect(frames, recipient).not.toContainEqual(expect.objectContaining({ method: "action" }));
+  expect(frames, recipient).not.toContainEqual(expect.objectContaining({ method: "x-ahp/tools/invoke" }));
+  expect(JSON.stringify(frames), recipient).not.toContain(deniedPath);
+}
+
 const user = (subject: string): PolicyActorRef => ({ kind: "user", principal: { domainId: "local", subject } });
 const actor = (subject: string): PolicyActorRef => subject.endsWith("-agent")
   ? { kind: "agent", principal: { domainId: "local", subject }, agentId: "verified-" + subject }
@@ -181,11 +189,22 @@ export async function createPolicyIntegrationFixture(options: {
     if (actual === undefined) throw new Error("Missing authenticated context");
     return { client, received, sent, request, assigned, advertise, dispatch, actual, transport, closed: closed.promise };
   };
+  const captureSessionState = async (...viewers: ToolClient[]) => {
+    const canonical = f.host.sessions.getSessionSnapshot(channel);
+    if (canonical === undefined) throw new Error("Missing canonical session snapshot");
+    const serverSeq = f.host.sessions.getCurrentServerSeq();
+    const views = await Promise.all(viewers.map(async (viewer) => {
+      const { result: { snapshot } } = await viewer.client.subscribe(channel);
+      if (snapshot?.resource !== channel) throw new Error("Missing recipient session snapshot");
+      return snapshot;
+    }));
+    return { canonical, serverSeq, views };
+  };
   const stop = async () => {
     await Promise.all(clients.map(async (client) => {
       await client.shutdown().catch(() => undefined);
     }));
     await f.host.stop();
   };
-  return { ...f, connect, stop, captures, caller, executor, route, workspace, chat, provider, chatPolicy, parentChannel, url, actors, sourceEvidence };
+  return { ...f, connect, captureSessionState, stop, captures, caller, executor, route, workspace, chat, provider, chatPolicy, parentChannel, url, actors, sourceEvidence };
 }

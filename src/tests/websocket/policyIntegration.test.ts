@@ -3,7 +3,7 @@ import { sessionReducer, type SessionState, type SessionAction } from "@microsof
 import type { ClientToolRoute } from "@toolExecution/helpers/client/helpers/broker";
 import WebSocket from "ws";
 import { FrameLog, responseWithId } from "./helpers";
-import { createPolicyIntegrationFixture, createCodingHarness, channel } from "./policyIntegrationFixture";
+import { createPolicyIntegrationFixture, createCodingHarness, expectNoDeniedDispatchFrames, channel } from "./policyIntegrationFixture";
 import { parseToolWire, toolInvokeSchema, toolAssignedReplySchema, type ToolInvoke } from "@toolExecution/helpers/client/helpers/protocol";
 
 const fixtures: Array<Awaited<ReturnType<typeof createPolicyIntegrationFixture>>> = [];
@@ -87,12 +87,15 @@ it.each(["self", "cross"] as const)("X05/X06 %s route denies an absent required 
   expect(selected?.execution).toBeDefined();
   expect((await caller.assigned()).tools.find((tool) => tool.contract.id === chosen.definition.id)?.purposes).not.toContain("invoke");
   const selector = { id: chosen.definition.id, key: chosen.definition.key, version: chosen.definition.version };
-  expect(await caller.client.dispatchTool(channel, selector, { path: "P12-MISSING-EVALUATOR" })).toMatchObject({ status: "denied" });
-  await executor.client.client.ping();
-  await observer.client.client.ping();
+  const before = await f.captureSessionState(caller.client, observer.client);
+  const recipients = [...new Set([caller, executor, observer])].map((peer) => ({ peer, offset: peer.received.length }));
+  const deniedPath = "P12-MISSING-EVALUATOR";
+  expect(await caller.client.dispatchTool(channel, selector, { path: deniedPath })).toEqual({ version: 2, status: "denied", code: "unavailable" });
+  await Promise.all(recipients.map(({ peer }) => peer.client.client.ping()));
+  expect(await f.captureSessionState(caller.client, observer.client)).toEqual(before);
   for (const tool of harness) expect(tool.execute).not.toHaveBeenCalled();
+  for (const { peer, offset } of recipients) expectNoDeniedDispatchFrames(peer.received.slice(offset), deniedPath);
   expect(JSON.stringify(executor.received)).toContain("P12-DESCRIPTOR-read");
-  expect(JSON.stringify(executor.received)).not.toContain("P12-MISSING-EVALUATOR");
   expect(JSON.stringify(observer.received)).not.toMatch(/P12-DESCRIPTOR|P12-SCHEMA|P12-MISSING-EVALUATOR/);
 });
 
@@ -430,12 +433,22 @@ it("X01/X02/X03 one harness preserves distinct senior, junior and PM user/agent 
     expect(params.serverSeq).toBe(envelope.serverSeq);
     expect(sessionReducer(native, params.action)).toEqual((await peer.client.client.subscribe(channel)).result.snapshot?.state);
   }
+  const observer = peers.get("observer");
+  if (observer === undefined) throw new Error("Missing observer");
   for (const subject of ["junior", "junior-agent", "pm", "pm-agent"]) {
     const peer = peers.get(subject);
     if (peer === undefined) throw new Error("Missing peer");
     for (const tool of [read, summary]) await expect(peer.client.callTool(channel, select(tool), { path: subject })).resolves.toEqual({ value: "P12-HANDLER-RESULT:" + tool.definition.key + ":" + subject + ":7" });
     for (const tool of [write, terminal]) {
-      expect(await peer.client.dispatchTool(channel, select(tool), { path: "P12-RESTRICTED-" + subject })).toMatchObject({ status: "denied" });
+      const before = await f.captureSessionState(peer.client, observer.client);
+      const recipients = [...peers].map(([recipient, endpoint]) => ({ recipient, endpoint, offset: endpoint.received.length }));
+      const deniedPath = "P12-RESTRICTED-" + subject + "-" + tool.definition.key;
+      expect(await peer.client.dispatchTool(channel, select(tool), { path: deniedPath })).toEqual({ version: 2, status: "denied", code: "unavailable" });
+      await Promise.all(recipients.map(({ endpoint }) => endpoint.client.client.ping()));
+      expect(await f.captureSessionState(peer.client, observer.client)).toEqual(before);
+      for (const { recipient, endpoint, offset } of recipients) {
+        expectNoDeniedDispatchFrames(endpoint.received.slice(offset), deniedPath, recipient);
+      }
       const view = await peer.assigned();
       await expect(peer.advertise(view.viewRevision, [select(tool)])).rejects.toThrow();
     }

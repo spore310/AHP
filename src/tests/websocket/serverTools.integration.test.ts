@@ -9,7 +9,7 @@ import { sessionReducer, type SessionState, type SessionAction } from "@microsof
 import { createToolPolicyHost } from "./toolPolicyFixture";
 import { FrameLog, responseWithId } from "./helpers";
 import { createServerHarness } from "../toolExecution/serverFixture";
-import { createPolicyIntegrationFixture, createCodingHarness, channel } from "./policyIntegrationFixture";
+import { createPolicyIntegrationFixture, createCodingHarness, expectNoDeniedDispatchFrames, channel } from "./policyIntegrationFixture";
 
 const fixtures: Array<Awaited<ReturnType<typeof createPolicyIntegrationFixture>>> = [];
 afterEach(async () => {
@@ -468,18 +468,22 @@ it("E05 a live host assignment cannot bypass an invoke-only mandatory provider d
   expect(initial.purposes).toContain("invoke");
   expect(initial.execution?.binding.location).toBe("server");
   armed.value = true;
-  expect(await caller.client.dispatchTool(channel, f.selector, { path: "P15-PROVIDER-DENIED" })).toMatchObject({ status: "denied" });
+  const before = await f.captureSessionState(caller.client, observer.client);
+  const recipients = [caller, observer].map((peer) => ({ peer, offset: peer.received.length }));
+  const deniedPath = "P15-PROVIDER-DENIED";
+  expect(verdict).not.toHaveBeenCalled();
+  expect(await caller.client.dispatchTool(channel, f.selector, { path: deniedPath })).toEqual({ version: 2, status: "denied", code: "unavailable" });
   expect(verdict).toHaveBeenCalled();
-  expect((await caller.client.client.subscribe(channel)).result.snapshot).toBeDefined();
-  expect(required((await caller.assigned()).tools.find((entry) => entry.contract.id === f.selector.id)).purposes).toEqual(["discover"]);
+  await Promise.all(recipients.map(({ peer }) => peer.client.client.ping()));
+  expect(await f.captureSessionState(caller.client, observer.client)).toEqual(before);
   for (const entry of f.harness) {
     expect(entry.prepare).not.toHaveBeenCalled();
     expect(entry.execute).not.toHaveBeenCalled();
   }
-  await caller.client.client.ping();
-  await observer.client.client.ping();
+  for (const { peer, offset } of recipients) expectNoDeniedDispatchFrames(peer.received.slice(offset), deniedPath);
+  expect(required((await caller.assigned()).tools.find((entry) => entry.contract.id === f.selector.id)).purposes).toEqual(["discover"]);
   expect(JSON.stringify(observer.received)).not.toMatch(/P15-|P12-SCHEMA|P12-DESCRIPTOR|p15-source/);
-  expect(JSON.stringify(caller.received)).not.toContain("P15-PROVIDER-DENIED");
+  expect(JSON.stringify(caller.received)).not.toContain(deniedPath);
   armed.value = false;
   await expect(caller.client.callTool(channel, f.selector, { path: "provider-restored" })).resolves.toHaveProperty("value");
   expect(f.read.execute).toHaveBeenCalledOnce();
