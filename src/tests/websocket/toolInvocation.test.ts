@@ -243,20 +243,23 @@ describe("end-to-end client tool capacity", () => {
     await expect(caller.callTool(channel, ref, { text: "hello" })).resolves.toEqual({ result: "real-executor" });
   });
 
-  it("does not inherit stale advertisements or route to ambiguous claimed IDs", async () => {
+  it("keeps the eligible executor available when another connection uses the same label", async () => {
+    const { url, caller } = await fixture();
+    const executor = await openToolClient(url, "executor");
+    const execute = vi.fn(() => ({ result: "ok" }));
+    await executor.joinSession(channel, [{ definition, execute }]);
+    await executor.client.ping();
+    await openToolClient(url, "executor");
+    await expect(caller.callTool(channel, ref, { text: "hello" })).resolves.toEqual({ result: "ok" });
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("does not inherit stale advertisements on a replacement connection", async () => {
     const { host, url, caller } = await fixture();
     const executor = await openToolClient(url, "executor");
-    let executions = 0;
-    await executor.joinSession(channel, [{ definition, execute: () => {
-      executions += 1;
-      return { result: "ok" };
-    } }]);
+    const execute = vi.fn(() => ({ result: "ok" }));
+    await executor.joinSession(channel, [{ definition, execute }]);
     await executor.client.ping();
-    const duplicate = await openToolClient(url, "executor");
-    // Not subscribed; still identity-ambiguous.
-    await expect(caller.callTool(channel, ref, { text: "ambiguous" })).rejects.toThrow();
-    expect(executions).toBe(0);
-    await duplicate.shutdown();
     await executor.shutdown();
     const replacement = await openToolClient(url, "executor");
     await replacement.client.subscribe(channel);
@@ -265,7 +268,7 @@ describe("end-to-end client tool capacity", () => {
       .toBe(true);
     // Presence is deliberately still stale; execution ownership is not.
     await expect(caller.callTool(channel, ref, { text: "stale" })).rejects.toThrow();
-    expect(executions).toBe(0);
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("settles an in-flight call on executor disconnect and on session removal/URI reuse", async () => {

@@ -1,8 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
+import Ajv from "ajv";
 import { createClientToolDispatcher, createClientToolPolicy } from "@toolExecution/helpers/client/helpers/broker";
 import { clientPolicyFixture } from "./clientPolicyFixture";
 
 describe("client tool canonical policy", () => {
+  it("binds validators to the exact issued registration revision", () => {
+    const f = clientPolicyFixture();
+    const registration = f.brokerOptions.registrations[0];
+    if (registration === undefined) throw new Error("Missing fixture registration");
+    const policy = createClientToolPolicy({ ...f.brokerOptions, registrations: [registration, {
+      ...registration, revision: 2,
+      definition: { ...registration.definition,
+        outputSchema: { type: "object", properties: { value: { type: "integer" } }, required: ["value"] } },
+    }] });
+    const [first, second] = policy.registrations;
+    if (first === undefined || second === undefined) throw new Error("Missing issued revision");
+    expect(policy.validatorsFor(first).validateOutput({ value: "text" })).toBe(true);
+    expect(policy.validatorsFor(second).validateOutput({ value: "text" })).toBe(false);
+    expect(policy.validatorsFor(second).validateOutput({ value: 2 })).toBe(true);
+    expect(() => policy.validatorsFor({ ...second })).toThrow("denied");
+  });
+
   it("supports bounded multi-purpose proof sets without reducing advertised tool capacity", async () => {
     const f = clientPolicyFixture();
     const proof = await f.policyService.authorize({ ...f.request, operation: "invoke" });
@@ -197,6 +215,23 @@ describe("client host proxy dispatcher", () => {
     return { ...f, dispatcher, request: { ...f.request, registration,
       executor: f.executor, executorContext: f.executorContext, callId: "call-1", current: () => true, fence: () => true } };
   };
+
+  it("reuses compiled validators but sends each call with its own context", async () => {
+    const f = setup();
+    const compile = vi.spyOn(Ajv.prototype, "compile");
+    const send = vi.fn((_input: unknown, context: { readonly callId: string }) => Promise.resolve({ value: context.callId }));
+    try {
+      for (const callId of ["first", "second"]) {
+        const handle = f.dispatcher.dispatch({ ...f.request, callId, send });
+        await expect(handle.result).resolves.toMatchObject({ status: "succeeded", output: { value: callId } });
+      }
+      expect(compile).not.toHaveBeenCalled();
+      expect(send.mock.calls[0]?.[1]).not.toBe(send.mock.calls[1]?.[1]);
+    } finally {
+      compile.mockRestore();
+      await f.dispatcher.shutdown();
+    }
+  });
 
   it("uses the P08 lifecycle and returns only schema-validated remote output", async () => {
     const f = setup();

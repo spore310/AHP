@@ -5,7 +5,6 @@ import { ToolDispatchFailure } from "@toolExecution/helpers/dispatcher/types";
 import type { ToolDispatchAdmission, ToolDispatcher } from "@toolExecution/helpers/dispatcher";
 import { createToolDispatcher } from "@toolExecution/helpers/dispatcher";
 import { createToolExecutorPolicy } from "@toolExecution/helpers/policy";
-import { createToolActionRegistration } from "@toolExecution/helpers/action";
 import { ToolAction } from "@toolExecution/types";
 import type { ToolActionContext } from "@toolExecution/types";
 import type { ResourceOperationAuthority, ResourceRoute } from "@authorization";
@@ -88,8 +87,9 @@ export function createClientToolDispatcher(options: ClientToolBrokerOptions, sha
           });
         }
       }
-      const registration = createToolActionRegistration({ definition: request.registration.definition,
-        implementation: request.registration.implementation, create: () => new RemoteAction() });
+      const registration = Object.freeze({ definition: request.registration.definition,
+        implementation: request.registration.implementation, create: () => new RemoteAction(),
+        ...policy.validatorsFor(request.registration) });
       const handle = dispatcher.dispatch({ callId: request.callId, input: request.input, signal: request.signal, registration,
         ports: {
           resolve: authorize,

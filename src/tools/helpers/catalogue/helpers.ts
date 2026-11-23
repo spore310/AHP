@@ -1,5 +1,5 @@
-import { defineToolContract } from "@tools/helpers/contracts";
-import { compileTrustedSchema, createTrustedAjv } from "@tools/helpers/validation";
+import { compileToolContract } from "@tools/helpers/contracts";
+import { createTrustedAjv } from "@tools/helpers/validation";
 import type {
   ToolCatalogue,
   ToolCatalogueOptions,
@@ -31,21 +31,15 @@ export function createToolCatalogue(options: ToolCatalogueOptions): ToolCatalogu
 
   const byRef = new Map<string, CompiledRevision>();
   const byId = new Map<string, CompiledRevision>();
-  const ajv = createTrustedAjv();
+  const ajv = createTrustedAjv(true);
 
   for (const seed of options.definitions) {
-    const definition = defineToolContract(seed);
+    const compiled = compileToolContract(seed, ajv);
+    const { definition } = compiled;
     const refKey = revisionKey(definition);
     if (byRef.has(refKey) || byId.has(definition.id)) {
       throw new ToolContractError("duplicate-revision", "Duplicate tool contract revision.");
     }
-    const compiled: CompiledRevision = {
-      definition,
-      validateInput: compileTrustedSchema(ajv, definition.inputSchema),
-      validateOutput: definition.outputSchema === undefined
-        ? undefined
-        : compileTrustedSchema(ajv, definition.outputSchema),
-    };
     byRef.set(refKey, compiled);
     byId.set(definition.id, compiled);
   }

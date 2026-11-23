@@ -26,6 +26,84 @@ afterEach(async () => {
 });
 
 describe("AHP host composition", () => {
+  it("shares completion while an attached session backend is disposing", async () => {
+    const entered = Promise.withResolvers<undefined>();
+    const release = Promise.withResolvers<undefined>();
+    const dispose = vi.fn(() => {
+      entered.resolve(undefined);
+      return release.promise;
+    });
+    const host = createAHPServer({ host: "127.0.0.1", port: 0,
+      sessions: { providers: [{ ...createMockProvider(), startSession: () => Promise.resolve({ dispose }) }] } });
+    hosts.push(host);
+    await host.sessions.createSession({ channel: `${SESSION_URI_PREFIX}held-disposal` });
+    const first = host.stop();
+    try {
+      await entered.promise;
+      expect(host.stop()).toBe(first);
+      const settled = vi.fn();
+      void first.then(settled);
+      await Promise.resolve();
+      expect(settled).not.toHaveBeenCalled();
+      expect(dispose).toHaveBeenCalledOnce();
+    } finally {
+      release.resolve(undefined);
+      await first;
+    }
+  });
+
+  it("shares completion while the supplied resource disposer is pending", async () => {
+    const entered = Promise.withResolvers<undefined>();
+    const release = Promise.withResolvers<undefined>();
+    const persistence = createMemoryPersistenceFixture();
+    const dispose = vi.fn(async () => {
+      entered.resolve(undefined);
+      await release.promise;
+      await persistence.provider.dispose();
+    });
+    const host = createAHPServer({
+      host: "127.0.0.1", port: 0,
+      sessions: { providers: [createMockProvider()] },
+      agentWork: { authenticator: createStaticTokenAuthenticator(new Map()), registrations: persistence.provider.registrations,
+        work: persistence.provider.work, allowedKinds: new Set(["test.kind"]), dispose },
+    });
+    hosts.push(host);
+    const first = host.stop();
+    try {
+      await entered.promise;
+      const second = host.stop();
+      expect(second).toBe(first);
+      expect(dispose).toHaveBeenCalledOnce();
+    } finally {
+      release.resolve(undefined);
+      await first;
+    }
+  });
+
+  it("shares reentrant shutdown and caches the aggregate cleanup error", async () => {
+    const persistence = createMemoryPersistenceFixture();
+    const failure = new Error("Resource cleanup failed");
+    const reentrant = Promise.withResolvers<{ stop: Promise<void> }>();
+    const dispose = vi.fn(async () => {
+      reentrant.resolve({ stop: host.stop() });
+      await persistence.provider.dispose();
+      throw failure;
+    });
+    const host = createAHPServer({
+      host: "127.0.0.1", port: 0,
+      sessions: { providers: [createMockProvider()] },
+      agentWork: { authenticator: createStaticTokenAuthenticator(new Map()), registrations: persistence.provider.registrations,
+        work: persistence.provider.work, allowedKinds: new Set(["test.kind"]), dispose },
+    });
+    const first = host.stop();
+    const caught = first.catch((error: unknown) => error);
+    await expect(host.start()).rejects.toThrow(/shutdown/);
+    expect((await reentrant.promise).stop).toBe(first);
+    expect(host.stop()).toBe(first);
+    await expect(caught).resolves.toMatchObject({ name: "AggregateError", errors: [failure] });
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
   it("keeps two hosts from sharing sessions", async () => {
     const first = createAHPServer({
       host: "127.0.0.1",

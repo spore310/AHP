@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { defineToolContract, ToolContractError } from "@tools";
+import { assertTrustedSchema } from "@tools/helpers/validation";
 
 const base = (): Record<string, unknown> => ({
   id: "11111111-1111-4111-8111-111111111111",
@@ -19,6 +20,59 @@ const base = (): Record<string, unknown> => ({
 });
 
 describe("tool schema admission", () => {
+  const forbidden = { type: "string", format: "uri" };
+  it.each([
+    ["property map", { properties: { value: forbidden } }],
+    ["definition map", { definitions: { value: forbidden } }],
+    ["definition aliases", { $defs: { value: forbidden } }],
+    ["extra property", { additionalProperties: forbidden }],
+    ["property name", { propertyNames: forbidden }],
+    ["item schema", { properties: { values: { items: forbidden } } }],
+    ["tuple item", { properties: { values: { items: [forbidden] } } }],
+    ["contains", { properties: { values: { contains: forbidden } } }],
+    ["negation", { not: forbidden }],
+    ["conjunction", { allOf: [forbidden] }],
+    ["disjunction", { anyOf: [forbidden] }],
+    ["exclusive disjunction", { oneOf: [forbidden] }],
+    ["condition", { if: forbidden }],
+    ["conditional branch", { then: forbidden }],
+    ["alternative branch", { else: forbidden }],
+    ["schema dependency", { dependencies: { value: forbidden } }],
+  ] as const)("applies the profile inside a %s", (_name, schema) => {
+    expect(() => {
+      assertTrustedSchema({ type: "object", ...schema }, "input");
+    }).toThrow(
+      expect.objectContaining({ code: "unsupported-schema-feature" }),
+    );
+  });
+
+  it.each(["inputSchema", "outputSchema"])("applies the schema profile to tuple extensions in %s", (role) => {
+    const schema = {
+      type: "object",
+      properties: {
+        labels: {
+          type: "array",
+          minItems: 1,
+          maxItems: 1,
+          items: [{ type: "string" }],
+          additionalItems: { type: "string", format: "uri" },
+        },
+      },
+    };
+    expect(() => defineToolContract({ ...base(), [role]: schema })).toThrow(
+      expect.objectContaining({ code: "unsupported-schema-feature" }),
+    );
+  });
+
+  it("allows schema keyword names as property names and literal data", () => {
+    const inputSchema = {
+      type: "object",
+      properties: { pattern: { type: "string" }, type: { const: { $ref: "literal" } } },
+      additionalProperties: false,
+    };
+    expect(defineToolContract({ ...base(), inputSchema }).inputSchema).toEqual(inputSchema);
+  });
+
   it("rejects non-object roots", () => {
     expect(() => defineToolContract({ ...base(), inputSchema: true })).toThrow(ToolContractError);
     expect(() => defineToolContract({ ...base(), inputSchema: [] })).toThrow(ToolContractError);

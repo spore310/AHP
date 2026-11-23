@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { once } from "node:events";
 import { readFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 import WebSocket from "ws";
@@ -94,18 +95,11 @@ it("E05 rejects absent, invalid and host-identity client credentials before auth
   for (const credential of [undefined, "r5-invalid", "r5-host-service"]) {
     const socket = credential === undefined ? new WebSocket(f.url) : new WebSocket(f.url, credential);
     const frames = new FrameLog(socket);
-    socket.on("error", () => undefined);
-    await new Promise<void>((resolve, reject) => {
-      socket.once("open", resolve);
-      socket.once("error", reject);
-    });
     try {
-      socket.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { channel: "ahp-root://", clientId: "host-service", protocolVersions: ["1.0.0"], initialSubscriptions: [channel] } }));
-      socket.send(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "x-ahp/tools/dispatch", params: { version: 2, channel, contract: f.selector, input: { path: "P15-UNAUTHENTICATED" } } }));
-      for (const id of [1, 2]) expect(await frames.waitFor(responseWithId(id), 2000)).toHaveProperty("error.code");
-      expect(JSON.stringify(frames.frames)).not.toMatch(/P15-|P12-DESCRIPTOR|P12-SCHEMA|p15-source/);
+      await expect(once(socket, "close")).resolves.toEqual([1008, Buffer.from("Connection rejected")]);
+      expect(frames.frames).toEqual([]);
     } finally {
-      socket.close();
+      socket.terminate();
     }
   }
   for (const entry of f.harness) expect(entry.execute).not.toHaveBeenCalled();

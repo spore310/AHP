@@ -1,9 +1,10 @@
 import { createAuthorizationSchemas, POLICY_LIMIT_ABSOLUTE } from "@authorization";
 import type { ResourceOperationAuthority, AssignmentAuthorization, TrustedRequestContext } from "@authorization";
 import { sameActor, sameResource, sameRoute } from "@authorization/helpers/context";
-import { defineToolContract, canonicalJsonEqual } from "@tools";
+import { canonicalJsonEqual } from "@tools";
+import { compileToolContract } from "@tools/helpers/contracts";
 import { toolExecutionBindingSchema } from "@toolPolicy/helpers/validation";
-import { captureToolValue } from "../action/helpers";
+import { bindToolActionValidators, captureToolValue } from "../action/helpers";
 import { ToolDispatchFailure } from "../dispatcher/types";
 import type { ToolExecutionLocation, ToolExecutorPolicyOptions, ToolPolicyRegistration, ToolPolicyResolutionRequest, ToolExecutorPolicyRequest, ToolExecutorProof, ToolPolicyRoute } from "./types";
 
@@ -26,13 +27,17 @@ export function createToolExecutorPolicy<TLocation extends ToolExecutionLocation
   const validateCohort = registry.validateAuthorityCohort.bind(registry);
   const readBindings = registry.readBindings.bind(registry);
   const getContract = registry.getContract.bind(registry);
+  const validators = new WeakMap<ToolPolicyRegistration<TLocation>, ReturnType<typeof bindToolActionValidators>>();
   const captureRegistration = (raw: ToolPolicyRegistration<TLocation>): ToolPolicyRegistration<TLocation> => {
-    const definition = defineToolContract(raw.definition);
+    const compiled = compileToolContract(raw.definition);
+    const { definition } = compiled;
     const implementation = toolExecutionBindingSchema.parse(raw.implementation);
     if (implementation.location !== location || !Number.isSafeInteger(raw.revision) || raw.revision < 1
       || !Number.isSafeInteger(raw.source.revision) || raw.source.revision < 1) throw new TypeError("Invalid tool policy registration.");
     const source = Object.freeze({ id: schemas.identifierSchema.parse(raw.source.id), revision: raw.source.revision });
-    return Object.freeze({ definition, implementation: Object.freeze(implementation) as ToolPolicyRegistration<TLocation>["implementation"], revision: raw.revision, source });
+    const captured = Object.freeze({ definition, implementation: Object.freeze(implementation) as ToolPolicyRegistration<TLocation>["implementation"], revision: raw.revision, source });
+    validators.set(captured, Object.freeze(bindToolActionValidators(compiled)));
+    return captured;
   };
   const registrations = options.registrations.map(captureRegistration);
   const identities = new Set<string>();
@@ -41,10 +46,9 @@ export function createToolExecutorPolicy<TLocation extends ToolExecutionLocation
     if (identities.has(key)) throw new TypeError("Duplicate tool policy registration.");
     identities.add(key);
   }
-  const issued = new WeakSet(registrations);
   const issuedProofs = new WeakMap<ToolExecutorProof, { readonly authorization: AssignmentAuthorization; readonly actor: TrustedRequestContext; readonly signal: AbortSignal }>();
   const captureRequest = (request: ToolPolicyResolutionRequest<TLocation>): ToolPolicyResolutionRequest<TLocation> => {
-    if (!issued.has(request.registration) || request.signal.aborted) return deny();
+    if (!validators.has(request.registration) || request.signal.aborted) return deny();
     return Object.freeze({
       ...request,
       caller: schemas.trustedRequestContextSchema.parse(captureToolValue(request.caller, limits).value),
@@ -57,14 +61,13 @@ export function createToolExecutorPolicy<TLocation extends ToolExecutionLocation
 
   return Object.freeze({
     registrations: Object.freeze(registrations),
+    validatorsFor: (registration: ToolPolicyRegistration<TLocation>) => validators.get(registration) ?? deny(),
     /** Runtime registration is issued only from the host-owned, activated manifest. */
     registerRuntime(raw: ToolPolicyRegistration<TLocation>): ToolPolicyRegistration<TLocation> {
       const registered = getContract(raw.definition.id);
       if (registered === undefined || !canonicalJsonEqual(registered, raw.definition)
         || registrations.some((entry) => entry.definition.id === raw.definition.id)) return deny();
-      const captured = captureRegistration(raw);
-      issued.add(captured);
-      return captured;
+      return captureRegistration(raw);
     },
     current(proofs: readonly ToolExecutorProof[], resourceAuthority?: ResourceOperationAuthority): boolean {
       if (resourceAuthority !== undefined && resourceAuthority.registry !== registry) return false;

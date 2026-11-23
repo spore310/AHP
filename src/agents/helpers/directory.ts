@@ -4,7 +4,7 @@ import type {
 } from "@persistence/types";
 import { isPortableText } from "@persistence";
 
-import { DEFAULT_PRESENCE_TTL_MS } from "../constants";
+import { DEFAULT_DIRECTORY_MAX_PENDING, DEFAULT_DIRECTORY_MAX_RETAINED, DEFAULT_PRESENCE_TTL_MS } from "../constants";
 import type {
   AgentDirectory,
   AgentDirectoryOptions,
@@ -12,6 +12,16 @@ import type {
   PresenceBinding,
 } from "../types";
 import { AgentDirectoryError } from "./errors";
+
+interface RetainedIdentity {
+  readonly id: string;
+  readonly key: string;
+  record: AgentRegistrationRecord | undefined;
+  generation: number;
+}
+
+const registrationKey = (subject: string, key: string): string => JSON.stringify([subject, key]);
+const registrationCapacity = (): AgentDirectoryError => new AgentDirectoryError("conflict", "Agent registration capacity unavailable.");
 
 /**
  * Create the agent registration and in-memory presence directory.
@@ -27,11 +37,18 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
   if (!Number.isFinite(presenceTtlMs) || presenceTtlMs <= 0) {
     throw new Error("Agent presence TTL must be a positive finite number of milliseconds");
   }
+  const { maxRetained = DEFAULT_DIRECTORY_MAX_RETAINED, maxPending = DEFAULT_DIRECTORY_MAX_PENDING } = options.registrationLimits ?? {};
+  if (!Number.isSafeInteger(maxRetained) || maxRetained < 1 || !Number.isSafeInteger(maxPending) || maxPending < 1) {
+    throw new TypeError("Invalid agent directory registration limits.");
+  }
 
   const byAgent = new Map<string, PresenceBinding>();
   const byConnection = new Map<string, Set<string>>();
-  const generations = new Map<string, number>();
-  const registrationCache = new Map<string, AgentRegistrationRecord>();
+  const retainedById = new Map<string, RetainedIdentity>();
+  const retainedByKey = new Map<string, RetainedIdentity>();
+  const reservations = new Map<string, { waiters: number; reserved: boolean }>();
+  let reservedIdentities = 0;
+  let pendingOperations = 0;
 
   const removeBinding = (binding: PresenceBinding): boolean => {
     const current = byAgent.get(binding.agentId);
@@ -67,15 +84,48 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
     return current;
   };
 
-  const cachedRegistration = (agentId: string): AgentRegistrationRecord | undefined => (
-    registrationCache.get(agentId)
-  );
-
-  const rememberRegistration = (
-    record: AgentRegistrationRecord,
-  ): AgentRegistrationRecord => {
-    registrationCache.set(record.id, record);
-    return record;
+  const beginRegistration = (locator: string, known: RetainedIdentity | undefined) => {
+    if (pendingOperations >= maxPending) throw registrationCapacity();
+    let reservation = known === undefined ? reservations.get(locator) : undefined;
+    if (known === undefined && reservation === undefined) {
+      if (retainedById.size + reservedIdentities >= maxRetained) throw registrationCapacity();
+      reservation = { waiters: 0, reserved: true };
+      reservations.set(locator, reservation);
+      reservedIdentities += 1;
+    }
+    if (reservation !== undefined) reservation.waiters += 1;
+    pendingOperations += 1;
+    return {
+      remember(record: AgentRegistrationRecord): AgentRegistrationRecord {
+        const key = registrationKey(record.principalSubject, record.agentKey);
+        const identity = retainedById.get(record.id);
+        if ((known !== undefined && (known.id !== record.id || known.key !== key))
+          || (identity !== undefined && identity.key !== key)
+          || (retainedByKey.has(key) && retainedByKey.get(key) !== identity)) {
+          throw new AgentDirectoryError("conflict", "Agent registration identity changed.");
+        }
+        if (identity !== undefined) {
+          identity.record = record;
+          return record;
+        }
+        if (reservation?.reserved !== true) throw registrationCapacity();
+        reservation.reserved = false;
+        reservedIdentities -= 1;
+        const retained = { id: record.id, key, record, generation: 0 };
+        retainedById.set(record.id, retained);
+        retainedByKey.set(key, retained);
+        return record;
+      },
+      release(): void {
+        pendingOperations -= 1;
+        if (reservation === undefined) return;
+        reservation.waiters -= 1;
+        if (reservation.waiters === 0) {
+          reservations.delete(locator);
+          if (reservation.reserved) reservedIdentities -= 1;
+        }
+      },
+    };
   };
 
   return {
@@ -89,12 +139,26 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
         || (displayName !== undefined && !isPortableText(displayName))) {
         throw new AgentDirectoryError("invalid", "Registration text contains unsupported characters.");
       }
-      const record = await registrations.register({
-        principalSubject: principal.subject,
-        agentKey,
-        ...(displayName !== undefined ? { displayName } : {}),
-      });
-      return rememberRegistration(record);
+      const subject = principal.subject;
+      const key = registrationKey(subject, agentKey);
+      const known = retainedByKey.get(key);
+      if (known !== undefined && known.record === undefined) {
+        throw new AgentDirectoryError("not_found", "Agent registration not found");
+      }
+      const admission = beginRegistration(`key:${key}`, known);
+      try {
+        const record = await registrations.register({
+          principalSubject: subject,
+          agentKey,
+          ...(displayName !== undefined ? { displayName } : {}),
+        });
+        if (record.principalSubject !== subject || record.agentKey !== agentKey) {
+          throw new AgentDirectoryError("conflict", "Agent registration identity changed.");
+        }
+        return admission.remember(record);
+      } finally {
+        admission.release();
+      }
     },
 
     bindPresence(
@@ -102,8 +166,9 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
       principal: AuthenticatedPrincipal,
       connectionId: string,
     ): PresenceBinding {
-      const record = cachedRegistration(agentId);
-      if (record === undefined) {
+      const identity = retainedById.get(agentId);
+      const record = identity?.record;
+      if (identity === undefined || record === undefined) {
         throw new AgentDirectoryError("not_found", "Agent registration not found");
       }
       if (record.principalSubject !== principal.subject || !record.enabled) {
@@ -127,8 +192,9 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
         }
       }
 
-      const generation = (generations.get(agentId) ?? 0) + 1;
-      generations.set(agentId, generation);
+      const generation = identity.generation + 1;
+      if (!Number.isSafeInteger(generation)) throw registrationCapacity();
+      identity.generation = generation;
       const binding: PresenceBinding = {
         agentId,
         principalSubject: principal.subject,
@@ -195,12 +261,19 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
     },
 
     async getRegistration(agentId: string): Promise<AgentRegistrationRecord | undefined> {
-      const record = await registrations.getById(agentId);
-      if (record === undefined) {
-        registrationCache.delete(agentId);
-        return undefined;
+      const known = retainedById.get(agentId);
+      const admission = beginRegistration(`id:${agentId}`, known);
+      try {
+        const record = await registrations.getById(agentId);
+        if (record === undefined) {
+          if (known !== undefined) known.record = undefined;
+          return undefined;
+        }
+        if (record.id !== agentId) throw new AgentDirectoryError("conflict", "Agent registration identity changed.");
+        return admission.remember(record);
+      } finally {
+        admission.release();
       }
-      return rememberRegistration(record);
     },
   };
 };

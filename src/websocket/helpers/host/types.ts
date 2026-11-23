@@ -1,12 +1,13 @@
 import type { ServerToolBrokerOptions } from "@toolExecution/server";
 import type { AddressInfo } from "node:net";
 
-import type { ConnectionAuthenticator } from "@agents";
+import type { AgentDirectoryRegistrationLimits, ConnectionAuthenticator } from "@agents";
 import type { AgentRegistrationRepository, WorkRepository } from "@persistence/types";
 import type { SessionsFactory, SessionsFactoryOptions } from "@sessions/types";
 import type { ClientToolBrokerOptions } from "@toolExecution/helpers/client/helpers/broker";
 import type { ResourceViewOptions } from "@toolExecution/helpers/views";
 import type { AHPServerSecurityOptions } from "../security/types";
+import type { WebSocketTransportLimits } from "../../types";
 
 /**
  * Optional durable agent and work-leasing wiring.
@@ -24,6 +25,7 @@ export interface AHPServerAgentWorkOptions {
   readonly allowedKinds: ReadonlySet<string>;
   /** Presence lifetime; defaults to the agent directory default. */
   readonly presenceTtlMs?: number;
+  readonly registrationLimits?: Partial<AgentDirectoryRegistrationLimits>;
   /** Clock used for presence deadlines and work-service validation. */
   readonly now?: () => number;
   /** Releases host-owned resources (for example, a database pool). */
@@ -38,6 +40,7 @@ export interface AHPServerOptions {
   readonly host: string;
   readonly port: number;
   readonly path?: string;
+  readonly transportLimits?: Partial<WebSocketTransportLimits>;
   /** Session factory options. The host creates and owns the factory. */
   readonly sessions: SessionsFactoryOptions;
   /** Optional authenticated agent identity and durable work leasing. */

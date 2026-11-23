@@ -3,12 +3,38 @@ import assert from "node:assert/strict";
 import { createPersistence } from "@persistence";
 import {
   RepositoryError,
+  type AgentRegistrationRepository,
   type DurableSessionInput,
   type PersistenceProvider,
 } from "@persistence/types";
 
 export type PersistenceConformanceProviderFactory
   = () => PersistenceProvider | Promise<PersistenceProvider>;
+
+const registrationConflict = (error: unknown): boolean => error instanceof RepositoryError && error.code === "conflict";
+
+/** Run against two adapters sharing an empty store with a per-principal cap of one and a total cap of two. */
+export const assertRegistrationQuotaConformance = async (
+  first: AgentRegistrationRepository,
+  second: AgentRegistrationRepository,
+): Promise<void> => {
+  const existing = { principalSubject: "quota-a", agentKey: "worker" };
+  const [left, right] = await Promise.all([first.register(existing), second.register(existing)]);
+  assert.equal(left.id, right.id);
+  await assert.rejects(second.register({ ...existing, agentKey: "second-worker" }), registrationConflict);
+
+  const outcomes = await Promise.allSettled([
+    first.register({ principalSubject: "quota-b", agentKey: "worker" }),
+    second.register({ principalSubject: "quota-c", agentKey: "worker" }),
+  ]);
+  const succeeded = outcomes.filter((outcome) => outcome.status === "fulfilled");
+  const refused = outcomes.filter((outcome) => outcome.status === "rejected");
+  assert.equal(succeeded.length, 1);
+  assert.equal(refused.length, 1);
+  assert.ok(registrationConflict(refused[0]?.reason));
+  assert.equal((await first.register({ ...existing, displayName: "Renamed" })).id, left.id);
+  assert.equal((await second.getById(left.id))?.displayName, "Renamed");
+};
 
 /** Runs data-contract scenarios against any provider fixture, without SQL hooks. */
 export const assertPersistenceConformance = async (

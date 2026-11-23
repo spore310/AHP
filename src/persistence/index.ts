@@ -1,5 +1,6 @@
 export { RepositoryError } from "./types";
 export type {
+  AgentRegistrationLimits,
   AgentRegistrationRecord,
   AgentRegistrationRepository,
   DurableSessionInput,

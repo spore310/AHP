@@ -48,6 +48,15 @@ Callers must not replace that operation with separate session and work writes.
 An idempotent replay compares the immutable JSON value: object key order is
 irrelevant, while array order remains significant.
 
+## Registration quotas
+
+The registration repository resolves one durable identity for each principal
+and agent key. Providers used with registration quotas enforce them during
+`register`. The PostgreSQL provider defaults to 128 per principal and 4,096
+total. Existing keys retain their IDs and allow display-name updates at
+capacity. A new key above quota returns a repository conflict. Use consistent
+limits across instances that write to the same database.
+
 ## Selecting an adapter
 
 The process composition root imports

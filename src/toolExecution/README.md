@@ -261,6 +261,10 @@ build remains SSR. Implementation/source binding is not remote code attestation.
 
 `createToolActionRegistration` captures a trusted contract definition, exact implementation binding and action factory. It reuses the existing draft-07 compiler. Schemas remain serializable; executable factories are separate host registrations. Generic input/output types are the host's schema/action pairing, checked against schemas on every invocation. Missing output schemas accept bounded JSON. Constructors must be inert: factories and supplementary authentication/validation are not privileged preparation.
 
+The client broker compiles fail-fast validators when policy issues an immutable
+registration. Calls reuse those validators and each gets its own action, signal,
+and authority checks. Validation is synchronous.
+
 `createToolDispatcher` owns aggregate capacity across registrations. Trusted per-call ports resolve context/resources, check coarse access, return full policy decision/authority, and check currentness synchronously. These ports are not client JSON, self-reported grants or public authentication. The host must retain complete invocation-specific freshness evidence privately; AuthorityRevisionStamp alone lacks LocalDecisionStamp expiry/external evidence. Initial authority is provisional. Prepare/execute receive the captured full-decision authority.
 
 Order: bounded immutable input/schema; resolved initial context/coarse access; fresh action instance; optional authenticate/validate; recaptured and schema-checked normalization; resolved target route; full policy; prepare; execute; bounded output/schema; cleanup; current result delivery. Caller/auth/connection, executor, origin incarnation, contract and implementation stay pinned. New normalized targets require fresh resolution and authorization. Challenges fail closed until P13. Every action object can be used once per dispatcher, including sequential calls; weak tracking does not strongly retain completed instances.

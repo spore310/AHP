@@ -8,6 +8,7 @@ export { DEFAULT_PRESENCE_TTL_MS } from "./constants";
 export type {
   AgentDirectory,
   AgentDirectoryOptions,
+  AgentDirectoryRegistrationLimits,
   AuthenticatedPrincipal,
   ConnectionAuthenticator,
   PresenceBinding,

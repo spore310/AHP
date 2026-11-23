@@ -25,8 +25,14 @@ export interface PresenceBinding {
   readonly expiresAt: number;
 }
 
+export interface AgentDirectoryRegistrationLimits {
+  readonly maxRetained: number;
+  readonly maxPending: number;
+}
+
 export interface AgentDirectoryOptions {
   readonly registrations: AgentRegistrationRepository;
+  readonly registrationLimits?: Partial<AgentDirectoryRegistrationLimits>;
   /** Monotonic milliseconds used for presence deadlines. */
   readonly now?: () => number;
   readonly presenceTtlMs?: number;

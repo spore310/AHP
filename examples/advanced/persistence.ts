@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import {
   RepositoryError,
+  type AgentRegistrationLimits,
   type AgentRegistrationRecord,
   type DurableSessionInput,
   type PersistenceProvider,
@@ -8,6 +9,7 @@ import {
   type WorkLeaseRecord,
   type WorkStatus,
 } from "@persistence";
+import { captureAgentRegistrationLimits } from "@persistence/helpers/agentRegistrations";
 
 /** Inspectable state for the example and repository conformance checks. */
 interface ExamplePersistence {
@@ -25,7 +27,8 @@ interface ExamplePersistence {
 const operation = <T extends unknown[], R>(run: (...args: T) => R): ((...args: T) => Promise<R>) => (...args) => Promise.resolve().then(() => run(...args));
 
 /** Local example storage, scoped to a single run. Configure PostgreSQL for real durability. */
-export const createExamplePersistence = (): ExamplePersistence => {
+export const createExamplePersistence = (registrationLimits?: Partial<AgentRegistrationLimits>): ExamplePersistence => {
+  const limits = captureAgentRegistrationLimits(registrationLimits);
   const registrations = new Map<string, AgentRegistrationRecord>();
   const registrationKeys = new Map<string, string>();
   const sessions = new Map<string, DurableSessionInput>();
@@ -67,6 +70,10 @@ export const createExamplePersistence = (): ExamplePersistence => {
             registrations.set(existingId, updated);
             return updated;
           }
+        }
+        if (registrations.size >= limits.maxTotal
+          || [...registrations.values()].filter((record) => record.principalSubject === input.principalSubject).length >= limits.maxPerPrincipal) {
+          throw new RepositoryError("conflict", "Agent registration capacity unavailable.");
         }
         const record: AgentRegistrationRecord = {
           id: nextId(),
@@ -263,7 +270,10 @@ export const createExamplePersistence = (): ExamplePersistence => {
     registrations,
     sessions,
     work,
-    seedRegistration: (record) => registrations.set(record.id, record),
+    seedRegistration: (record) => {
+      registrations.set(record.id, record);
+      registrationKeys.set(`${record.principalSubject}\u0000${record.agentKey}`, record.id);
+    },
     seedSession: (session) => sessions.set(session.sessionUri, session),
     setNow: (value) => { now = value; },
     isDisposed: () => disposed,

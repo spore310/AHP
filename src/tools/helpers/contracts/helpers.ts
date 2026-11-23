@@ -32,9 +32,19 @@ const DEFINITION_KEYS = new Set([
  * not stored on the definition.
  */
 export function defineToolContract(input: unknown): ToolContractDefinition {
+  return compileToolContract(input).definition;
+}
+
+/** Admit and compile once for callers that also need the executable validators. */
+export function compileToolContract(input: unknown, ajv = createTrustedAjv()) {
   const definition = captureToolDefinition(input);
-  admitSchemas(definition);
-  return definition;
+  assertTrustedSchema(definition.inputSchema, "input");
+  if (definition.outputSchema !== undefined) assertTrustedSchema(definition.outputSchema, "output");
+  return {
+    definition,
+    validateInput: compileTrustedSchema(ajv, definition.inputSchema),
+    validateOutput: definition.outputSchema === undefined ? undefined : compileTrustedSchema(ajv, definition.outputSchema),
+  };
 }
 
 /** Capture shape and budgets without compiling an untrusted proposal. */
@@ -95,18 +105,6 @@ function captureDefinition(data: Record<string, unknown>): ToolContractDefinitio
     Object.assign(definition, { metadata });
   }
   return definition;
-}
-
-function admitSchemas(definition: ToolContractDefinition): void {
-  assertTrustedSchema(definition.inputSchema, "input");
-  if (definition.outputSchema !== undefined) {
-    assertTrustedSchema(definition.outputSchema, "output");
-  }
-  const ajv = createTrustedAjv();
-  compileTrustedSchema(ajv, definition.inputSchema);
-  if (definition.outputSchema !== undefined) {
-    compileTrustedSchema(ajv, definition.outputSchema);
-  }
 }
 
 function readVersion(value: unknown): number {

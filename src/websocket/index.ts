@@ -17,6 +17,7 @@ export type {
   WebSocketDispatchContext,
   WebSocketServerHandle,
   WebSocketServerOptions,
+  WebSocketTransportLimits,
 } from "./types";
 
 export { createAHPBinding, createAHPBinding as createAHPConnectionModule } from "./helpers/ahp";

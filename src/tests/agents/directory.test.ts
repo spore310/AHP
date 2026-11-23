@@ -23,6 +23,43 @@ const setup = (ttlMs = 1_000) => {
 };
 
 describe("createAgentDirectory registration", () => {
+  it("preserves retained identities and fences while refusing new identities at capacity", async () => {
+    const registrations = createRegistrationFixture();
+    const options = { registrations: registrations.repository, registrationLimits: { maxRetained: 1 } };
+    const directory = createAgentDirectory(options);
+    const first = await directory.register(alice, "worker");
+    const binding = directory.bindPresence(first.id, alice, "first");
+    directory.releasePresence(binding);
+
+    await expect(directory.register(alice, "worker", "Renamed")).resolves.toMatchObject({ id: first.id, displayName: "Renamed" });
+    await expect(directory.register(bob, "other")).rejects.toMatchObject({ code: "conflict" });
+    expect(registrations.registerCalls).toHaveLength(2);
+
+    const other = await registrations.repository.register({ principalSubject: bob.subject, agentKey: "other" });
+    await expect(directory.getRegistration(other.id)).rejects.toMatchObject({ code: "conflict" });
+    await expect(directory.getRegistration(first.id)).resolves.toMatchObject({ id: first.id });
+    const rebound = directory.bindPresence(first.id, alice, "second");
+    expect(rebound.generation).toBeGreaterThan(binding.generation);
+    directory.releasePresence(binding);
+    expect(directory.getOnline(first.id)).toBe(rebound);
+  });
+
+  it("releases pending lookup and identity capacity when the repository fails", async () => {
+    const registrations = createRegistrationFixture();
+    const lookup = Promise.withResolvers<undefined>();
+    const directory = createAgentDirectory({
+      registrations: { ...registrations.repository, getById: () => lookup.promise },
+      registrationLimits: { maxRetained: 1, maxPending: 1 },
+    });
+    const pending = directory.getRegistration("pending");
+    const failure = expect(pending).rejects.toThrow("Lookup failed");
+    await expect(directory.register(alice, "worker")).rejects.toMatchObject({ code: "conflict" });
+    expect(registrations.registerCalls).toHaveLength(0);
+    lookup.reject(new Error("Lookup failed"));
+    await failure;
+    await expect(directory.register(alice, "worker")).resolves.toMatchObject({ agentKey: "worker" });
+  });
+
   it("resolves one stable registration for the same principal and agent key", async () => {
     const { registrations, directory } = setup();
     const first = await directory.register(alice, "coding-worker", "Worker");

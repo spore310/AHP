@@ -12,24 +12,18 @@ const FORBIDDEN_SCHEMA_KEYS = new Set([
   "$data",
 ]);
 
-const SCHEMA_WALK_KEYS = new Set([
-  "properties",
+const SCHEMA_MAP_KEYS = ["properties", "definitions", "$defs"] as const;
+const SCHEMA_ARRAY_KEYS = ["allOf", "anyOf", "oneOf"] as const;
+const SINGLE_SCHEMA_KEYS = [
   "additionalProperties",
-  "items",
+  "additionalItems",
   "contains",
   "if",
   "then",
   "else",
   "not",
-  "allOf",
-  "anyOf",
-  "oneOf",
   "propertyNames",
-  "dependencies",
-  "dependentSchemas",
-  "$defs",
-  "definitions",
-]);
+] as const;
 
 /**
  * Creates an Ajv 8 instance for trusted, already-admitted draft-07 schemas.
@@ -37,9 +31,9 @@ const SCHEMA_WALK_KEYS = new Set([
  * No coercion, defaults, additional-property removal, format plugin, or
  * remote schema loading.
  */
-export function createTrustedAjv(): Ajv {
+export function createTrustedAjv(allErrors = false): Ajv {
   return new Ajv({
-    allErrors: true,
+    allErrors,
     coerceTypes: false,
     useDefaults: false,
     removeAdditional: false,
@@ -80,7 +74,7 @@ function isObjectRootSchema(schema: Readonly<Record<string, unknown>>): boolean 
 
 function walkSchema(schema: unknown): void {
   if (typeof schema === "boolean") {
-    throw new ToolContractError("invalid-schema", "Boolean schemas are not admitted.");
+    return;
   }
   if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
     throw new ToolContractError("invalid-schema", "Invalid tool schema.");
@@ -118,40 +112,27 @@ function walkSchema(schema: unknown): void {
     throw new ToolContractError("invalid-schema", "Invalid tool schema.");
   }
 
-  for (const key of SCHEMA_WALK_KEYS) {
-    const nested = record[key];
-    if (nested === undefined) {
-      continue;
-    }
-    walkNested(nested);
+  for (const key of SINGLE_SCHEMA_KEYS) {
+    if (record[key] !== undefined) walkSchema(record[key]);
+  }
+  for (const key of SCHEMA_ARRAY_KEYS) {
+    if (Array.isArray(record[key])) record[key].forEach(walkSchema);
+  }
+  for (const key of SCHEMA_MAP_KEYS) {
+    schemaMapValues(record[key]).forEach(walkSchema);
+  }
+  const items = record.items;
+  if (Array.isArray(items)) items.forEach(walkSchema);
+  else if (items !== undefined) walkSchema(items);
+  for (const dependency of schemaMapValues(record.dependencies)) {
+    if (!Array.isArray(dependency)) walkSchema(dependency);
   }
 }
 
-function walkNested(value: unknown): void {
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      if (typeof entry === "object" && entry !== null) {
-        walkSchema(entry);
-      }
-    }
-    return;
-  }
-  if (typeof value === "object" && value !== null) {
-    const record = value as Record<string, unknown>;
-    const looksLikeSchema = record.type !== undefined
-      || record.properties !== undefined
-      || record.items !== undefined
-      || record.required !== undefined;
-    if (looksLikeSchema || Object.keys(record).some((key) => FORBIDDEN_SCHEMA_KEYS.has(key))) {
-      walkSchema(record);
-      return;
-    }
-    for (const child of Object.values(record)) {
-      if (typeof child === "object" && child !== null) {
-        walkNested(child);
-      }
-    }
-  }
+function schemaMapValues(value: unknown): unknown[] {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? Object.values(value)
+    : [];
 }
 
 function assertStringArray(value: unknown): void {

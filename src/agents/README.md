@@ -32,7 +32,7 @@ registration and a live presence binding are separate concepts.
 - `createStaticTokenAuthenticator(tokens: ReadonlyMap<string, string>)` — maps an
   exact token to a principal subject. Missing, malformed, repeated, or unknown
   credentials resolve to `undefined`; tokens are never logged or echoed.
-- `createAgentDirectory({ registrations, now?, presenceTtlMs? })` —
+- `createAgentDirectory({ registrations, now?, presenceTtlMs?, registrationLimits? })` —
   - `register(principal, agentKey, displayName?)` resolves the durable row for
     that principal and key.
   - `bindPresence(agentId, principal, connectionId)` creates or returns the
@@ -71,6 +71,11 @@ for work authorization.
   the TTL lapses. Every work mutation re-reads the registration, so claims and
   completions still fail closed. Invalidation belongs with a real
   disable/decommission path.
+- The directory defaults to 4,096 retained identities and 64 pending
+  registration or lookup operations. Configure `maxRetained` and `maxPending`
+  through `registrationLimits`. Known identities remain usable at the
+  retention limit as pending capacity allows. New identities need a slot
+  before a repository call. Closing a binding preserves its generation history.
 - Registration rows grow only with unique `(principal, agent_key)` pairs: the
   register handler refuses a connection-level bind conflict before the durable
   write, and same-key registrations are upserts. The reachable "row landed but

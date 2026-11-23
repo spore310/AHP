@@ -7,6 +7,7 @@ import { createSessionOwnerRegistry, createWorkService } from "@work";
 
 import {
   assertPersistenceConformance,
+  assertRegistrationQuotaConformance,
   createMemoryPersistenceFixture,
 } from "./conformance/helpers";
 
@@ -41,6 +42,17 @@ const composeServices = (fixture: ReturnType<typeof createMemoryPersistenceFixtu
 describe("provider conformance through neutral services", () => {
   it("runs the reusable contract suite against a non-SQL provider", async () => {
     await assertPersistenceConformance(() => createMemoryPersistenceFixture().provider);
+  });
+
+  it("runs the reusable registration quotas against a non-SQL provider", async () => {
+    const memory = createMemoryPersistenceFixture({ maxPerPrincipal: 1, maxTotal: 2 });
+    const persistence = createPersistence(memory.provider);
+    try {
+      await assertRegistrationQuotaConformance(memory.provider.registrations, persistence.registrations);
+      expect(memory.registrations.size).toBe(2);
+    } finally {
+      await persistence.dispose();
+    }
   });
 
   it("substitutes an independently built provider through AgentDirectory and WorkService", async () => {

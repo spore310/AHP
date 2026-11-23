@@ -1,8 +1,9 @@
+import { once } from "node:events";
 import { afterEach, expect, it, vi } from "vitest";
 import { sessionReducer, type SessionState, type SessionAction } from "@microsoft/agent-host-protocol";
 import type { ClientToolRoute } from "@toolExecution/helpers/client/helpers/broker";
 import WebSocket from "ws";
-import { FrameLog, responseWithId } from "./helpers";
+import { FrameLog } from "./helpers";
 import { createPolicyIntegrationFixture, createCodingHarness, expectNoDeniedDispatchFrames, channel } from "./policyIntegrationFixture";
 import { parseToolWire, toolInvokeSchema, toolAssignedReplySchema, type ToolInvoke } from "@toolExecution/helpers/client/helpers/protocol";
 
@@ -815,30 +816,13 @@ it.each(["self", "cross"] as const)("X05/X06 %s route rejects missing and invali
   if (chosen === undefined) throw new Error("Missing tool");
   await executor.client.joinSession(channel, [chosen]);
   for (const credential of [undefined, "r5-invalid"]) {
-    // The transport attaches unauthenticated sockets as open but unprivileged
-    // connections. Denials are authoritative per frame, never a host close.
     const socket = credential === undefined ? new WebSocket(f.url) : new WebSocket(f.url, credential);
     const frames = new FrameLog(socket);
-    socket.on("error", () => undefined);
-    await new Promise<void>((resolve, reject) => {
-      socket.once("open", resolve);
-      socket.once("error", reject);
-    });
-    socket.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { clientId: "senior-agent", protocolVersions: ["1.0.0"], initialSubscriptions: [channel] } }));
-    socket.send(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "x-ahp/tools/dispatch", params: { version: 2, channel,
-      contract: { id: chosen.definition.id, key: chosen.definition.key, version: chosen.definition.version }, input: { path: "P12-UNAUTHENTICATED" } } }));
     try {
-      for (const [label, id] of [["initialize", 1], ["dispatch", 2]] as const) {
-        const reply = await frames.waitFor(responseWithId(id), 2000);
-        expect(reply, label + " denied").toHaveProperty("error.code");
-        if (typeof reply !== "object" || reply === null || !("error" in reply) || typeof reply.error !== "object"
-          || reply.error === null || !("code" in reply.error)) throw new Error("Missing public RPC error");
-        expect(typeof reply.error.code).toBe("number");
-        expect(JSON.stringify(reply), label + " authority absent").not.toContain("\"result\"");
-      }
-      expect(JSON.stringify(frames.frames), "no authorized canary").not.toMatch(/P12-DESCRIPTOR|P12-SCHEMA|P12-HANDLER-RESULT/);
+      await expect(once(socket, "close")).resolves.toEqual([1008, Buffer.from("Connection rejected")]);
+      expect(frames.frames).toEqual([]);
     } finally {
-      socket.close();
+      socket.terminate();
     }
   }
   await executor.client.client.ping();

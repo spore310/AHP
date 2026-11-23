@@ -45,6 +45,7 @@ host fences prevent reuse even though standalone factories may be reused.
 | ---- | -------------- |
 | `types.ts` | `WebSocketServerOptions`, `WebSocketServerHandle`, `JsonRpcHandler(s)`, `WebSocketConnectionContext`, and the optional handshake authenticator. |
 | `helpers/server.ts` | `createWebSocketServer`: HTTP/WebSocket lifecycle, upgrade checks, handshake authentication, heartbeat, and shutdown. |
+| `helpers/capacity.ts` | Validated transport limits, capacity reservations, and outbound frame accounting. |
 | `helpers/connection.ts` | `attachConnection`: per-socket framing, serialized dispatch, reply settlement, principal attachment, and error mapping. |
 | `helpers/ahp/index.ts` | Public AHP binding exports. |
 | `helpers/ahp/helpers.ts` | Safe public facade: cursor-authorized ready initialize, separate contextual create/null, per-connection cancellation, protected-route deferral and work delegation. |
@@ -76,6 +77,10 @@ host fences prevent reuse even though standalone factories may be reused.
   - `options.handlers` — `Readonly<Record<string, JsonRpcHandler>>`.
   - `options.authenticator` — optional handshake credential verifier. A resolved
     principal is attached to `WebSocketConnectionContext.principal`.
+  - `options.authentication` defaults to `"optional"`. In `"required"` mode,
+    missing or invalid credentials close the connection with `1008` before any
+    JSON-RPC handler attaches.
+  - `options.transportLimits` overrides the limits below at construction.
   - `options.shutdownTimeoutMs` — graceful-shutdown deadline (default `5000`).
 - `handle.start(): Promise<AddressInfo>` — resolves with the bound address.
 - `handle.stop(): Promise<void>` — resolves once local resources are released.
@@ -92,12 +97,35 @@ host fences prevent reuse even though standalone factories may be reused.
   protected host supplies `ownerLookup` from its canonical full-ref/domain owner
   projection. The lookup has no bind/unbind/clear mutators and grants no new work
   authority.
-- `createAHPServer({ host, port, path, sessions, agentWork?, security? })` — composed host.
+- `createAHPServer({ host, port, path, sessions, agentWork?, security?, transportLimits? })` — composed host.
   `agentWork` optionally adds the static-token authenticator, shared
-  registration/work ports, allowed kinds, presence TTL, and provider cleanup.
-  `stop()` releases transport, binding, sessions, and the optional provider. It is terminal,
-  including after a failed `start()`. `host.sessions.createSession` and
-  `host.sessions.dispatchAction` then reject; a second `start()` rejects.
+  registration/work ports, allowed kinds, presence TTL, directory registration
+  limits, and provider cleanup. Hosts with `security` or `agentWork` require
+  successful authentication.
+  Every `stop()` call shares completion of transport, binding, bounded tool
+  drain, session, and optional provider cleanup. Cleanup failures reject
+  with one aggregate error. The host becomes terminal at the start of
+  shutdown, including cleanup after a failed `start()`.
+
+### Transport limits
+
+| Option | Default | Scope |
+| ------ | ------- | ----- |
+| `maxConnections` | 64 | Accepted and reserved upgrades per listener |
+| `maxPendingSetups` | 16 | Pending authentication or setup per listener |
+| `maxQueuedFrames` | 64 | Queued input messages per connection |
+| `maxQueuedInputBytes` | 2 MiB | Queued input per connection, measured in UTF-8 bytes |
+| `maxBufferedOutputBytes` | 4 MiB | Local pending WebSocket output per connection, including framing and close headroom |
+| `maxPendingDeferredRequests` | 64 | Unsettled deferred requests per listener |
+
+An incoming message can carry up to 1 MiB and must also fit the input queue
+budget. Set `maxPendingSetups` at or below `maxConnections`. Capacity refusal
+before upgrade returns HTTP `503`. Input queue or write overflow terminates
+that socket. A deferred request over capacity receives a JSON-RPC error, and
+already admitted calls can finish. A refused write returns `false` to the
+caller. Setup and deferred-operation slots stay charged until the underlying
+promises settle, even after the socket closes. Transport limits apply to the
+listed allocations. Application work and buffers have their own lifetimes.
 
 ## 5-Minute Usage
 

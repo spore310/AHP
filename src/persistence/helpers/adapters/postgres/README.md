@@ -15,7 +15,7 @@ contract and do not inspect this adapter.
 | `helpers/connection/types.ts` | Private `PoolLike`, `PoolClientLike`, and `Queryable` shapes for driver code and query doubles. |
 | `helpers/connection/helpers.ts` | Pool creation, same-client transactions, timestamp conversion, and private SQLSTATE mapping. |
 | `helpers/connection/index.ts` | Connection helper boundary for sibling adapter modules. |
-| `helpers/agentRegistrations/helpers.ts` | Registration upsert/get SQL and row mapping. |
+| `helpers/agentRegistrations/helpers.ts` | Registration quota checks, upsert/get SQL, and row mapping. |
 | `helpers/agentRegistrations/index.ts` | Registration repository boundary. |
 | `helpers/sessions/helpers.ts` | Session projection ensure/get/delete, owner checks, and dependent-work classification. |
 | `helpers/sessions/index.ts` | Session repository boundary; transaction-local `ensureSession` remains internal. |
@@ -24,7 +24,7 @@ contract and do not inspect this adapter.
 
 ## Provider usage
 
-`createPostgresPersistenceProvider({ connectionString, maxConnections?, leaseTtlSeconds? })`
+`createPostgresPersistenceProvider({ connectionString, maxConnections?, leaseTtlSeconds?, registrationLimits? })`
 returns a `Promise<PersistenceProvider>`. The configured adapter registry calls
 it after validating its neutral selection options. The returned provider owns
 one pool shared by registration, session, and work repositories; its
@@ -36,6 +36,11 @@ under [`database/migrations/`](../../../../../database/migrations/).
 
 ## Preserved behavior and limits
 
+- `registrationLimits` sets `maxPerPrincipal` and `maxTotal` to positive safe
+  integers. The defaults are 128 and 4,096. Registration checks both limits
+  and writes on one transaction client under a table lock. The lock serializes
+  registration writes and allows ordinary reads. Lowering a limit preserves
+  existing identities and their ability to re-register.
 - `work.submit` runs session projection and idempotent work insertion in one
   transaction using the same acquired client.
 - Claim and lease updates keep their SQL predicates, database clock
@@ -46,6 +51,6 @@ under [`database/migrations/`](../../../../../database/migrations/).
 - The schema stores `session_type_id`; current mapping limitations for the
   optional session type fields are recorded in the shared
   [persistence README](../../../README.md#postgresql-behavior).
-- Query doubles cover SQL behavior offline. No test here proves real database
-  contention or transaction behavior; those cases require separate
-  authorization and a dedicated database.
+- Query doubles cover SQL behavior offline. The disposable PostgreSQL
+  conformance runner checks contention through independent provider pools.
+  [PostgreSQL setup and conformance](../../../../../docs/guides/postgresql.md)

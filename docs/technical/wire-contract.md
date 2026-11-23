@@ -170,10 +170,10 @@ this is application policy, not a claim that JSON itself cannot represent those
 values. The profile does not replace request schemas, authorization, or payload
 size checks. See the [persistence contract](../../src/persistence/README.md#portable-text-profile-v1).
 
-When configured, the upgrade may carry `Authorization: Bearer <token>`; the
-resolved subject is attached to the connection before AHP dispatch. Missing or
-unknown credentials leave the connection unauthenticated, so agent/work methods
-fail closed. Supported native initialization independently requires trusted
+An agent/work host using static tokens requires
+`Authorization: Bearer <token>` on the upgrade. The resolved subject attaches
+before AHP dispatch. Missing or unknown credentials close the socket with
+`1008`. Supported native initialization independently requires trusted
 global-sequence consent, and protected reads require resource-view configuration.
 `initialize.clientId` is never identity. See
 [`../architecture/agent-task-lifecycle.md`](../architecture/agent-task-lifecycle.md).

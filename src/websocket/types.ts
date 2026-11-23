@@ -89,6 +89,15 @@ export interface DeferredRequestCompletionRule {
   matches(params: JsonRpcParams, context: WebSocketConnectionContext): boolean;
 }
 
+export interface WebSocketTransportLimits {
+  readonly maxConnections: number;
+  readonly maxPendingSetups: number;
+  readonly maxQueuedFrames: number;
+  readonly maxQueuedInputBytes: number;
+  readonly maxBufferedOutputBytes: number;
+  readonly maxPendingDeferredRequests: number;
+}
+
 /** Options for {@link createWebSocketServer}. */
 export interface WebSocketServerOptions {
   /** Network interface to bind. */
@@ -103,11 +112,13 @@ export interface WebSocketServerOptions {
    * Optional server-side credential verification for the WebSocket upgrade.
    *
    * Runs once before the connection context is created. A resolved principal is
-   * attached to the context; an unresolved credential leaves it `undefined`.
+   * attached to the context; in optional mode an unresolved credential leaves it `undefined`.
    * A thrown authentication failure closes that socket without stopping the
    * server.
    */
   readonly authenticator?: ConnectionAuthenticator;
+  readonly authentication?: "optional" | "required";
+  readonly transportLimits?: Partial<WebSocketTransportLimits>;
   /** Mutually exclusive with authenticator. Reserves the actual fence before asynchronous setup. */
   readonly connectionSetup?: ConnectionSetupAdapter;
   readonly setupDeadlineMs?: number;

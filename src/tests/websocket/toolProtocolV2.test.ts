@@ -29,6 +29,37 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+it("denies a call when two current executor advertisements match the contract", async () => {
+  const subjects = ["caller", "first-executor", "second-executor"];
+  const f = await createToolPolicyHost([contract], {
+    protectedViews: true,
+    toolDiscovery: subjects,
+    roles: { "caller": ["discover", "invoke"],
+      "first-executor": ["discover", "advertise", "execute"],
+      "second-executor": ["discover", "advertise", "execute"] },
+  });
+  hosts.push(f.host);
+  const address = await f.host.start();
+  const connect = async (subject: string) => {
+    const transport = await connectPolicyTransport(`ws://127.0.0.1:${String(address.port)}/capacity`, subject);
+    const client = await connectToolClient({ transport, ownership: "owned" }, { clientId: subject, protocolVersions: ["1.0.0"] });
+    clients.push(client);
+    return client;
+  };
+  const caller = await connect("caller");
+  const first = await connect("first-executor");
+  const second = await connect("second-executor");
+  await caller.client.subscribe(channel);
+  const executeFirst = vi.fn(() => ({ value: "first" }));
+  const executeSecond = vi.fn(() => ({ value: "second" }));
+  await first.joinSession(channel, [{ definition: contract, execute: executeFirst }]);
+  await second.joinSession(channel, [{ definition: contract, execute: executeSecond }]);
+  const selector = { id: contract.id, key: contract.key, version: contract.version };
+  await expect(caller.dispatchTool(channel, selector, { path: "same-contract" })).resolves.toMatchObject({ status: "denied" });
+  expect(executeFirst).not.toHaveBeenCalled();
+  expect(executeSecond).not.toHaveBeenCalled();
+});
+
 it.each(["completed", "cancelled", "revoked"] as const)("W04/W05 public SDK local execution has a %s result without releasing forbidden output", async (outcome) => {
   const f = await createToolPolicyHost([contract], { protectedViews: true, toolDiscovery: ["caller", "executor"],
     roles: { caller: ["discover", "invoke"], executor: ["discover", "advertise", "execute"] } });

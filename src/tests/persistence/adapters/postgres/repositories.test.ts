@@ -72,7 +72,9 @@ class SimulatedDriverError extends Error {
  * query surface but must not consume planned statement results — otherwise the
  * plan queue desynchronizes and projection SQL gets the wrong rows.
  */
-const CONTROL_STATEMENTS = new Set(["BEGIN", "COMMIT", "ROLLBACK"]);
+const CONTROL_STATEMENTS = new Set(["BEGIN", "COMMIT", "ROLLBACK",
+  "SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
+  "LOCK TABLE agent_registrations IN SHARE ROW EXCLUSIVE MODE"]);
 
 const callAt = (calls: readonly RecordedQuery[], index: number): RecordedQuery => {
   const call = calls[index];
@@ -179,11 +181,25 @@ const registrationRow = (overrides: Partial<AgentRegistrationRow> = {}): AgentRe
 });
 
 describe("postgres agent registration repository", () => {
-  it("register upserts with the original SQL, parameters and optional display name", async () => {
-    const double = createDatabaseDouble([{
+  it("refuses a new key at capacity and rolls back on the acquired client", async () => {
+    const double = createDatabaseDouble([
+      { rows: [{ full: true }] },
+    ]);
+    const repository = createPostgresAgentRegistrationRepository(double.pool, { maxPerPrincipal: 1, maxTotal: 1 });
+    await expect(repository.register({ principalSubject: "alice", agentKey: "agent-2" })).rejects.toMatchObject({
+      code: "conflict", message: "Agent registration capacity unavailable.",
+    });
+    expect(double.connectCount()).toBe(1);
+    expect(double.calls.every((call) => call.surface === "client")).toBe(true);
+    expect(double.calls.at(-1)?.text).toBe("ROLLBACK");
+    expect(double.calls.some((call) => call.text.includes("INSERT"))).toBe(false);
+  });
+
+  it("checks capacity and upserts on one transaction client with the optional display name", async () => {
+    const double = createDatabaseDouble([{ rows: [{ full: false }] }, {
       rows: [registrationRow({ display_name: "Willa", created_at: "2026-01-02T03:04:05.678Z" })],
     }]);
-    const repository = createPostgresAgentRegistrationRepository(double.client);
+    const repository = createPostgresAgentRegistrationRepository(double.pool);
 
     const record = await repository.register({
       principalSubject: "alice",
@@ -191,16 +207,22 @@ describe("postgres agent registration repository", () => {
       displayName: "Willa",
     });
 
-    expect(double.calls).toHaveLength(1);
-    expect(callAt(double.calls, 0).surface).toBe("client");
-    expect(callAt(double.calls, 0).text.replace(/\s+/g, " ").trim()).toBe(
+    expect(double.calls).toHaveLength(6);
+    expect(double.calls.every((call) => call.surface === "client")).toBe(true);
+    expect(double.calls.slice(0, 3).map((call) => call.text)).toEqual([
+      "BEGIN", "SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
+      "LOCK TABLE agent_registrations IN SHARE ROW EXCLUSIVE MODE",
+    ]);
+    expect(callAt(double.calls, 3).values).toEqual(["alice", "agent-1", 4095, 127]);
+    expect(callAt(double.calls, 4).text.replace(/\s+/g, " ").trim()).toBe(
       "INSERT INTO agent_registrations (principal_subject, agent_key, display_name)"
       + " VALUES ($1, $2, $3)"
       + " ON CONFLICT (principal_subject, agent_key)"
       + " DO UPDATE SET display_name = COALESCE(EXCLUDED.display_name, agent_registrations.display_name)"
       + " RETURNING id, principal_subject, agent_key, display_name, enabled, created_at",
     );
-    expect([...callAt(double.calls, 0).values]).toEqual(["alice", "agent-1", "Willa"]);
+    expect(callAt(double.calls, 4).values).toEqual(["alice", "agent-1", "Willa"]);
+    expect(callAt(double.calls, 5).text).toBe("COMMIT");
     expect(record).toEqual({
       id: REGISTRATION_ID,
       principalSubject: "alice",
@@ -212,19 +234,19 @@ describe("postgres agent registration repository", () => {
   });
 
   it("register maps a missing display name to undefined (port optional mapping)", async () => {
-    const double = createDatabaseDouble([{ rows: [registrationRow()] }]);
-    const repository = createPostgresAgentRegistrationRepository(double.client);
+    const double = createDatabaseDouble([{ rows: [{ full: false }] }, { rows: [registrationRow()] }]);
+    const repository = createPostgresAgentRegistrationRepository(double.pool);
 
     const record = await repository.register({ principalSubject: "alice", agentKey: "agent-1" });
 
-    expect([...callAt(double.calls, 0).values]).toEqual(["alice", "agent-1", null]);
+    expect(callAt(double.calls, 4).values).toEqual(["alice", "agent-1", null]);
     expect(record.displayName).toBeUndefined();
     expect(record.createdAt).toBe("2026-01-02T03:04:05.678Z");
   });
 
   it("register maps a driver failure through the owned error vocabulary", async () => {
     const double = createDatabaseDouble([], { failAllWith: new SimulatedDriverError("23505") });
-    const repository = createPostgresAgentRegistrationRepository(double.client);
+    const repository = createPostgresAgentRegistrationRepository(double.pool);
 
     const attempt = repository.register({ principalSubject: "alice", agentKey: "agent-1" });
 
@@ -235,17 +257,18 @@ describe("postgres agent registration repository", () => {
   });
 
   it("register keeps a missing RETURNING row a sanitized database failure", async () => {
-    const double = createDatabaseDouble([{ rows: [] }]);
-    const repository = createPostgresAgentRegistrationRepository(double.client);
+    const double = createDatabaseDouble([{ rows: [{ full: false }] }, { rows: [] }]);
+    const repository = createPostgresAgentRegistrationRepository(double.pool);
 
     await expect(
       repository.register({ principalSubject: "alice", agentKey: "agent-1" }),
     ).rejects.toHaveProperty("message", "The durable store operation failed.");
+    expect(double.calls.at(-1)?.text).toBe("ROLLBACK");
   });
 
   it("getById returns the mapped record for the UUID parameter", async () => {
     const double = createDatabaseDouble([{ rows: [registrationRow()] }]);
-    const repository = createPostgresAgentRegistrationRepository(double.client);
+    const repository = createPostgresAgentRegistrationRepository(double.pool);
 
     const record = await repository.getById(REGISTRATION_ID);
 
@@ -266,14 +289,14 @@ describe("postgres agent registration repository", () => {
 
   it("getById preserves the undefined absence sentinel", async () => {
     const double = createDatabaseDouble([{ rows: [] }]);
-    const repository = createPostgresAgentRegistrationRepository(double.client);
+    const repository = createPostgresAgentRegistrationRepository(double.pool);
 
     await expect(repository.getById(REGISTRATION_ID)).resolves.toBeUndefined();
   });
 
   it("getById sends constraint violations to the sanitized database class", async () => {
     const double = createDatabaseDouble([], { failAllWith: new SimulatedDriverError("42P01") });
-    const repository = createPostgresAgentRegistrationRepository(double.client);
+    const repository = createPostgresAgentRegistrationRepository(double.pool);
 
     await expect(repository.getById(REGISTRATION_ID)).rejects.toMatchObject({
       code: "database",

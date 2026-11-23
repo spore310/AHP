@@ -93,11 +93,15 @@ stateDiagram-v2
   forced close itself throws.
 - **A permanent HTTP error listener** absorbs late server-level errors so they
   cannot crash the process.
-- **Authentication precedes AHP dispatch.** When configured, the upgrade
-  authenticator resolves a principal before the connection context exists.
-  Frames are paused while an asynchronous authenticator runs, so an early
-  `initialize` is not dropped. A thrown/rejected authenticator closes only that
-  socket with `1011`; the listener keeps running.
+- **Authentication precedes AHP dispatch.** Hosts using `security` or
+  `agentWork` require a principal before creating the connection context.
+  Missing or invalid credentials close the socket with `1008`. An
+  authentication error closes it with `1011`. The transport pauses frames
+  during setup and resumes them for an accepted connection.
+- **Transport capacity is finite.** Connection and setup slots are reserved
+  before upgrade. The transport bounds queued input and local pending output
+  per socket, and tracks deferred requests across the listener. Setup and
+  deferred slots remain charged until their promises settle.
 
 ## Connection framing
 
@@ -119,9 +123,11 @@ reachable as methods.
 - A work lease has a token and a repository-owned deadline. PostgreSQL checks
   that deadline using its own clock. With presence gone, the lease still expires
   on schedule and eligible workers can reclaim it with a new token and attempt.
-- Host shutdown stops the transport, disposes the binding, disposes sessions,
-  then releases the optional database pool. A failed cleanup is aggregated
-  rather than silently ignored.
+- Host shutdown rejects new operations and begins protected session
+  cancellation synchronously. It stops the transport, disposes the binding,
+  waits for the bounded tool drain and owned session cleanup, and releases
+  the optional database pool. Every stop caller awaits the same completion or
+  aggregate failure. Unresolved remote work can remain draining.
 
 ## Gotchas
 

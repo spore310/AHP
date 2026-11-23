@@ -20,11 +20,13 @@ import type {
   WebSocketServerOptions,
 } from "../types";
 import { attachConnection } from "./connection";
+import { canBufferFrame, captureTransportLimits, createCapacity } from "./capacity";
 import { setupDeadline } from "./security/helpers";
 import type { PreparedConnectionSetup } from "./security/types";
 
 /** Free-form close code used only when handshake authentication throws. */
 const WEBSOCKET_CLOSE_AUTHENTICATION_FAILED = 1011;
+const WEBSOCKET_CLOSE_AUTHENTICATION_REQUIRED = 1008;
 
 /**
  * Lifecycle of a server: bound lazily, single-flight while starting, and
@@ -71,6 +73,17 @@ export const createWebSocketServer = (
   if (authenticator !== undefined && connectionSetup !== undefined) {
     throw new Error("Conflicting connection setup authenticators.");
   }
+  const needsSetup = authenticator !== undefined || connectionSetup !== undefined;
+  const configuredAuthentication: unknown = options.authentication;
+  const authentication = configuredAuthentication === undefined ? "optional" : configuredAuthentication;
+  if ((authentication !== "optional" && authentication !== "required") || (authentication === "required" && !needsSetup)) {
+    throw new TypeError("Invalid WebSocket authentication configuration.");
+  }
+  const limits = captureTransportLimits(options.transportLimits);
+  const reserveConnection = createCapacity(limits.maxConnections);
+  const reserveSetup = createCapacity(limits.maxPendingSetups);
+  const reserveDeferred = createCapacity(limits.maxPendingDeferredRequests);
+  const pendingCancels = new Set<() => void>();
   const setupDeadlineMs = setupDeadline(options.setupDeadlineMs);
   const prepareConnection = connectionSetup?.prepare.bind(connectionSetup);
   const verifyHandshake = authenticator?.authenticate.bind(authenticator);
@@ -88,6 +101,7 @@ export const createWebSocketServer = (
   httpServer.on("error", () => undefined);
   const wsServer = new WebSocketServer({
     noServer: true,
+    autoPong: false,
     maxPayload: WEBSOCKET_MAX_PAYLOAD_BYTES,
   });
 
@@ -116,7 +130,6 @@ export const createWebSocketServer = (
     socket.once("error", onSocketError);
 
     if (lifecycle !== "listening") {
-      socket.off("error", onSocketError);
       rejectUpgrade(socket, 503, "Service Unavailable");
       return;
     }
@@ -125,23 +138,35 @@ export const createWebSocketServer = (
     try {
       requestPath = new URL(request.url ?? "/", "http://localhost").pathname;
     } catch {
-      socket.off("error", onSocketError);
       rejectUpgrade(socket, 400, "Bad Request");
       return;
     }
 
     if (requestPath !== path) {
-      socket.off("error", onSocketError);
       rejectUpgrade(socket, 404, "Not Found");
       return;
     }
 
+    const releaseConnection = reserveConnection();
+    const releaseSetup = releaseConnection !== undefined && needsSetup ? reserveSetup() : undefined;
+    if (releaseConnection === undefined || (needsSetup && releaseSetup === undefined)) {
+      releaseConnection?.();
+      rejectUpgrade(socket, 503, "Service Unavailable");
+      return;
+    }
+    let upgraded = false;
+    socket.once("close", () => {
+      releaseConnection();
+      if (!upgraded) releaseSetup?.();
+    });
     try {
       wsServer.handleUpgrade(request, socket, head, (client) => {
+        upgraded = true;
         socket.off("error", onSocketError);
-        wsServer.emit("connection", client, request);
+        acceptConnection(client, request, releaseSetup);
       });
     } catch {
+      releaseSetup?.();
       socket.off("error", onSocketError);
       socket.destroy();
     }
@@ -161,9 +186,10 @@ export const createWebSocketServer = (
     });
   };
 
-  wsServer.on("connection", (socket, request) => {
+  const acceptConnection = (socket: WebSocket, request: IncomingMessage, releaseSetup: (() => void) | undefined): void => {
     generation += 1;
     if (!Number.isSafeInteger(generation)) {
+      releaseSetup?.();
       socket.close(WEBSOCKET_CLOSE_AUTHENTICATION_FAILED, "Connection rejected");
       return;
     }
@@ -186,15 +212,16 @@ export const createWebSocketServer = (
         return;
       }
       cancelled = true;
+      pendingCancels.delete(cancel);
       abort.abort();
       clearDeadline();
       prepared?.release();
     };
-    const reject = (): void => {
+    const reject = (code = WEBSOCKET_CLOSE_AUTHENTICATION_FAILED): void => {
       cancel();
       try {
+        socket.close(code, "Connection rejected");
         socket.resume();
-        socket.close(WEBSOCKET_CLOSE_AUTHENTICATION_FAILED, "Connection rejected");
       } catch {
         socket.terminate();
       }
@@ -202,6 +229,10 @@ export const createWebSocketServer = (
     const establish = (principal: AuthenticatedPrincipal | undefined): void => {
       if (cancelled || attached || lifecycle !== "listening" || socket.readyState !== socket.OPEN) {
         cancel();
+        return;
+      }
+      if (authentication === "required" && principal === undefined) {
+        reject(WEBSOCKET_CLOSE_AUTHENTICATION_REQUIRED);
         return;
       }
       if (prepared !== undefined && (!prepared.isCurrent()
@@ -213,7 +244,8 @@ export const createWebSocketServer = (
         return;
       }
       // This final currentness check and local attach have no intervening await.
-      const context = attachConnection(socket, handlers, beforeDispatch, deferredRequestCompletionMethods, principal, { fence, ...(prepared === undefined ? {} : { setup: prepared }) });
+      const context = attachConnection(socket, handlers, beforeDispatch, deferredRequestCompletionMethods, principal,
+        { fence, ...(prepared === undefined ? {} : { setup: prepared }) }, { limits, reserveDeferred });
       attached = true;
       clearDeadline();
       onConnection?.(context);
@@ -222,10 +254,20 @@ export const createWebSocketServer = (
     socket.on("pong", () => {
       alive.add(socket);
     });
-    socket.on("error", reject);
+    socket.on("ping", (data) => {
+      if (socket.readyState !== socket.OPEN) return;
+      if (!canBufferFrame(socket.bufferedAmount, data.byteLength, limits.maxBufferedOutputBytes)) {
+        socket.terminate();
+        return;
+      }
+      socket.pong(data);
+    });
+    socket.on("error", () => {
+      reject();
+    });
     socket.once("close", cancel);
     request.socket.once("close", cancel);
-    if (authenticator === undefined && connectionSetup === undefined) {
+    if (!needsSetup) {
       try {
         establish(undefined);
       } catch {
@@ -234,6 +276,7 @@ export const createWebSocketServer = (
       return;
     }
     socket.pause();
+    pendingCancels.add(cancel);
     timer = setTimeout(reject, setupDeadlineMs);
     const handshake = Object.freeze({
       headers: Object.freeze(structuredClone(request.headers)),
@@ -273,17 +316,19 @@ export const createWebSocketServer = (
       } catch {
         reject();
       } finally {
+        pendingCancels.delete(cancel);
+        releaseSetup?.();
         if (socket.readyState === socket.OPEN) {
           socket.resume();
         }
       }
     })();
-  });
+  };
 
   const startHeartbeat = (): void => {
     heartbeatTimer = setInterval(() => {
       for (const socket of wsServer.clients) {
-        if (!alive.has(socket)) {
+        if (!alive.has(socket) || !canBufferFrame(socket.bufferedAmount, 0, limits.maxBufferedOutputBytes)) {
           socket.terminate();
           continue;
         }
@@ -439,6 +484,7 @@ export const createWebSocketServer = (
     const wasStarting = lifecycle === "starting";
     lifecycle = "stopping";
     stopHeartbeat();
+    for (const cancel of pendingCancels) cancel();
 
     // A bind still in flight must settle before shutdown can close it, so a
     // listener cannot appear after stop() reports completion. beginListening
@@ -449,6 +495,7 @@ export const createWebSocketServer = (
 
     for (const socket of wsServer.clients) {
       socket.close(WEBSOCKET_CLOSE_GOING_AWAY, "Server shutting down");
+      if (socket.isPaused) socket.resume();
     }
 
     if (boundAddress !== null) {
@@ -459,7 +506,12 @@ export const createWebSocketServer = (
   };
 
   const stop = (): Promise<void> => {
-    shutdownPromise ??= performShutdown();
+    if (shutdownPromise !== null) return shutdownPromise;
+    const completion = Promise.withResolvers<undefined>();
+    shutdownPromise = completion.promise;
+    void performShutdown().then(() => {
+      completion.resolve(undefined);
+    }, completion.reject);
     return shutdownPromise;
   };
 

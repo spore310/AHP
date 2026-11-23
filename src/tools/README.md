@@ -30,6 +30,13 @@ The proposal service first captures bounded definition data, then applies the
 existing schema profile and compiler after scoped proposal authorization and
 capacity checks. Proposals and approved definitions contain serializable data.
 
+Input and output schemas have object roots and use draft-07. Admission checks
+schema-bearing positions including additional tuple items and schema-valued
+dependencies. The profile excludes references, regex keywords, formats,
+asynchronous validation, and data references. Property names and literal
+values under `const` and `enum` are ordinary data. Execution validation stops
+at the first error. Catalogue validation continues to return detailed errors.
+
 ## Testing
 
 | Test | Pins |

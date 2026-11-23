@@ -27,17 +27,16 @@ relationships, lease columns, and constraints.
 pnpm exec vite-node examples/postgresql-conformance.ts
 ```
 
-The runner writes fixture rows to the database and exercises repository
-registration, work round-trips, ownership, and lease checks. A passing run
-prints `PostgreSQL repository conformance passed.` Use a disposable database so
-the fixture state is easy to discard. The command reads only the explicit test
-URL and limits its target to loopback.
+The runner writes fixture rows and exercises registration quotas across two
+independent provider pools, then verifies registration, work round-trips,
+ownership, and leases. A passing run prints
+`PostgreSQL repository conformance passed.` Use a fresh, migrated, disposable
+database for each run because the quota check assumes an empty registration
+table. The command limits its target to the explicit loopback test URL.
 
 `pnpm validate` runs the offline adapter tests and the in-memory conformance
 suite. The [historical portability record](../archive/validation/persistence-portability-validation.md)
-documents the offline results and the live database work that was left unrun.
-This documentation sweep verified the runner's invocation guard and left the
-live migrations and PostgreSQL conformance unrun.
+documents earlier offline results.
 
 ## Embed the adapter
 

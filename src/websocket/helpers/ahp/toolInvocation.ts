@@ -423,18 +423,21 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
         return handle;
       }
       if (dispatcher === undefined) return unavailable();
-      const idCounts = new Map<string, number>();
-      for (const peer of peers.values()) if (peer.phase === "ready" && peer.clientId !== undefined) idCounts.set(peer.clientId, (idCounts.get(peer.clientId) ?? 0) + 1);
       const candidates: { peer: AHPPeer; ad: Advertisement; registration: ClientToolRegistration; executor: ExecutorRevision }[] = [];
       for (const peer of peers.values()) {
         const ad = advertisements.get(peer.context.connectionId)?.get(request.channel);
-        if (ad === undefined || !advertisementReady(ad) || !ownAdvertisement(peer, request.channel, ad) || idCounts.get(ad.clientId) !== 1) continue;
-        for (const entry of ad.entries) if (entry.registration.definition.id === contract.id) candidates.push({ peer, ad, ...entry });
+        if (ad === undefined || ad.origin !== facts.origin || !advertisementReady(ad) || !ownAdvertisement(peer, request.channel, ad)
+          || (expectedContractId !== undefined && ad.advertisementId === undefined)) continue;
+        for (const entry of ad.entries) {
+          const definition = entry.registration.definition;
+          if (definition.id === contract.id && definition.key === contract.key && definition.version === contract.version) {
+            candidates.push({ peer, ad, ...entry });
+          }
+        }
       }
       // Admission is checked again by the one dispatcher; ambiguity is never an implicit routing policy.
       const selected = candidates[0];
       if (selected === undefined || candidates.length !== 1) return unavailable();
-      if (expectedContractId !== undefined && selected.ad.advertisementId === undefined) return unavailable();
       const controller = new AbortController();
       let enqueued = false;
       // Invalidation retires new dispatch readiness, not ownership of work that

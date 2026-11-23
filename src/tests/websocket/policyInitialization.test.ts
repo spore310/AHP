@@ -496,8 +496,7 @@ describe("P04 public initialization boundary", () => {
     }
     expect(authenticate).toHaveBeenCalledTimes(2);
     const bad = await connect(host, "bad-token");
-    expect(await bad.rpc("initialize", initialize)).toMatchObject({ error: { code: -32600 } });
-    expect(await bad.rpc("x-ahp/work/get", { version: 1, workId: "11111111-1111-4111-8111-111111111111" })).toMatchObject({ error: { code: -32600 } });
+    await onClosed(bad.socket);
     expect(get).toHaveBeenCalledTimes(2);
   });
 

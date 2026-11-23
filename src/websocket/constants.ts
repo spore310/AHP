@@ -1,3 +1,5 @@
+import type { WebSocketTransportLimits } from "./types";
+
 /** Default HTTP path for WebSocket upgrades, matching the AHP client examples. */
 export const WEBSOCKET_DEFAULT_PATH = "/";
 
@@ -6,6 +8,15 @@ export const WEBSOCKET_HEARTBEAT_INTERVAL_MS = 30_000;
 
 /** Maximum accepted frame payload, guarding against oversized client frames. */
 export const WEBSOCKET_MAX_PAYLOAD_BYTES = 1_048_576;
+
+export const DEFAULT_WEBSOCKET_TRANSPORT_LIMITS: WebSocketTransportLimits = Object.freeze({
+  maxConnections: 64,
+  maxPendingSetups: 16,
+  maxQueuedFrames: 64,
+  maxQueuedInputBytes: 2 * 1024 * 1024,
+  maxBufferedOutputBytes: 4 * 1024 * 1024,
+  maxPendingDeferredRequests: 64,
+});
 
 /** Close code sent when a client sends an unsupported (binary) frame. */
 export const WEBSOCKET_CLOSE_UNSUPPORTED_DATA = 1003;

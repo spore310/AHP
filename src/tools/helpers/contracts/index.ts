@@ -1,1 +1,1 @@
-export { captureToolDefinition, defineToolContract } from "./helpers";
+export { captureToolDefinition, compileToolContract, defineToolContract } from "./helpers";

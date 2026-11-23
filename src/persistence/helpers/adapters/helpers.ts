@@ -1,4 +1,5 @@
 import type { PersistenceProvider } from "@persistence/types";
+import { captureAgentRegistrationLimits } from "../agentRegistrations";
 
 import type { PersistenceProviderLoader, PersistenceSelection } from "./types";
 
@@ -17,6 +18,9 @@ const loadPostgres: PersistenceProviderLoader = async (options) => {
     connectionString: options.url,
     maxConnections: options.maxConnections,
     leaseTtlSeconds: options.workLeaseSeconds,
+    ...(options.registrationLimits === undefined
+      ? {}
+      : { registrationLimits: captureAgentRegistrationLimits(options.registrationLimits) }),
   });
 };
 

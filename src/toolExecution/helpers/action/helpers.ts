@@ -1,5 +1,4 @@
-import { defineToolContract } from "@tools/helpers/contracts";
-import { compileTrustedSchema, createTrustedAjv } from "@tools/helpers/validation";
+import { compileToolContract } from "@tools/helpers/contracts";
 import { toolExecutionBindingSchema } from "@toolPolicy/helpers/validation";
 
 import type { ToolActionRegistration, ToolActionRegistrationOptions } from "./types";
@@ -8,26 +7,33 @@ import type { ToolActionRegistration, ToolActionRegistrationOptions } from "./ty
 export function createToolActionRegistration<TInput, TOutput, TPrepared = void>(
   options: ToolActionRegistrationOptions<TInput, TOutput, TPrepared>,
 ): ToolActionRegistration<TInput, TOutput, TPrepared> {
-  const definition = defineToolContract(options.definition);
+  const compiled = compileToolContract(options.definition);
   const implementation = Object.freeze(toolExecutionBindingSchema.parse(options.implementation));
   const create = options.create.bind(options);
-  const ajv = createTrustedAjv();
-  const input = compileTrustedSchema(ajv, definition.inputSchema);
-  const output = definition.outputSchema === undefined ? undefined : compileTrustedSchema(ajv, definition.outputSchema);
+  const validators = bindToolActionValidators(compiled);
   return Object.freeze({
-    definition, implementation, create,
-    validateInput: (value: unknown): value is TInput => {
+    definition: compiled.definition, implementation, create,
+    validateInput: (value: unknown): value is TInput => validators.validateInput(value),
+    validateOutput: (value: unknown): value is TOutput => validators.validateOutput(value),
+  });
+}
+
+export function bindToolActionValidators(
+  { validateInput: input, validateOutput: output }: ReturnType<typeof compileToolContract>,
+) {
+  return {
+    validateInput: (value: unknown): value is unknown => {
       const valid = input(value);
       input.errors = null;
       return valid;
     },
-    validateOutput: (value: unknown): value is TOutput => {
+    validateOutput: (value: unknown): value is unknown => {
       if (output === undefined) return true;
       const valid = output(value);
       output.errors = null;
       return valid;
     },
-  });
+  };
 }
 
 export { captureToolValue } from "../value";

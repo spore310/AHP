@@ -14,16 +14,13 @@ import { createAHPBinding } from "../ahp";
 import { TOOL_CALL_METHOD, TOOL_COMPLETE_METHOD } from "../ahp/constants";
 import { isSettlingSession } from "../settling";
 import { createWebSocketServer } from "../server";
+import { captureTransportLimits } from "../capacity";
 import { createConnectionSetupAdapter, setupCount, setupDeadline } from "../security";
 import type { AHPServerHandle, AHPServerOptions } from "./types";
 
 const HOST_STOPPED = "AHP host cannot be started after shutdown has begun.";
 const HOST_SESSIONS_STOPPED = "AHP host sessions cannot be used after shutdown has begun.";
 const HOST_SESSIONS_SETTLING = "A session disposal is still settling; create the session once it completes.";
-
-const collectFailure = (failures: unknown[], error: unknown): void => {
-  failures.push(error);
-};
 
 /**
  * Project the live session snapshot into the durable row shape.
@@ -95,6 +92,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
   }
   // Validate/capture before creating sessions, listeners, directory or work services.
   const connectionSetup = security === undefined ? undefined : createConnectionSetupAdapter(security);
+  const transportLimits = captureTransportLimits(options.transportLimits);
   const deadlineMs = setupDeadline(security?.setupDeadlineMs);
   const maxInitialSubscriptions = setupCount(security?.maxInitialSubscriptions);
   const sequence = options.sessions.sequence ?? createActionSequence();
@@ -121,6 +119,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     ? undefined
     : createAgentDirectory({
         registrations: options.agentWork.registrations,
+        registrationLimits: options.agentWork.registrationLimits,
         ...(options.agentWork.presenceTtlMs !== undefined
           ? { presenceTtlMs: options.agentWork.presenceTtlMs }
           : {}),
@@ -169,6 +168,8 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     port: options.port,
     path: options.path,
     handlers: binding.handlers,
+    transportLimits,
+    authentication: security !== undefined || options.agentWork !== undefined ? "required" : "optional",
     setupDeadlineMs: deadlineMs,
     ...(connectionSetup !== undefined
       ? { connectionSetup }
@@ -295,45 +296,41 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     await options.agentWork.dispose();
   };
 
-  const stop = async (): Promise<void> => {
-    if (stopped) {
-      await transport.stop();
-      return;
-    }
-    stopped = true;
-    sessions.managedTools?.admission.dispose();
-    sessionOwners?.clear();
+  const performStop = async (): Promise<void> => {
     const failures: unknown[] = [];
+    const attempt = async (cleanup: () => unknown): Promise<void> => {
+      try {
+        await cleanup();
+      } catch (error) {
+        failures.push(error);
+      }
+    };
+    const retireAdmissions = attempt(() => sessions.managedTools?.admission.dispose());
+    const retireOwners = attempt(() => sessionOwners?.clear());
     // Protected in-process callers must be cancelled synchronously too, before socket shutdown awaits.
-    const earlyDisposal = actualAuthorization === undefined
-      ? undefined
-      : sessions.dispose().catch((error: unknown) => {
-          collectFailure(failures, error);
-        });
-    try {
-      await transport.stop();
-    } catch (error) {
-      collectFailure(failures, error);
-    }
-    try {
+    const earlyDisposal = actualAuthorization === undefined ? undefined : attempt(() => sessions.dispose());
+    await attempt(() => transport.stop());
+    await attempt(() => {
       binding.dispose();
-      await binding.drainTools();
-    } catch (error) {
-      collectFailure(failures, error);
-    }
-    try {
-      await (earlyDisposal ?? sessions.dispose());
-    } catch (error) {
-      collectFailure(failures, error);
-    }
-    try {
-      await disposeAgentWork();
-    } catch (error) {
-      collectFailure(failures, error);
-    }
+    });
+    await attempt(() => binding.drainTools());
+    await (earlyDisposal ?? attempt(() => sessions.dispose()));
+    await attempt(disposeAgentWork);
+    await Promise.all([retireAdmissions, retireOwners]);
     if (failures.length > 0) {
       throw new AggregateError(failures, "AHP host shutdown failed");
     }
+  };
+  let shutdown: Promise<void> | undefined;
+  const stop = (): Promise<void> => {
+    if (shutdown !== undefined) return shutdown;
+    const completion = Promise.withResolvers<undefined>();
+    shutdown = completion.promise;
+    stopped = true;
+    void performStop().then(() => {
+      completion.resolve(undefined);
+    }, completion.reject);
+    return shutdown;
   };
 
   return {

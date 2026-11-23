@@ -1,4 +1,5 @@
-import type { PersistenceProvider } from "@persistence/types";
+import type { AgentRegistrationLimits, PersistenceProvider } from "@persistence/types";
+import { captureAgentRegistrationLimits } from "@persistence/helpers/agentRegistrations";
 
 import { createPostgresAgentRegistrationRepository } from "./helpers/agentRegistrations";
 import { createPostgresPool } from "./helpers/connection";
@@ -6,7 +7,9 @@ import { createPostgresDurableSessionRepository } from "./helpers/sessions";
 import { createPostgresWorkRepository } from "./helpers/workItems";
 import type { PostgresOptions, PostgresWorkRepositoryOptions } from "./types";
 
-export interface PostgresPersistenceOptions extends PostgresOptions, PostgresWorkRepositoryOptions {}
+export interface PostgresPersistenceOptions extends PostgresOptions, PostgresWorkRepositoryOptions {
+  readonly registrationLimits?: Partial<AgentRegistrationLimits>;
+}
 
 export const createPostgresPersistenceProvider = async (
   options: PostgresPersistenceOptions,
@@ -19,11 +22,12 @@ export const createPostgresPersistenceProvider = async (
     throw new Error("Invalid PostgreSQL persistence options.");
   }
 
+  const registrationLimits = captureAgentRegistrationLimits(options.registrationLimits);
   const pool = createPostgresPool(options);
   let disposal: Promise<void> | undefined;
   try {
     return {
-      registrations: createPostgresAgentRegistrationRepository(pool),
+      registrations: createPostgresAgentRegistrationRepository(pool, registrationLimits),
       sessions: createPostgresDurableSessionRepository(pool),
       work: createPostgresWorkRepository(pool, { leaseTtlSeconds: options.leaseTtlSeconds }),
       dispose() {

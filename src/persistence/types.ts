@@ -18,6 +18,11 @@ export interface AgentRegistrationRecord {
   readonly createdAt: string;
 }
 
+export interface AgentRegistrationLimits {
+  readonly maxPerPrincipal: number;
+  readonly maxTotal: number;
+}
+
 export interface AgentRegistrationRepository {
   /** Idempotently resolves the row for one verified principal and agent key. */
   register(input: {
