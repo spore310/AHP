@@ -1,5 +1,6 @@
 # Agent Registration and Work-Lease Schema
 
+https://agenticskills.io/skills/animate
 The [migrations](migrations/README.md) define the PostgreSQL adapter's durable
 schema. This page explains its relationships and invariants. For a local run,
 see [PostgreSQL setup and conformance](../docs/guides/postgresql.md). The original
@@ -25,14 +26,14 @@ resolves `session_types.provider_id` to registered provider code. The independen
 
 ## What is durable and what is not
 
-| Concept | Durable table | Notes |
-| --- | --- | --- |
-| Agent registration | `agent_registrations` | Survives disconnect, restart, and reauthentication. `enabled` is administrative state, not presence. |
-| Work item and current lease | `work_items` | One row per durable task; the current token and deadline are columns. |
-| Session owner and durable projection | `sessions.owner_principal_subject` + state columns | Owner comes only from authenticated server context. |
-| Live agent presence | **none** | In-memory `AgentDirectory`, default 90 s TTL, generation-fenced. |
-| Sockets, subscriptions, active clients | **none** | Runtime-only; never authoritative for work. |
-| Session options and pinned tools | `session_types`, `tools`, `session_type_tools` | Baseline exact-revision model. |
+| Concept                                | Durable table                                      | Notes                                                                                                |
+| -------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Agent registration                     | `agent_registrations`                              | Survives disconnect, restart, and reauthentication. `enabled` is administrative state, not presence. |
+| Work item and current lease            | `work_items`                                       | One row per durable task; the current token and deadline are columns.                                |
+| Session owner and durable projection   | `sessions.owner_principal_subject` + state columns | Owner comes only from authenticated server context.                                                  |
+| Live agent presence                    | **none**                                           | In-memory `AgentDirectory`, default 90 s TTL, generation-fenced.                                     |
+| Sockets, subscriptions, active clients | **none**                                           | Runtime-only; never authoritative for work.                                                          |
+| Session options and pinned tools       | `session_types`, `tools`, `session_type_tools`     | Baseline exact-revision model.                                                                       |
 
 Do **not** add a SQL `agent_leases` or `session_active_clients` table for this
 slice. A database row cannot prove that a WebSocket is alive, and a WebSocket
@@ -40,22 +41,22 @@ heartbeat cannot prove agent identity.
 
 ## Work columns and invariants
 
-| Column | Type / default | Invariant |
-| --- | --- | --- |
-| `id` | `UUID PRIMARY KEY DEFAULT gen_random_uuid()` | Stable work identity across retries. |
-| `session_uri` | `TEXT NOT NULL REFERENCES sessions` | `ON DELETE RESTRICT`; disposal is blocked while any work exists. |
-| `request_key` | `TEXT NOT NULL` | Unique with `session_uri`; 1–256 chars; idempotency key. |
-| `kind` | `TEXT NOT NULL` | 1–128 chars; additionally allowlisted by the service. |
-| `input` | `JSONB NOT NULL` | Must be a JSON object; bounded by the wire/service layer. |
-| `status` | `TEXT NOT NULL DEFAULT 'queued'` | One of `queued`, `leased`, `completed`, `failed`, `cancelled`. |
-| `target_agent_id` | `UUID NULL` | Optional intended agent; must belong to the session owner. The DDL cannot express this across tables — the FK only anchors the row — so the invariant is enforced at write time by `WorkService.submit` (`src/work/helpers/helpers.ts`), not by the schema. Direct repository callers bypass the service check. |
-| `lease_agent_id` | `UUID NULL` | Current holder only while `leased`. |
-| `lease_token` | `UUID NULL` | Rotated on every claim/reclaim; sensitive; never returned by `get`. |
-| `lease_expires_at` | `TIMESTAMPTZ NULL` | Evaluated with the database clock, never the process clock. |
-| `attempt_count` | `INTEGER NOT NULL DEFAULT 0` | Incremented atomically on claim; never exceeds `max_attempts`. |
-| `max_attempts` | `INTEGER NOT NULL DEFAULT 3` | Positive; retry budget. |
-| `result` | `JSONB NULL` | Must be a JSON object when present; terminal result only. |
-| `created_at`, `updated_at` | `TIMESTAMPTZ NOT NULL DEFAULT now()` | Updated with `statement_timestamp()` on lease changes. |
+| Column                     | Type / default                               | Invariant                                                                                                                                                                                                                                                                                                       |
+| -------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                       | `UUID PRIMARY KEY DEFAULT gen_random_uuid()` | Stable work identity across retries.                                                                                                                                                                                                                                                                            |
+| `session_uri`              | `TEXT NOT NULL REFERENCES sessions`          | `ON DELETE RESTRICT`; disposal is blocked while any work exists.                                                                                                                                                                                                                                                |
+| `request_key`              | `TEXT NOT NULL`                              | Unique with `session_uri`; 1–256 chars; idempotency key.                                                                                                                                                                                                                                                        |
+| `kind`                     | `TEXT NOT NULL`                              | 1–128 chars; additionally allowlisted by the service.                                                                                                                                                                                                                                                           |
+| `input`                    | `JSONB NOT NULL`                             | Must be a JSON object; bounded by the wire/service layer.                                                                                                                                                                                                                                                       |
+| `status`                   | `TEXT NOT NULL DEFAULT 'queued'`             | One of `queued`, `leased`, `completed`, `failed`, `cancelled`.                                                                                                                                                                                                                                                  |
+| `target_agent_id`          | `UUID NULL`                                  | Optional intended agent; must belong to the session owner. The DDL cannot express this across tables — the FK only anchors the row — so the invariant is enforced at write time by `WorkService.submit` (`src/work/helpers/helpers.ts`), not by the schema. Direct repository callers bypass the service check. |
+| `lease_agent_id`           | `UUID NULL`                                  | Current holder only while `leased`.                                                                                                                                                                                                                                                                             |
+| `lease_token`              | `UUID NULL`                                  | Rotated on every claim/reclaim; sensitive; never returned by `get`.                                                                                                                                                                                                                                             |
+| `lease_expires_at`         | `TIMESTAMPTZ NULL`                           | Evaluated with the database clock, never the process clock.                                                                                                                                                                                                                                                     |
+| `attempt_count`            | `INTEGER NOT NULL DEFAULT 0`                 | Incremented atomically on claim; never exceeds `max_attempts`.                                                                                                                                                                                                                                                  |
+| `max_attempts`             | `INTEGER NOT NULL DEFAULT 3`                 | Positive; retry budget.                                                                                                                                                                                                                                                                                         |
+| `result`                   | `JSONB NULL`                                 | Must be a JSON object when present; terminal result only.                                                                                                                                                                                                                                                       |
+| `created_at`, `updated_at` | `TIMESTAMPTZ NOT NULL DEFAULT now()`         | Updated with `statement_timestamp()` on lease changes.                                                                                                                                                                                                                                                          |
 
 The schema enforces lease-shape consistency:
 
