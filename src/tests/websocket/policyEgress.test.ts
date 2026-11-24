@@ -81,7 +81,7 @@ describe("P10 public host protected native egress", () => {
     const reader = await f.raw("reader");
     await reader.initialize([channel]);
     armed = true;
-    f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "SUPPRESSED-EVENT-CANARY" } });
+    await f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "SUPPRESSED-EVENT-CANARY" } });
     await eventEntered.promise;
     const repeated = reader.request("subscribe", { channel }).catch(() => undefined);
     await snapshotEntered.promise;
@@ -117,10 +117,10 @@ describe("P10 public host protected native egress", () => {
       }));
       armed = true;
       const title = "QUEUE-SECRET-CANARY" + (budget === "bytes" ? "x".repeat(900000) : "");
-      f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title } });
+      await f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title } });
       await entered.promise;
       const count = budget === "bytes" ? 4 : 260;
-      for (let index = 2; index <= count; index += 1) f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: index, action: { type: "session/titleChanged", title } });
+      for (let index = 2; index <= count; index += 1) await f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: index, action: { type: "session/titleChanged", title } });
       await closed;
       release.resolve("allow");
       expect(JSON.stringify(reader.frames.frames)).not.toContain("QUEUE-SECRET-CANARY");
@@ -157,9 +157,10 @@ describe("P10 public host protected native egress", () => {
     expect(counts.reduce((state, action) => rootReducer(state, action), before)).toEqual(next.result.snapshot?.state);
     expect(next.result.snapshot?.state).toEqual({ agents: [], activeSessions: 2 });
     expect(wire.join("")).not.toContain("HIDDEN-SCHEMA-CANARY");
-    f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "Reordered first session" } });
+    const renamed = f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "Reordered first session" } });
     f.registry.invalidateExternal("catalogue-order-check");
     f.registry.drainInvalidations();
+    await renamed;
     await client.ping();
     expect((await client.subscribe("ahp-root://")).result.snapshot?.state).toEqual({ agents: [], activeSessions: 2 });
   });
@@ -187,7 +188,7 @@ describe("P10 public host protected native egress", () => {
       await reader.request("ping", { channel: "ahp-root://" });
       release.resolve(outcome);
       expect(await reader.request("subscribe", { channel })).toMatchObject({ result: { snapshot: { resource: channel } } });
-      f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "REFRESH-DRAIN-BARRIER" } });
+      await f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "REFRESH-DRAIN-BARRIER" } });
       await reader.frames.waitFor(actionWithTitle("REFRESH-DRAIN-BARRIER"));
       expect(reader.socket.readyState).toBe(WebSocket.OPEN);
     });
@@ -214,7 +215,7 @@ describe("P10 public host protected native egress", () => {
     const registration = f.registrations[0];
     if (registration === undefined) throw new Error("Missing registration");
     const activeClient = { clientId: "trusted-host-advertiser", tools: [toAhpToolDefinition(registration.definition)] };
-    const envelope = f.host.sessions.dispatchAction({ channel, clientId: activeClient.clientId, clientSeq: 1, action: { type: "session/activeClientSet", activeClient } });
+    const envelope = await f.host.sessions.dispatchAction({ channel, clientId: activeClient.clientId, clientSeq: 1, action: { type: "session/activeClientSet", activeClient } });
     expect(envelope.rejectionReason).toBeUndefined();
     await reader.frames.waitFor((frame) => typeof frame === "object" && frame !== null && "method" in frame && frame.method === "action");
     expect(await reader.request("subscribe", { channel })).toMatchObject({ result: { snapshot: { state: { activeClients: [{ clientId: activeClient.clientId, tools: [] }] } } } });
@@ -243,17 +244,17 @@ describe("P10 public host protected native egress", () => {
       const reader = await f.raw("reader");
       await reader.initialize([channel]);
       armed = true;
-      f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "STALE-EVENT-CANARY" } });
+      await f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "STALE-EVENT-CANARY" } });
       await entered.promise;
       if (transition === "unsubscribe") {
         reader.socket.send(JSON.stringify({ jsonrpc: "2.0", method: "unsubscribe", params: { channel } }));
         await reader.request("ping", { channel: "ahp-root://" });
       }
-      f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 2, action: { type: "session/titleChanged", title: "new snapshot" } });
+      await f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 2, action: { type: "session/titleChanged", title: "new snapshot" } });
       const snapshot = await reader.request("subscribe", { channel });
       expect(snapshot).toMatchObject({ result: { snapshot: { state: { title: "new snapshot" } } } });
       release.resolve("allow");
-      f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 3, action: { type: "session/titleChanged", title: "QUEUE-DRAIN-BARRIER" } });
+      await f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 3, action: { type: "session/titleChanged", title: "QUEUE-DRAIN-BARRIER" } });
       await reader.frames.waitFor(actionWithTitle("QUEUE-DRAIN-BARRIER"));
       expect(reader.frames.frames.some(actionWithTitle("STALE-EVENT-CANARY"))).toBe(false);
     });
@@ -292,7 +293,7 @@ describe("P10 public host protected native egress", () => {
         const closed = new Promise<void>((resolve) => reader.socket.once("close", () => {
           resolve();
         }));
-        f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "FINAL-SEND-CANARY" } });
+        await f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "FINAL-SEND-CANARY" } });
         await closed;
         expect(reader.frames.frames.some(actionWithTitle("FINAL-SEND-CANARY"))).toBe(false);
       }
@@ -307,7 +308,7 @@ describe("P10 public host protected native egress", () => {
     expect(await stranger.initialize(["ahp-root://"])).toMatchObject({ result: { snapshots: [{ state: { agents: [], activeSessions: 0 } }] } });
     expect(await stranger.request("subscribe", { channel })).toMatchObject({ error: { message: "Protected view unavailable" } });
     expect(await stranger.request("listSessions", { channel: "ahp-root://" })).toMatchObject({ result: { items: [] } });
-    f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "HIDDEN-TITLE-CANARY" } });
+    await f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "HIDDEN-TITLE-CANARY" } });
     await stranger.request("ping", { channel: "ahp-root://" });
     expect(JSON.stringify(stranger.frames.frames)).not.toContain("HIDDEN-TITLE-CANARY");
   });
@@ -340,7 +341,7 @@ describe("P10 public host protected native egress", () => {
     const before = initialized.snapshots[0]?.state as SessionState;
     const events = client.events();
     const delivered = events.next();
-    const envelope = f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "Authored HIDDEN-SCHEMA-CANARY" } });
+    const envelope = await f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "Authored HIDDEN-SCHEMA-CANARY" } });
     const received = await delivered;
     expect(received.done).toBe(false);
     const raw = wire.map((line) => JSON.parse(line) as { method?: string; params?: { action: SessionAction; serverSeq: number } }).find((message) => message.method === "action");
@@ -365,7 +366,7 @@ describe("P10 public host protected native egress", () => {
     waiting = true;
     const response = reader.initialize([channel]);
     await entered.promise;
-    f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "BUFFERED-SECRET-CANARY" } });
+    await f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "BUFFERED-SECRET-CANARY" } });
     const scope = f.host.sessions.authorization?.getResource(channel);
     if (scope === undefined) throw new Error("Missing resource");
     expect(f.registry.removeBinding({ bindingId: "fixture-grant-reader", scope, revision: 1 })).toBe(true);

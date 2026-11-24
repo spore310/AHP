@@ -49,7 +49,7 @@ describe("baseline session application", () => {
       expect(first.sessions.getSessionToolManifest(channel)?.toolContracts).toHaveLength(2);
       expect(second.sessions.getSessionToolManifest(channel)?.toolContracts).toHaveLength(3);
       const before = second.sessions.getCurrentServerSeq();
-      first.sessions.dispatchAction({
+      await first.sessions.dispatchAction({
         channel, clientId: "owner", clientSeq: 1, action: { type: "session/titleChanged", title: "only first" },
       });
       expect(first.sessions.getSessionSnapshot(channel)?.state.title).toBe("only first");

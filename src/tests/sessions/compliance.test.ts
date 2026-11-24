@@ -19,7 +19,7 @@ import {
   ACTION_TYPE_SESSION_CREATION_FAILED,
   ACTION_TYPE_SESSION_READY,
   SESSION_LIFECYCLE_CREATING,
-  SESSION_STATUS_IDLE,
+  SESSION_STATUS_IDLE, SESSION_STATUS_READ, SESSION_STATUS_ARCHIVED,
 } from "@sessions/constants";
 import { createMockProvider } from "@sessions/mock";
 
@@ -74,6 +74,8 @@ describe("protocol literal mirrors", () => {
 
     expect(runtime.SessionLifecycle.Creating).toBe(SESSION_LIFECYCLE_CREATING);
     expect(runtime.SessionStatus.Idle).toBe(SESSION_STATUS_IDLE);
+    expect(runtime.SessionStatus.IsRead).toBe(SESSION_STATUS_READ);
+    expect(runtime.SessionStatus.IsArchived).toBe(SESSION_STATUS_ARCHIVED);
     expect(runtime.ActionType.SessionReady).toBe(ACTION_TYPE_SESSION_READY);
     expect(runtime.ActionType.SessionCreationFailed).toBe(ACTION_TYPE_SESSION_CREATION_FAILED);
   });

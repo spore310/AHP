@@ -1,5 +1,4 @@
 import type {
-  ActionEnvelope,
   SessionState,
 } from "@microsoft/agent-host-protocol";
 import { AhpErrorCodes, JsonRpcErrorCodes } from "@microsoft/agent-host-protocol";
@@ -13,7 +12,7 @@ import { WorkError } from "@work";
 import { createAHPKernel as createAHPBinding } from "@websocket/helpers/ahp/helpers/kernel/helpers";
 import {
   AGENT_REGISTER_METHOD,
-  WORK_SUBMIT_METHOD,
+  WORK_GET_METHOD,
 } from "@websocket/helpers/ahp/constants";
 import type {
   JsonRpcInvocation,
@@ -138,9 +137,7 @@ const setup = () => {
     },
     getCurrentServerSeq: () => 0,
     listAgents: () => [],
-    dispatchAction: (): ActionEnvelope => {
-      throw new Error("dispatchAction is not used by these tests");
-    },
+    dispatchAction: () => Promise.reject(new Error("Unexpected dispatchAction")),
     onCatalogueNotification: () => () => undefined,
     onSessionEnvelope: () => () => undefined,
     dispose: () => Promise.resolve(),
@@ -325,7 +322,7 @@ describe("createAHPBinding agent/work lifecycle", () => {
     expect(() => {
       binding.beforeDispatch({
         kind: "request",
-        method: WORK_SUBMIT_METHOD,
+        method: WORK_GET_METHOD,
         params: { version: 1 },
         context: alice,
         invocation,

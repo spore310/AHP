@@ -10,11 +10,20 @@ import type { ActionSequence } from "./types";
  * @param start First value returned by `next()`. Defaults to `1`.
  */
 export function createActionSequence(start = 1): ActionSequence {
+  if (!Number.isSafeInteger(start) || start < 1) throw new Error("Invalid initial server sequence.");
   let next = start;
   let current = start - 1;
 
   return {
+    seed(checkpoint) {
+      if (!Number.isSafeInteger(checkpoint) || checkpoint < 0) throw new Error("Invalid durable sequence checkpoint.");
+      if (checkpoint > current) {
+        current = checkpoint;
+        next = checkpoint + 1;
+      }
+    },
     next: (): number => {
+      if (!Number.isSafeInteger(next)) throw new Error("Server sequence exhausted.");
       const value = next;
       next += 1;
       current = value;
@@ -50,6 +59,7 @@ export function adaptSequenceAllocator(nextServerSeq: () => number): ActionSeque
   return {
     next: (): number => {
       const value = nextServerSeq();
+      if (!Number.isSafeInteger(value) || value <= current) throw new Error("Invalid server sequence.");
       current = value;
       return value;
     },

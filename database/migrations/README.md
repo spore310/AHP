@@ -1,6 +1,6 @@
 # Database Migrations
 
-These two SQL files are the authoritative DDL for the implemented PostgreSQL
+These SQL files are the authoritative DDL for the PostgreSQL
 adapter. Apply them in version order to an empty test database. The optional
 conformance runner expects migrations to have already been applied and writes
 its own repository fixtures. The routine validation suite runs offline. See
@@ -10,7 +10,8 @@ The executable migration set contains forward SQL. A production rollout needs
 its own reviewed deployment and recovery plan.
 
 The canonical durable tables are `host_state`, `sessions`, `session_types`,
-`tools`, `session_type_tools`, `agent_registrations`, `work_items`, plus the
+`tools`, `session_type_tools`, `canonical_resources`, `agent_registrations`,
+`work_items`, `work_resource_selections`, plus the
 `schema_migrations` bookkeeping table:
 
 - The first five are the session/tool baseline.
@@ -27,7 +28,14 @@ The canonical durable tables are `host_state`, `sessions`, `session_types`,
   `CREATE TABLE`, or on the duplicate version key) rather than silently
   re-running statements.
 
-The executable DDL is split into `0001_session_tool_baseline.sql` (existing
-session/tool model) and `0002_agent_work.sql` (the two new tables and their
-indexes). See [`database/M2_AGENT_WORK_DATABASE_SCHEMA.md`](../M2_AGENT_WORK_DATABASE_SCHEMA.md)
-for the ERD, invariants, and state machine.
+`0001_session_tool_baseline.sql` and `0002_agent_work.sql` establish the
+historical session/tool and agent/work tables.
+`0003_durable_session_resources.sql` adds host ownership epochs, canonical
+resource identities and recovery fields. It makes session incarnations the
+relational parents of work and gives retention and retirement an exact
+resource anchor. Session and root rows must agree by transaction commit.
+
+Migration 0003 takes exclusive locks on the old session, work and registration
+tables and refuses to continue if any contains rows. A populated installation
+requires its own reviewed identity mapping. The migration preserves existing
+catalogue records.

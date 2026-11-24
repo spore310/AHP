@@ -175,22 +175,27 @@ export async function startSessionBackend(
   workingDirectories: readonly string[],
   config: Readonly<Record<string, unknown>>,
   beforeFailure?: () => void,
+  durable?: Pick<ReturnType<typeof import("@sessions/helpers/recovery/helpers").createDurableLifecycle>, "backend" | "commit" | "fail" | "quarantine" | "releaseBackend"> & { ordered<T>(run: () => Promise<T>): Promise<T> },
 ): Promise<void> {
   if (dependencies.sessions.get(record.sessionUri) !== record) return;
   let action: SessionAction;
+  let acquired: SessionRecord["backend"];
   try {
-    const backend = await record.provider.startSession({
-      sessionUri: record.sessionUri,
-      workingDirectories,
-      config,
-    });
+    const backend = durable
+      ? await durable.backend(record, workingDirectories, config)
+      : await record.provider.startSession({
+          sessionUri: record.sessionUri,
+          workingDirectories,
+          config,
+        });
 
     // The factory may have been disposed (or the URI reused) while the backend
     // was starting. Release the late backend and publish nothing rather than
     // attaching it to a detached record or emitting a stale ready action.
     if (dependencies.sessions.get(record.sessionUri) !== record) {
       try {
-        await backend.dispose();
+        if (durable) await durable.releaseBackend(record, backend);
+        else await backend.dispose();
       } catch (error) {
         // Detached cleanup has no caller to observe it, so report a sanitized
         // lifecycle diagnostic instead of publishing anything.
@@ -203,7 +208,7 @@ export async function startSessionBackend(
       return;
     }
 
-    record.backend = backend;
+    acquired = backend;
     action = { type: ACTION_TYPE_SESSION_READY };
   } catch (error) {
     action = { type: ACTION_TYPE_SESSION_CREATION_FAILED, error: toErrorInfo(error) };
@@ -213,22 +218,60 @@ export async function startSessionBackend(
     return;
   }
 
-  if (action.type === ACTION_TYPE_SESSION_CREATION_FAILED) beforeFailure?.();
-  const envelope = applySessionAction(
-    record,
-    action,
-    dependencies.now().toISOString(),
-    dependencies.nextServerSeq,
-  );
-  dependencies.emitSessionEnvelope(envelope);
-  dependencies.emitCatalogueNotification({
-    method: "root/sessionSummaryChanged",
-    params: {
-      channel: ROOT_CHANNEL_URI,
-      session: record.sessionUri,
-      changes: { modifiedAt: record.modifiedAt },
-    },
-  });
+  let cleanup: Promise<void> | undefined;
+  const publish = async (): Promise<void> => {
+    if (dependencies.sessions.get(record.sessionUri) !== record) {
+      if (durable && acquired) cleanup = durable.releaseBackend(record, acquired);
+      return;
+    }
+    if (action.type === ACTION_TYPE_SESSION_CREATION_FAILED) {
+      beforeFailure?.();
+      if (durable) await durable.fail(record);
+    }
+    const staged = durable ? { ...record } : record;
+    const envelope = applySessionAction(
+      staged,
+      action,
+      dependencies.now().toISOString(),
+      dependencies.nextServerSeq,
+    );
+    if (durable) {
+      await durable.commit(record, staged, () => dependencies.sessions.get(record.sessionUri) === record, false);
+      if (dependencies.sessions.get(record.sessionUri) !== record) {
+        if (acquired) cleanup = durable.releaseBackend(record, acquired);
+        return;
+      }
+      Object.assign(record, { state: staged.state, modifiedAt: staged.modifiedAt, serverSeq: staged.serverSeq });
+    }
+    if (acquired) record.backend = acquired;
+    dependencies.emitSessionEnvelope(envelope);
+    dependencies.emitCatalogueNotification({
+      method: "root/sessionSummaryChanged",
+      params: {
+        channel: ROOT_CHANNEL_URI,
+        session: record.sessionUri,
+        changes: { modifiedAt: record.modifiedAt },
+      },
+    });
+  };
+  if (durable) {
+    try {
+      await durable.ordered(async () => {
+        try {
+          await publish();
+        } catch (error) {
+          // Withdraw before the next ordered write. Await external cleanup outside the slot.
+          cleanup = durable.quarantine(record, acquired);
+          throw error;
+        }
+      });
+    } catch (error) {
+      cleanup ??= durable.quarantine(record, acquired);
+      throw error;
+    } finally {
+      await cleanup;
+    }
+  } else await publish();
 }
 
 /**

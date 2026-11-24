@@ -1,4 +1,5 @@
 import { AhpErrorCodes, JsonRpcErrorCodes, type ActionEnvelope } from "@microsoft/agent-host-protocol";
+import { createDurableLifecycle, captureProviderLifecycle } from "@sessions/helpers/recovery/helpers";
 import { parseUnknownJson } from "@jsonrpc";
 
 import { ACTION_TYPE_ROOT_ACTIVE_SESSIONS_CHANGED, ACTION_TYPE_SESSION_META_CHANGED, ROOT_CHANNEL_URI } from "@sessions/constants";
@@ -52,7 +53,7 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
   const providers = new Map(buildProviderMap(options.providers));
   if (creationSecurity !== undefined) {
     for (const [id, provider] of providers) {
-      providers.set(id, Object.freeze({ providerId: id, agentInfo: freezeCreation(structuredClone(provider.agentInfo)), startSession: provider.startSession.bind(provider),
+      providers.set(id, Object.freeze({ providerId: id, agentInfo: freezeCreation(structuredClone(provider.agentInfo)), startSession: provider.startSession.bind(provider), ...captureProviderLifecycle(provider),
         ...(provider.config === undefined ? {} : { config: Object.freeze({ schema: freezeCreation(structuredClone(provider.config.schema)), parse: provider.config.parse.bind(provider.config) }) }),
       }));
     }
@@ -86,9 +87,13 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
   const now = options.now ?? ((): Date => new Date());
   const sequence = resolveActionSequence(options);
   let allocationRevision = 0;
+  let lastAllocation = 0;
   const nextServerSeq = (): number => {
     allocationRevision += 1;
-    return sequence.next();
+    const next = sequence.next();
+    if (!Number.isSafeInteger(next) || next <= lastAllocation) throw new Error("Invalid host sequence allocation.");
+    lastAllocation = next;
+    return next;
   };
 
   const catalogueListeners = new Set<(notification: CatalogueNotification) => void>();
@@ -143,19 +148,29 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
           const action = { type: ACTION_TYPE_SESSION_META_CHANGED, _meta: { ...record.state._meta, [APPLICATION_META_KEY]: manifest } };
           const modifiedAt = now().toISOString();
           if (!prepared.current() || !owned()) return undefined;
-          const priorAllocation = allocationRevision;
-          const priorSequence = record.serverSeq;
-          const serverSeq = nextServerSeq();
-          if (!prepared.current() || !owned() || record.serverSeq !== priorSequence || allocationRevision !== priorAllocation + 1) return undefined;
-          try {
-            creationSecurity.originalRegistry.installTool(definition);
-          } catch {
-            return undefined;
-          }
-          record.application = Object.freeze({ ...binding, tools: Object.freeze(refs) });
-          activated.set(record, { revision: revision + 1, tools: Object.freeze(additions) });
-          deliver(envelopeListeners, applySessionAction(record, action, modifiedAt, () => serverSeq));
-          return { revision: revision + 1, tool: prepared.tool };
+          return ordered(async () => {
+            if (!prepared.current() || !owned()) return undefined;
+            const priorAllocation = allocationRevision;
+            const priorSequence = record.serverSeq;
+            const serverSeq = nextServerSeq();
+            if (!prepared.current() || !owned() || record.serverSeq !== priorSequence || allocationRevision !== priorAllocation + 1) return undefined;
+            const staged = { ...record };
+            const envelope = applySessionAction(staged, action, modifiedAt, () => serverSeq);
+            if (durable) {
+              await durable.commit(record, staged, () => prepared.current() && owned());
+              if (!owned()) return undefined;
+            }
+            try {
+              creationSecurity.originalRegistry.installTool(definition);
+            } catch {
+              return undefined;
+            }
+            record.application = Object.freeze({ ...binding, tools: Object.freeze(refs) });
+            activated.set(record, { revision: revision + 1, tools: Object.freeze(additions) });
+            Object.assign(record, { state: staged.state, modifiedAt, serverSeq });
+            deliver(envelopeListeners, envelope);
+            return { revision: revision + 1, tool: prepared.tool };
+          });
         },
       };
 
@@ -183,10 +198,42 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
     },
   };
 
+  if (options.durability && !creationSecurity) throw new Error("Durable hosts require trusted typed session creation.");
+  const durable = options.durability && creationSecurity && createDurableLifecycle(options.durability, dependencies, creationSecurity);
+  let startup: Promise<void> | undefined;
+  let writeTail = Promise.resolve();
+  let pendingWrites = 0;
+  function ordered<T>(run: () => Promise<T>): Promise<T> {
+    if (!durable) return run();
+    if (!durable.isOpen() || pendingWrites >= 256) return Promise.reject(new Error("State write unavailable."));
+    let expire: ReturnType<typeof setTimeout> | undefined;
+    let waiting = true;
+    const expired = new Promise<never>((_, reject) => {
+      expire = setTimeout(() => {
+        if (waiting) {
+          waiting = false;
+          reject(new Error("State write queue deadline exceeded."));
+        }
+      }, 5000);
+    });
+    pendingWrites++;
+    const result = writeTail.then(() => {
+      clearTimeout(expire);
+      if (!durable.isOpen() || !waiting) throw new Error("State write unavailable.");
+      waiting = false;
+      return run();
+    });
+    writeTail = result.then(() => undefined, () => undefined).finally(() => {
+      pendingWrites--;
+    });
+    return Promise.race([result, expired]);
+  }
+
   const dispose = (): Promise<void> => {
     // Publish the barrier BEFORE synchronous cleanup can reenter dispose().
     if (shutdown !== null) return shutdown;
     disposing = true;
+    durable?.closeAdmission();
     let complete = (): void => undefined;
     let fail: (error: unknown) => void = () => undefined;
     const completion = new Promise<void>((resolve, reject) => {
@@ -213,7 +260,7 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
    * attached backend, collecting failures. Backends still starting are skipped:
    * their completion detects the cleared registry and disposes itself detached.
    */
-  const emitActiveSessionsChanged = (): void => {
+  const publishActiveSessions = (): void => {
     const envelope: ActionEnvelope = {
       channel: ROOT_CHANNEL_URI,
       action: {
@@ -226,14 +273,23 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
     deliver(envelopeListeners, envelope);
   };
 
+  const emitActiveSessionsChanged = (): void => {
+    if (!durable) publishActiveSessions();
+    else if (!disposing) void ordered(() => {
+      publishActiveSessions();
+      return Promise.resolve();
+    }).catch(() => undefined);
+  };
   const creation = creationSecurity === undefined
     ? undefined
     : createSessionAuthorization(dependencies, creationSecurity, {
+        ...(durable ? { reserve: durable.reserve.bind(durable), retire: durable.retire.bind(durable), attachmentFailed: durable.attachmentFailed.bind(durable) } : {}),
         prepare: (params) => prepareCreateSession(dependencies, params),
         publish: (record) => {
           publishCreatedSession(dependencies, record);
         },
-        start: (prepared, beforeFailure) => startSessionBackend(dependencies, prepared.record, prepared.workingDirectories, prepared.config, beforeFailure),
+        start: (prepared, beforeFailure) => startSessionBackend(dependencies, prepared.record, prepared.workingDirectories, prepared.config, beforeFailure,
+          durable && { backend: durable.backend, ordered, commit: durable.commit.bind(durable), fail: durable.fail.bind(durable), quarantine: durable.quarantine, releaseBackend: durable.releaseBackend }),
         changed: emitActiveSessionsChanged,
         isStopping: () => disposing,
       });
@@ -256,6 +312,21 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
     catalogueListeners.clear();
     envelopeListeners.clear();
 
+    if (durable) {
+      try {
+        const timeout = AbortSignal.timeout(5000);
+        const drain = new Promise<never>((_, reject) => {
+          timeout.addEventListener("abort", () => {
+            reject(new Error("Pending durable writes did not drain."));
+          }, { once: true });
+        });
+        try {
+          await Promise.race([writeTail, drain]);
+        } finally {
+          await durable.stop();
+        }
+      } catch (error) { failures.push(error); }
+    }
     for (const record of records) {
       // A record without a backend is still starting; its completion detects
       // the cleared registry and disposes itself without publishing.
@@ -278,6 +349,23 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
   }
 
   return {
+    ...(durable && creation
+      ? { durability: {
+          start: (onLost?: () => void) => startup ??= durable.start(creation.restore, (n) => {
+            if (sequence.seed) sequence.seed(n);
+            else if (sequence.current() < n) throw new Error("Sequence cannot restore checkpoint.");
+          }, () => {
+            onLost?.();
+            void dispose().catch(() => undefined);
+          }, creation.teardown),
+          inspect: durable.inspect, purge: durable.purge,
+          publishWorkReady: (publish: (seq: number) => void) => ordered(() => {
+            if (disposing) throw new SessionsDisposingError();
+            publish(nextServerSeq());
+            return Promise.resolve();
+          }),
+        } }
+      : {}),
     ...(managedTools === undefined ? {} : { managedTools }),
     ...(creation === undefined ? {} : { authorization: creation.authorization }),
     createSession: (params: unknown, onRecordCreated?: (sessionUri: string) => void): Promise<void> => {
@@ -355,7 +443,7 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
     listAgents: () => [...providers.values()].map((provider) => structuredClone(provider.agentInfo)),
     onCatalogueNotification: (listener) => subscribe(catalogueListeners, listener),
     onSessionEnvelope: (listener) => subscribe(envelopeListeners, listener),
-    dispatchAction: ({ channel, clientSeq, action, clientId, admission }) => {
+    dispatchAction: async ({ channel, clientSeq, action, clientId, admission }) => {
       if (typeof channel !== "string" || channel.length === 0) {
         throw new SessionsError(JsonRpcErrorCodes.InvalidParams, "Invalid dispatchAction channel");
       }
@@ -374,85 +462,96 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
         );
       }
 
-      if (!isBaselineSupportedSessionAction(parsedAction)) {
-        return {
-          channel,
-          action: toClientSessionAction(parsedAction),
-          serverSeq: nextServerSeq(),
+      const expectedSeq = record.serverSeq;
+      return ordered(async () => {
+        if (!isBaselineSupportedSessionAction(parsedAction)) {
+          return {
+            channel,
+            action: toClientSessionAction(parsedAction),
+            serverSeq: nextServerSeq(),
+            origin: { clientId, clientSeq: parsedClientSeq },
+            rejectionReason: BASELINE_UNSUPPORTED_ACTION_REASON,
+          } satisfies ActionEnvelope;
+        }
+
+        const admitted = admitTypedAdvertisement(
+          record,
+          dependencies.application,
+          parsedAction,
+          clientId,
+          activated.has(record) ? effectiveTools(record) : undefined,
+        );
+        if ("rejectionReason" in admitted) {
+          return {
+            channel,
+            action: toClientSessionAction(parsedAction),
+            serverSeq: nextServerSeq(),
+            origin: { clientId, clientSeq: parsedClientSeq },
+            rejectionReason: admitted.rejectionReason,
+          } satisfies ActionEnvelope;
+        }
+        if (!isBaselineSupportedSessionAction(admitted.accepted)) {
+          return {
+            channel,
+            action: toClientSessionAction(parsedAction),
+            serverSeq: nextServerSeq(),
+            origin: { clientId, clientSeq: parsedClientSeq },
+            rejectionReason: BASELINE_UNSUPPORTED_ACTION_REASON,
+          } satisfies ActionEnvelope;
+        }
+
+        const before = buildSessionSummary(record);
+        const priorSequence = record.serverSeq;
+        const priorAllocation = allocationRevision;
+        const modifiedAt = now().toISOString();
+        // Resolve injected callbacks before the last synchronous admission check.
+        const serverSeq = nextServerSeq();
+        let allowed: unknown = true;
+        try {
+          if (!durable && admission !== undefined) allowed = admission();
+        } catch {
+          allowed = false;
+        }
+        if (allowed !== true) void Promise.resolve(allowed).catch(() => undefined);
+        if (allowed !== true || disposing || sessions.get(channel) !== record || record.serverSeq !== expectedSeq || record.serverSeq !== priorSequence
+          || allocationRevision !== priorAllocation + 1) {
+          return { channel, action: toClientSessionAction(parsedAction), serverSeq: nextServerSeq(),
+            origin: { clientId, clientSeq: parsedClientSeq }, rejectionReason: "Action admission is no longer current." } satisfies ActionEnvelope;
+        }
+        const staged = durable ? { ...record } : record;
+        const envelope = applySessionAction(
+          staged,
+          toSupportedSessionAction(admitted.accepted),
+          modifiedAt,
+          () => serverSeq,
+        );
+        if (durable) {
+          await durable.commit(record, staged, () => !disposing && sessions.get(channel) === record && record.serverSeq === expectedSeq && (admission === undefined || admission()));
+          if (!durable.isOpen() || sessions.get(channel) !== record) throw new Error("Session detached during commit.");
+          record.state = staged.state;
+          record.modifiedAt = staged.modifiedAt;
+          record.serverSeq = staged.serverSeq;
+        }
+        const stamped = {
+          ...envelope,
           origin: { clientId, clientSeq: parsedClientSeq },
-          rejectionReason: BASELINE_UNSUPPORTED_ACTION_REASON,
         } satisfies ActionEnvelope;
-      }
+        deliver(envelopeListeners, stamped);
 
-      const admitted = admitTypedAdvertisement(
-        record,
-        dependencies.application,
-        parsedAction,
-        clientId,
-        activated.has(record) ? effectiveTools(record) : undefined,
-      );
-      if ("rejectionReason" in admitted) {
-        return {
-          channel,
-          action: toClientSessionAction(parsedAction),
-          serverSeq: nextServerSeq(),
-          origin: { clientId, clientSeq: parsedClientSeq },
-          rejectionReason: admitted.rejectionReason,
-        } satisfies ActionEnvelope;
-      }
-      if (!isBaselineSupportedSessionAction(admitted.accepted)) {
-        return {
-          channel,
-          action: toClientSessionAction(parsedAction),
-          serverSeq: nextServerSeq(),
-          origin: { clientId, clientSeq: parsedClientSeq },
-          rejectionReason: BASELINE_UNSUPPORTED_ACTION_REASON,
-        } satisfies ActionEnvelope;
-      }
+        const changes = changedSessionSummaryFields(before, buildSessionSummary(record));
+        if (Object.keys(changes).length > 0) {
+          deliver(catalogueListeners, {
+            method: "root/sessionSummaryChanged",
+            params: {
+              channel: ROOT_CHANNEL_URI,
+              session: record.sessionUri,
+              changes,
+            },
+          });
+        }
 
-      const before = buildSessionSummary(record);
-      const priorSequence = record.serverSeq;
-      const priorAllocation = allocationRevision;
-      const modifiedAt = now().toISOString();
-      // Resolve injected callbacks before the last synchronous admission check.
-      const serverSeq = nextServerSeq();
-      let allowed: unknown = true;
-      try {
-        if (admission !== undefined) allowed = admission();
-      } catch {
-        allowed = false;
-      }
-      if (allowed !== true) void Promise.resolve(allowed).catch(() => undefined);
-      if (allowed !== true || disposing || sessions.get(channel) !== record || record.serverSeq !== priorSequence
-        || allocationRevision !== priorAllocation + 1) {
-        return { channel, action: toClientSessionAction(parsedAction), serverSeq: nextServerSeq(),
-          origin: { clientId, clientSeq: parsedClientSeq }, rejectionReason: "Action admission is no longer current." } satisfies ActionEnvelope;
-      }
-      const envelope = applySessionAction(
-        record,
-        toSupportedSessionAction(admitted.accepted),
-        modifiedAt,
-        () => serverSeq,
-      );
-      const stamped = {
-        ...envelope,
-        origin: { clientId, clientSeq: parsedClientSeq },
-      } satisfies ActionEnvelope;
-      deliver(envelopeListeners, stamped);
-
-      const changes = changedSessionSummaryFields(before, buildSessionSummary(record));
-      if (Object.keys(changes).length > 0) {
-        deliver(catalogueListeners, {
-          method: "root/sessionSummaryChanged",
-          params: {
-            channel: ROOT_CHANNEL_URI,
-            session: record.sessionUri,
-            changes,
-          },
-        });
-      }
-
-      return stamped;
+        return stamped;
+      });
     },
     dispose,
   };

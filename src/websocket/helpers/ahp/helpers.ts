@@ -2,12 +2,15 @@ import { JsonRpcErrorCodes } from "@microsoft/agent-host-protocol";
 
 import { RpcError } from "@jsonrpc";
 import type { SessionsFactory } from "@sessions/types";
+import { parseClientSessionAction } from "@sessions/helpers/actions";
+import { ACTION_TYPE_SESSION_IS_ARCHIVED_CHANGED, ACTION_TYPE_SESSION_IS_READ_CHANGED, ACTION_TYPE_SESSION_TITLE_CHANGED } from "@sessions/constants";
+import { sameResource } from "@authorization/helpers/context";
 import type { JsonRpcHandlers, WebSocketConnectionContext } from "@websocket/types";
 import { parseToolWire, toolCompleteSchema } from "@toolExecution/helpers/client/helpers/protocol";
 
 import { AGENT_WORK_REQUEST_METHODS, TOOL_PRIVATE_REQUEST_METHODS, TOOL_CALL_METHOD, TOOL_COMPLETE_METHOD } from "./constants";
 import { createAHPKernel, type AHPBinding } from "./helpers/kernel/helpers";
-import { initializeParamsSchema, type AHPBindingOptions, type AHPDiagnostic } from "./types";
+import { channelParamsSchema, dispatchActionParamsSchema, initializeParamsSchema, type AHPBindingOptions, type AHPDiagnostic, type NativeSessionWrites } from "./types";
 
 export type { AHPBinding } from "./helpers/kernel/helpers";
 
@@ -37,6 +40,10 @@ export const createAHPBinding = (
   options?: AHPBindingOptions,
 ): AHPBinding => {
   const authorization = factory.authorization;
+  const admitWrite = options?.nativeWrites?.admit.bind(options.nativeWrites);
+  if (admitWrite !== undefined && (authorization === undefined || factory.durability === undefined || options?.protectedViews === undefined)) {
+    throw new Error("Native session writes require protected durable sessions and views.");
+  }
   if (authorization !== undefined && options?.sessionOwners !== undefined) {
     throw new Error("Protected creation cannot use a competing mutable owner registry.");
   }
@@ -67,6 +74,40 @@ export const createAHPBinding = (
         return handler(params, context, invocation);
       }
       if (method === TOOL_CALL_METHOD) throw new RpcError(JsonRpcErrorCodes.InvalidRequest, "Tool protocol extension required");
+      if (admitWrite !== undefined && authorization !== undefined && (method === "dispatchAction" || method === "disposeSession")) {
+        kernel.beforeDispatch({ method, params, context, invocation, kind: invocation.kind });
+        const clientId = kernel.initializedClientId(context);
+        const setup = context.security;
+        const lifetime = lifetimes.get(context);
+        if (!setup || !lifetime || clientId === undefined || !mayReadGlobalSequence(context)) return unavailable();
+        const { channel } = channelParamsSchema.parse(params);
+        const session = authorization.getResource(channel);
+        if (!session || session.domainId !== setup.context.actor.principal.domainId
+          || (method === "dispatchAction" && !authorization.isReady(session))) return unavailable();
+        const current = () => {
+          if (!mayReadGlobalSequence(context) || context.security !== setup || lifetime.signal.aborted) return false;
+          if (method === "dispatchAction" && !authorization.isReady(session)) return false;
+          const actual = authorization.getResource(channel);
+          return actual !== undefined && sameResource(actual, session) && !lifetime.signal.aborted;
+        };
+        const admission = (command: Parameters<NativeSessionWrites["admit"]>[0]["command"]) => () => {
+          if (!current()) return false;
+          const allowed: unknown = admitWrite(Object.freeze({ context: setup.context, session, command }));
+          if (allowed !== true) {
+            void Promise.resolve(allowed).catch(() => undefined);
+            return false;
+          }
+          return current();
+        };
+        if (method === "disposeSession") {
+          return authorization.disposeSession(session, admission(Object.freeze({ type: "disposeSession" }))).then((retired) => retired ? null : unavailable(), unavailable);
+        }
+        const parsed = dispatchActionParamsSchema.parse(params);
+        const action = parseClientSessionAction(parsed.action);
+        if (action.type !== ACTION_TYPE_SESSION_TITLE_CHANGED && action.type !== ACTION_TYPE_SESSION_IS_READ_CHANGED && action.type !== ACTION_TYPE_SESSION_IS_ARCHIVED_CHANGED) return unavailable();
+        return factory.dispatchAction({ channel, clientId, clientSeq: parsed.clientSeq, action, admission: admission(Object.freeze(action)) })
+          .then((envelope) => envelope.rejectionReason === undefined ? null : unavailable(), unavailable);
+      }
       if (method === "createSession") {
         // Preserve canonical ready-state/kind gating; a live setup alone is not initialized.
         kernel.beforeDispatch({ method, params, context, invocation, kind: invocation.kind });

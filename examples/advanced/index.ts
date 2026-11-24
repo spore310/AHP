@@ -4,7 +4,7 @@ import { setTimeout } from "node:timers/promises";
 import { WebSocketTransport } from "@microsoft/agent-host-protocol/ws";
 import { connectToolClient, type ToolClient } from "@toolExecution/client";
 import { channel, clientTool, createReviewHost, demoProof, selector, type Subject } from "./host";
-import { showWorkLease } from "./work";
+import { showWorkBoundary } from "./work";
 
 async function connect(url: string, subject: Subject): Promise<ToolClient> {
   const transport = await WebSocketTransport.connect(url, { protocols: "demo-" + subject });
@@ -77,7 +77,7 @@ try {
   assert.equal(demo.host.sessions.getSessionSnapshot(channel)?.state.title, "Review ready");
   process.stdout.write("The host action returned a result and the authorized projector set the title to Review ready.\n");
 
-  await showWorkLease(url);
+  await showWorkBoundary(url);
 
   const proposed = { ...clientTool, id: "10000000-0000-4000-8000-000000000002", key: "review.summarize", name: "summarize" };
   const contract = selector(proposed);

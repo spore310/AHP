@@ -1,11 +1,7 @@
 # Active plans
 
-[Providers and client connections](ProvidersPlan.md) records the direction for
-the provider boundary and still-proposed client milestones. Use the
-[capability map](../architecture/capabilities.md) for the implementation that
-exists today.
+- [AHP V1 implementation sequence](plan.md) covers the P0–P5 goals.
+- [Work packet handoff](work/README_Codex_Handoff.md) links the contracts and acceptance criteria for each milestone.
+- [Providers and client connections](work/ProvidersPlan.md) describes the provider boundary and proposed client milestones.
 
-Completed work, earlier designs, and dated validation are in the
-[project archive](../archive/README.md).
-
-[Documentation index](../README.md)
+The [acceptance ledger](work/03_Acceptance_Matrix.md) records completed checks. The [archive](../archive/README.md) holds earlier plans and reviews.

@@ -37,6 +37,8 @@ export interface ResourceOperation {
   readonly policies: readonly PolicyRef[];
   validate?(payload: unknown): boolean;
   commit?(payload: unknown, context: ResourceOperationRequest, admission: () => boolean): boolean;
+  /** The durable owner invokes admission synchronously at its first write, then awaits commit. */
+  commitDurable?(payload: unknown, context: ResourceOperationRequest, admission: () => boolean): Promise<boolean>;
 }
 export interface ResourceKindAdapter {
   readonly kind: string;
@@ -83,6 +85,8 @@ export interface ResourceOperations {
   authorize(request: ResourceOperationRequest): ResourceOperationHandle;
   /** The trusted guard must aggregate original invocation proofs with these operation proofs. */
   commit(ticket: ResourceOperationTicket, admission: (authority: ResourceOperationAuthority) => boolean): boolean;
+  /** Waits for the registered owner's mutation, retaining its capacity slot until settlement. */
+  commitDurable(ticket: ResourceOperationTicket, admission: (authority: ResourceOperationAuthority) => boolean): Promise<boolean>;
   cancel(ticket: ResourceOperationTicket): void;
   dispose(): void;
   stats(): { readonly active: number };

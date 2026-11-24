@@ -24,7 +24,7 @@ adapter. The [PostgreSQL chapter](postgresql.md) covers an optional storage run.
 | Junior agent | Has a delegated binding and a distinct executor assignment. Runs the inspection and loads the assigned artifact. |
 | Project manager | Can read the session and approve a proposal. The example grants no invoke assignment. |
 | Observer | Can read the protected session view. Private tool metadata stays out of that snapshot. |
-| Owner's worker | Registers on a separate connection under the owner's verified principal and claims the owner's work. |
+| Owner's worker | Registers on a separate connection under the owner's verified principal and renews its presence. |
 
 `clientId` labels a connection. The demo authenticator resolves the principal
 from its loopback handshake, then the host classifies the actor and installs
@@ -46,10 +46,9 @@ ceiling. The registered binding and assignment supply the actual authority.
 4. **Project a host result.** The server echo returns `Review ready`. A separate
    resource operation validates that result and updates the title through the
    native reducer. The client receives the tool result privately.
-5. **Complete a work lease.** The owner submits a review item. Its registered
-   worker claims, renews, and completes it. A different principal gets `work: null`
-   when it asks for the same item. This same-owner rule is narrower than scoped
-   tool access. [Work lifecycle](../architecture/agent-task-lifecycle.md)
+5. **Register a worker.** The worker registers and renews its presence. Its
+   attempt to submit work is rejected. A read for an unknown work ID returns
+   `work: null`. [Work lifecycle](../architecture/agent-task-lifecycle.md)
 6. **Publish and load a tool.** The senior proposes, the PM approves, and the
    senior publishes. The live manifest changes only after trusted activation.
    The junior then receives the exact assignment, verifies the artifact, and
@@ -72,13 +71,14 @@ after the host activates it and grants the exact assignment.
 | --- | --- |
 | [index.ts](../../examples/advanced/index.ts) | Runs both forms of client invocation, the denial, the host action, and the proposal-to-artifact flow. |
 | [host.ts](../../examples/advanced/host.ts) | Composes the registry, provider rules, SDK host, and public extension ports. |
-| [work.ts](../../examples/advanced/work.ts) | Exercises registration and leases through versioned requests on real connections. |
-| [persistence.ts](../../examples/advanced/persistence.ts) | Supplies local storage through the same repository ports used by the conformance tests. |
+| [work.ts](../../examples/advanced/work.ts) | Exercises agent presence, work reads, and denial of remote work submission. |
+| [persistence.ts](../../examples/advanced/persistence.ts) | Supplies in-memory registrations and exact-instance durable storage, and rejects URI-only session and work mutations. |
 
 The artifact loader selects a known local handler for the verified fixture bytes.
 Your application owns publisher trust, the artifact format, and runtime isolation.
-The fixture adapter's work and registration data lasts for the run. For network
-and storage integration details, see the [wire contract](../technical/wire-contract.md)
+The example provider keeps registrations in memory for the run. Its work reads
+return an empty result because it has no work submission port. For network and
+storage integration details, see the [wire contract](../technical/wire-contract.md)
 and the [persistence module](../../src/persistence/README.md).
 
 ## Adapt the composition
@@ -92,8 +92,7 @@ and the [persistence module](../../src/persistence/README.md).
    registration for trusted local code and an SDK advertisement for a client
    handler. The client API also exposes status, cancellation, and approved
    artifact loading. [SDK tool client](../../src/toolClient/README.md)
-4. Add the work repositories only if your application needs durable
-   coordination. Keep work payloads separate from session state and let each
-   registered worker claim under a current lease. [Work service](../../src/work/README.md)
+4. Configure the work repositories for durable registrations and authorized
+   reads. Remote work mutations stay closed through P2. [Work service](../../src/work/README.md)
 
 [Five-minute example](quickstart.md) · [Documentation index](../README.md)

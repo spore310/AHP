@@ -70,6 +70,9 @@ export interface SessionOwnerRegistry extends SessionOwnerLookup {
 }
 
 export interface WorkServiceOptions {
+  /** Liveness of an explicitly configured non-durable host serving legacy rows. */
+  readonly legacyReadCurrent?: () => boolean;
+  readonly currentInstance?: (uri: string, instanceId: string, subject: string, domainId: string) => boolean;
   readonly repository: WorkRepository;
   readonly sessions: SessionOwnerLookup;
   readonly presence: WorkPresence;
@@ -109,7 +112,8 @@ export interface WorkService {
     reason: WorkFailure,
   ): Promise<{ readonly status: WorkStatus }>;
   cancel(principal: AuthenticatedPrincipal, workId: string): Promise<void>;
-  get(principal: AuthenticatedPrincipal, workId: string): Promise<WorkView | null>;
+  get(principal: AuthenticatedPrincipal, workId: string, domainId?: string,
+    guardDelivery?: (current: () => boolean) => void): Promise<WorkView | null>;
   /** Rejects session disposal while dependent work exists. */
   assertSessionDisposable(sessionUri: string): Promise<void>;
 }

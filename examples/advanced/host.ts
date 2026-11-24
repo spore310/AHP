@@ -72,7 +72,13 @@ const challenge: ChallengeAdapter = {
 export const demoProof = proof;
 
 /** Compose one real public host. All credentials, data, and adapters here are local examples. */
-export function createReviewHost(mode: "direct" | "namespace") {
+export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
+  readonly durability: NonNullable<import("@sessions").SessionsFactoryOptions["durability"]>;
+  readonly provider: import("@sessions").SessionProvider;
+  readonly restoration?: import("@sessions").SessionTypePolicyRegistration["restoration"];
+  readonly persistence?: import("@persistence").PersistenceProvider;
+  readonly nativeWrites?: import("@websocket").NativeSessionWrites;
+}) {
   const { admitted, namespaces } = createExamplePolicyAdmission(mode, definitions);
   const rules = { admitted, mandatory: [providerPolicy] };
   const policies = createToolPolicyFactory({ policies: [...definitions, provider], namespaces,
@@ -81,7 +87,7 @@ export function createReviewHost(mode: "direct" | "namespace") {
   const registry = createReferenceAuthorizer({ policies, now: Date.now,
     permissionEvaluators: { "review-provider-consent": () => providerAllowsInvoke ? "allow" : "deny" } });
   const admission = createToolAdmission({ registry, policies, activationPolicies: [activationPolicy] });
-  const memory = createPersistence(createExamplePersistence().provider);
+  const persistence = createPersistence(lifecycle?.persistence ?? createExamplePersistence().provider);
   const bytes = new TextEncoder().encode("example review artifact");
   const artifacts = createApprovedArtifactSource({ approve: ({ descriptor }) => descriptor.publisherId === "demo-publisher", read: () => bytes });
   const serverTool = createInMemoryEchoRegistration();
@@ -91,6 +97,7 @@ export function createReviewHost(mode: "direct" | "namespace") {
   const type = defineApplicationSession({ ...sessionType, id: "20000000-0000-4000-8000-000000000001", providerId: mockProvider.providerId,
     configSchema: schema, config: createSessionConfig({ schema, parser: z.object({}).strict() }),
     tools: allTools.map((ref) => ({ ref, access: ToolAccessLevel.Standard })), policy: { rules,
+      ...(lifecycle?.restoration ? { restoration: lifecycle.restoration } : {}),
       creation: { capability: { key: "example.create-review", revision: 1 }, prepare: ({ request }) => Promise.resolve(
         request.caller.actor.principal.subject === "senior"
           ? { effect: "allow", request, bootstrap: { kind: "none" }, validUntil: Date.now() + 30_000, isCurrent: () => true, release: () => undefined }
@@ -125,11 +132,12 @@ export function createReviewHost(mode: "direct" | "namespace") {
     kinds: [{ kind: "session", resolve: ({ id }) => host.sessions.authorization?.getResource(id), current: liveResource, fence: liveResource }],
     types: [{ kind: "session", type: sessionType, providerId: mockProvider.providerId, operations: [{ name: "title", purpose: "invoke", policies: [projectionPolicy],
       validate: (payload) => typeof payload === "object" && payload !== null && "value" in payload && typeof payload.value === "string",
-      commit(payload, request, admissionCheck) {
+      async commitDurable(payload, request, admissionCheck) {
         if (typeof payload !== "object" || payload === null || !("value" in payload) || typeof payload.value !== "string") return false;
         projectionSeq += 1;
-        return host.sessions.dispatchAction({ channel: request.target.id, clientId: "demo-projector", clientSeq: projectionSeq,
-          action: { type: "session/titleChanged", title: payload.value }, admission: admissionCheck }).rejectionReason === undefined;
+        const envelope = await host.sessions.dispatchAction({ channel: request.target.id, clientId: "demo-projector", clientSeq: projectionSeq,
+          action: { type: "session/titleChanged", title: payload.value }, admission: admissionCheck });
+        return envelope.rejectionReason === undefined;
       } }] }],
   });
   const projection = createToolResultProjection({ resources, project: (output, context) => context.contract.id === serverTool.definition.id
@@ -138,14 +146,15 @@ export function createReviewHost(mode: "direct" | "namespace") {
   const dispatcher = { challenge: { adapter: challenge }, projection };
 
   const host = createAHPServer({ host: "127.0.0.1", port: 0,
-    sessions: { providers: [mockProvider], creationSecurity: { registry, policies }, toolAdmission: admission,
+    ...(lifecycle?.nativeWrites ? { nativeWrites: lifecycle.nativeWrites } : {}),
+    sessions: { ...(lifecycle ? { durability: lifecycle.durability } : {}), providers: [lifecycle?.provider ?? mockProvider], creationSecurity: { registry, policies }, toolAdmission: admission,
       application: { catalogue: createSessionTypeCatalogue({ tools: createToolCatalogue({ definitions: allTools }), types: [type.registration] }), defaultType: sessionType } },
     protectedViews: { registry, policies, admitted: [policy], resolve: ({ resource }) => routeFor(resource) },
     toolExecution: { registry, policies, dispatcher, artifacts, resolve: ({ origin: resource }) => routeFor(resource),
       registrations: [{ definition: clientTool, source: { id: "demo-client", revision: 1 }, revision: 1, implementation: clientImplementation }] },
     serverToolExecution: { registry, policies, dispatcher, resolve: ({ origin: resource }) => routeFor(resource), registrations: [serverTool],
       executor: { context: executorContext, generation: 1, current: () => true, fence: () => true } },
-    agentWork: { authenticator, registrations: memory.registrations, work: memory.work, allowedKinds: new Set(["code.review"]), dispose: () => memory.dispose() },
+    agentWork: { authenticator, registrations: persistence.registrations, work: persistence.work, allowedKinds: new Set(["code.review"]), dispose: () => persistence.dispose() },
     security: { composition, workDomainId: domainId, initialAuthority: { prepare: ({ context, fence }) => {
       connections.set(context.connectionId, { context, fence });
       return Promise.resolve({ scopes: [], allowGlobalSequence: true, validUntil: Date.now() + 60_000,
@@ -171,11 +180,11 @@ export function createReviewHost(mode: "direct" | "namespace") {
     const { context, fence } = connection("junior");
     allowExecutor("junior", definition, { actor: context.actor, connectionId: fence.connectionId, generation: fence.connectionGeneration, registrationRevision }, implementation);
   };
-  const provision = async (): Promise<void> => {
+  const provision = async (workingDirectories?: readonly string[]): Promise<void> => {
     const authorization = host.sessions.authorization;
     assert.ok(authorization);
     const context: TrustedRequestContext = { actor: actorFor("senior"), connectionId: "demo-session-setup", authRevision: "demo" };
-    await authorization.createSession({ channel }, { context, connectionId: context.connectionId, connectionGeneration: 1,
+    await authorization.createSession({ channel, ...(workingDirectories ? { workingDirectories } : {}) }, { context, connectionId: context.connectionId, connectionGeneration: 1,
       validUntil: Date.now() + 30_000, signal: new AbortController().signal, isCurrent: () => true });
     const resource = authorization.getResource(channel);
     assert.ok(resource);
@@ -195,7 +204,7 @@ export function createReviewHost(mode: "direct" | "namespace") {
       registrationRevision: serverTool.revision }, serverTool.implementation);
   };
 
-  return { host, artifacts, bytes, serverTool, connection, provision, allowTool, allowJuniorExecutor,
+  return { host, artifacts, bytes, serverTool, connection, provision, registry, allowTool, allowJuniorExecutor,
     origin: () => origin, consent: (allow: boolean): void => { providerAllowsInvoke = allow; },
     stop: async (): Promise<void> => {
       resources.dispose();

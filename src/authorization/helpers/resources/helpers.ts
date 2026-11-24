@@ -105,7 +105,11 @@ export function createResourceOperations(options: ResourceOperationsOptions): Re
       names.add(name);
       const refs = operationCopy(operation.policies.map((ref) => policyRefSchema.parse(ref)));
       if (refs.some((ref) => policies.getPolicy(ref) === undefined)) throw new TypeError("Unknown operation policy.");
-      return Object.freeze({ name, purpose: operation.purpose, policies: refs, ...(operation.validate === undefined ? {} : { validate: operation.validate.bind(operation) }), ...(operation.commit === undefined ? {} : { commit: operation.commit.bind(operation) }) });
+      if (operation.commit !== undefined && operation.commitDurable !== undefined) throw new TypeError("Ambiguous resource commit.");
+      return Object.freeze({ name, purpose: operation.purpose, policies: refs,
+        ...(operation.validate === undefined ? {} : { validate: operation.validate.bind(operation) }),
+        ...(operation.commit === undefined ? {} : { commit: operation.commit.bind(operation) }),
+        ...(operation.commitDurable === undefined ? {} : { commitDurable: operation.commitDurable.bind(operation) }) });
     });
     const key = typeKey(type.kind, type.type, type.providerId);
     if (types.has(key)) throw new TypeError("Duplicate resource type.");
@@ -122,7 +126,8 @@ export function createResourceOperations(options: ResourceOperationsOptions): Re
     readonly fence: () => boolean;
     settled: boolean;
     consumed: boolean;
-    commit?: (admission: (authority: ResourceOperationAuthority) => boolean) => boolean;
+    durable?: boolean;
+    commit?: (admission: (authority: ResourceOperationAuthority) => boolean) => boolean | Promise<boolean>;
   }
   const pending = new Set<Pending>();
   const tickets = new WeakMap<ResourceOperationTicket, Pending>();
@@ -225,8 +230,11 @@ export function createResourceOperations(options: ResourceOperationsOptions): Re
             if (!selected) return undefined;
           }
           const target = resolved.find((item) => sameResource(item.ref, request.target));
-          if (target?.operation.validate === undefined || target.operation.commit === undefined || !exactlyTrue(target.operation.validate(request.payload)) || !alive(state)) return undefined;
-          const commit = target.operation.commit.bind(target.operation);
+          if (target?.operation.validate === undefined || !exactlyTrue(target.operation.validate(request.payload)) || !alive(state)) return undefined;
+          const commit = target.operation.commit?.bind(target.operation);
+          const commitDurable = target.operation.commitDurable?.bind(target.operation);
+          if (commit === undefined && commitDurable === undefined) return undefined;
+          state.durable = commitDurable !== undefined;
           const authority: ResourceOperationAuthority = Object.freeze({ registry, decisions: Object.freeze(decisions) });
           const registryFence = state.fence;
           const fence = () => alive(state) && registryFence() && resolved.every((item) => exactlyTrue(item.adapter.fence(item.ref)));
@@ -237,15 +245,27 @@ export function createResourceOperations(options: ResourceOperationsOptions): Re
             const active = () => accepting;
             let admitted = false;
             const wasAdmitted = () => admitted;
+            const admit = () => {
+              if (!active() || attempted) return false;
+              attempted = true;
+              if (!alive(state) || !resolved.every((item) => exactlyTrue(item.adapter.current(item.ref)))) return false;
+              if (!exactlyTrue(admission(authority)) || !fence()) return false;
+              admitted = true;
+              return true;
+            };
+            if (commitDurable !== undefined) {
+              const write = async (): Promise<boolean> => {
+                try {
+                  const result: unknown = await commitDurable(request.payload, ownedRequest, admit);
+                  return wasAdmitted() && result === true;
+                } finally {
+                  accepting = false;
+                }
+              };
+              return write();
+            }
             try {
-              const result: unknown = commit(request.payload, ownedRequest, () => {
-                if (!active() || attempted) return false;
-                attempted = true;
-                if (!alive(state) || !resolved.every((item) => exactlyTrue(item.adapter.current(item.ref)))) return false;
-                if (!exactlyTrue(admission(authority)) || !fence()) return false;
-                admitted = true;
-                return true;
-              });
+              const result: unknown = commit?.(request.payload, ownedRequest, admit);
               if (result !== true) void Promise.resolve(result).catch(() => undefined);
               return wasAdmitted() && result === true;
             } finally {
@@ -270,13 +290,27 @@ export function createResourceOperations(options: ResourceOperationsOptions): Re
     },
     commit(ticket: ResourceOperationTicket, admission: (authority: ResourceOperationAuthority) => boolean): boolean {
       const state = tickets.get(ticket);
-      if (state === undefined || state.consumed || state.commit === undefined || !alive(state)) return false;
+      if (state === undefined || state.durable === true || state.consumed || state.commit === undefined || !alive(state)) return false;
       state.consumed = true;
       try {
-        return state.commit(admission);
+        return state.commit(admission) === true;
       } catch {
         return false;
       } finally {
+        release(state);
+      }
+    },
+    async commitDurable(ticket: ResourceOperationTicket, admission: (authority: ResourceOperationAuthority) => boolean): Promise<boolean> {
+      const state = tickets.get(ticket);
+      if (state === undefined || state.consumed || state.commit === undefined || !alive(state)) return false;
+      state.consumed = true;
+      state.settled = false;
+      try {
+        return await state.commit(admission);
+      } catch {
+        return false;
+      } finally {
+        state.settled = true;
         release(state);
       }
     },

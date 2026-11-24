@@ -12,9 +12,9 @@ minimal initialize returns the genuine current sequence and empty snapshots, and
 then ping works. Contextual native create requires separate explicit
 registered creation approval and a `null` reply. Explicit `protectedViews` opens
 projected initial/repeated subscriptions, root counts and lists through canonical
-resource-read policy. Native disposal/actions and legacy tool delivery remain
-unavailable. Authentication/setup is not disclosure
-permission. The generic transport still accepts arbitrary trusted application
+resource-read policy. Durable protected hosts can also provide `nativeWrites.admit`
+for title, read and archive changes and exact-session retirement. The generic
+transport still accepts arbitrary trusted application
 handlers; it does not sandbox application JavaScript.
 
 ## Protected session creation and canonical work ownership
@@ -92,11 +92,8 @@ host fences prevent reuse even though standalone factories may be reused.
 - `createAHPConnectionModule(factory, reportDiagnostic?, options?)` — wire-only
   handlers plus `onConnection`, `beforeDispatch`, and `dispose`. Cleanup is not
   an RPC method. The optional third argument enables the agent/work extension
-  with `agents`, `work`, and either legacy mutable `sessionOwners` or read-only
-  `ownerLookup`. Protected SDK factories reject `sessionOwners`; the composed
-  protected host supplies `ownerLookup` from its canonical full-ref/domain owner
-  projection. The lookup has no bind/unbind/clear mutators and grants no new work
-  authority.
+  with `agents` and `work`. Legacy unprotected factories may also receive mutable
+  `sessionOwners`. The extension exposes agent presence and authorized work reads.
 - `createAHPServer({ host, port, path, sessions, agentWork?, security?, transportLimits? })` — composed host.
   `agentWork` optionally adds the static-token authenticator, shared
   registration/work ports, allowed kinds, presence TTL, directory registration
@@ -228,7 +225,11 @@ const server = createWebSocketServer({
 - **Native setup is not resource permission.** Hosts without `protectedViews`
   reject nonempty initialSubscriptions, subscribe/repeat subscribe and lists.
   Explicit resource-view configuration uses canonical read grants and projects
-  all native reads. Native dispose/actions and legacy tools remain closed.
+  all native reads. Durable protected hosts may opt into `nativeWrites.admit`
+  for title, read, archive and session disposal. The synchronous callback receives
+  the verified context, exact session and parsed command. The host rechecks
+  connection and incarnation at durable admission. Other native mutations and
+  legacy tools remain closed.
   Empty initialize/ping remain supported only after
   the explicit live global-sequence permission gate. The
   explicit agent/work extension still requires its own principal/owner/presence
@@ -239,9 +240,11 @@ const server = createWebSocketServer({
   principal is projected only in that configured domain; arbitrary domains are
   not collapsed. clientId/kind/role are never identity. Static bearer tokens are
   POC-grade, not production identity.
-- **Work is not tool invocation.** `x-ahp/tools/*` is short-lived and private;
-  `x-ahp/work/*` is durable coordination with a database lease. The server never
-  executes stored work.
+- **Work reads.** `x-ahp/work/get` returns an authorized view. Protected
+  replies recheck connection authority at send time. Durable reads also
+  recheck the original session incarnation, readiness and owner. The binding
+  omits remote work mutations through P2. Short-lived private tool calls use
+  `x-ahp/tools/*`.
 - **Trusted contextual creation owns exactly its creator.** Protected callers use
   `host.sessions.authorization.createSession(params, context)` (no native cursor
   prerequisite in-process); context-free create rejects. Public native create also
@@ -340,11 +343,12 @@ remain. The new public tests below use the real unmocked facade/host alongside t
 | [`src/tests/websocket/deferred.test.ts`](../tests/websocket/deferred.test.ts) | A broken completion predicate cannot escape the ordered socket queue. |
 | [`src/tests/agents/authenticator.test.ts`](../tests/agents/authenticator.test.ts) | Bearer parsing, exact token lookup, missing/unknown credentials, repeated headers, and value-free errors. |
 | [`src/tests/agents/directory.test.ts`](../tests/agents/directory.test.ts) | Stable registration, cross-principal denial, disabled agents, one live binding, generation fencing, expiry, and stale release. |
-| [`src/tests/websocket/agentWork.test.ts`](../tests/websocket/agentWork.test.ts) | Extension request/notification kinds, strict v1 schemas, authenticated identity derivation, exact replies, sanitized errors, a service-length request key accepted at the wire with longer ones rejected before the service, and depth-budget rejection before the service runs. |
+| [`src/tests/websocket/agentWork.test.ts`](../tests/websocket/agentWork.test.ts) | Extension request kinds, strict schemas, authenticated presence and reads, and absence of remote work mutation handlers. |
 | [`src/tests/websocket/agentWork.binding.test.ts`](../tests/websocket/agentWork.binding.test.ts) | Session-owner binding, disposal ownership/conflict, and presence release on close/dispose. |
 | [`src/tests/websocket/agentWork.disposal.test.ts`](../tests/websocket/agentWork.disposal.test.ts) | Disposal races: the binding held through a parked settle, settlement-last on backend disposal failure, the settle window denying every principal, stale starts neither binding foreign successors nor ghosts, in-flight foreign disposal denial, a failing settlement unbind failing loudly and healing on re-dispose, and the shared settle-window probe. |
 | [`src/tests/websocket/agentWork.transport.test.ts`](../tests/websocket/agentWork.transport.test.ts) | Handshake auth vs. `clientId`, delayed auth frame buffering, thrown-authenticator containment, and real-socket extension calls. |
-| [`src/tests/websocket/agentWork.integration.test.ts`](../tests/websocket/agentWork.integration.test.ts) | Composed host: authenticated A/B submit → register → claim → renew → complete → get through the real work service, with owner and secret checks, and the fail-closed host facade during a settling disposal. |
+| [`src/tests/websocket/agentWork.integration.test.ts`](../tests/websocket/agentWork.integration.test.ts) | Internal kernel host composition, closed remote mutations, redacted work reads, and the host facade during a settling disposal. |
+| [`src/tests/websocket/durableDispatch.test.ts`](../tests/websocket/durableDispatch.test.ts) | Real public host and pinned SDK dispatch, commit-before-envelope ordering, write revocation while parked, and scoped durable disposal. |
 
 ## Private canonical compatibility kernel (not a public tool route)
 

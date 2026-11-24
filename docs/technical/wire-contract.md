@@ -104,6 +104,15 @@ The order of subscription and backend readiness varies. A client can observe
 `ready` in the subscription snapshot or in a later action. Private tool replies
 and lifecycle events use the tool extension instead of the native reducer.
 
+Durable protected hosts can configure `nativeWrites.admit` for native
+`dispatchAction` title, read and archive changes, and for `disposeSession`.
+The host supplies the verified actor, exact session incarnation and validated
+command at admission. Title, read and archive changes require a ready session.
+An authorized caller can retire a published session whose provider failed to
+start. A subscribed SDK client receives the accepted action
+envelope after the state commit, through its existing protected view. Cursor
+consent alone grants no mutation authority.
+
 ## Application tool extension
 
 Trusted canonical typed session snapshots carry the server-authored contract manifest
@@ -153,17 +162,15 @@ request using `version: 1`:
 
 - `x-ahp/agents/register`, `renew`, `unregister` — durable registration plus a
   live in-memory presence binding.
-- `x-ahp/work/submit`, `claim`, `renew`, `complete`, `fail`, `cancel`, `get` —
-  durable work and its current execution lease.
+- `x-ahp/work/get` — an authorized work view with the lease holder and token
+  omitted, or `work: null` for an absent or inaccessible item.
 
-Only `x-ahp/work/claim` returns a lease token, and only to the current claimant.
-`get` redacts lease-holder and token fields. A submission may name a target
-agent. The requesting principal, executing agent, connection ID, and presence
-generation come from the authenticated connection and live directory. The work extension is separate
-from `x-ahp/tools/*`: tools are short-lived private invocation, while work is a
-durable record that survives a disconnect.
+Through P2, an initialized client receives JSON-RPC `MethodNotFound` for
+`x-ahp/work/submit`, `claim`, `renew`, `complete`, `fail`, `cancel`, and
+`updateData`. This also applies to the session owner and registered workers.
+The host derives the principal for work reads from the authenticated connection.
 
-Registration text and work payload trees also pass the application's
+Registration text passes the application's
 portable-text profile before reaching a repository. It rejects NUL and unpaired
 UTF-16 surrogates so accepted values are consistent across storage adapters;
 this is application policy, not a claim that JSON itself cannot represent those

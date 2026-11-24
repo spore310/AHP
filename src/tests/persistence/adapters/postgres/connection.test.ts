@@ -210,6 +210,26 @@ describe("adapter connection — toIso", () => {
 });
 
 describe("adapter connection — createPostgresPool (offline construction only)", () => {
+  it("bounds checkout, statement execution and idle transactions on the default repository pool", async () => {
+    const pool = createPostgresPool({ connectionString: "postgresql://localhost/unused" });
+    try {
+      expect(pool.options).toMatchObject({
+        connectionTimeoutMillis: 5_000,
+        statement_timeout: 30_000,
+        idle_in_transaction_session_timeout: 30_000,
+      });
+    } finally {
+      await pool.end();
+    }
+  });
+  it("absorbs idle-client loss after pg evicts the disconnected client", async () => {
+    const pool = createPostgresPool({ connectionString: "postgresql://localhost/unused" });
+    try {
+      expect(() => pool.emit("error", new Error("idle client lost"))).not.toThrow();
+    } finally {
+      await pool.end();
+    }
+  });
   it("keeps the original default of 10 maximum clients", () => {
     const options: PostgresOptions = { connectionString: "postgresql://localhost:5432/probe" };
     const pool = createPostgresPool(options);

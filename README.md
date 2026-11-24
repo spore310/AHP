@@ -7,7 +7,7 @@ through the AHP SDK. The host owns session state, authorization, and delivery.
 ## Use the SDK
 
 - [Five-minute quick start](docs/guides/quickstart.md) · Start a local host and create a typed session that reaches `ready`.
-- [Advanced review application](docs/guides/advanced.md) · Run authenticated clients, protected tools, artifact delivery, and a work lease on one loopback host.
+- [Advanced review application](docs/guides/advanced.md) · Run authenticated clients, protected tools, artifact delivery, and agent registration on one loopback host.
 - [Wire contract](docs/technical/wire-contract.md) · Check which messages belong to AHP and which belong to this host's extensions.
 
 ## Contribute to AHP

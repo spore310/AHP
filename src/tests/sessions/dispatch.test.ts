@@ -43,17 +43,15 @@ describe("dispatchAction: missing target (T15)", () => {
     const envelopesBefore = envelopes.length;
     const missing = sessionUri("missing-target");
 
-    expect(() =>
-      factory.dispatchAction({
-        channel: missing,
-        clientSeq: 1,
-        action: { type: "session/titleChanged", title: "Renamed" },
-        clientId: CLIENT_ID,
-      }),
-    ).toThrow(SessionsError);
+    await expect(factory.dispatchAction({
+      channel: missing,
+      clientSeq: 1,
+      action: { type: "session/titleChanged", title: "Renamed" },
+      clientId: CLIENT_ID,
+    })).rejects.toThrow(SessionsError);
 
     try {
-      factory.dispatchAction({
+      await factory.dispatchAction({
         channel: missing,
         clientSeq: 1,
         action: { type: "session/titleChanged", title: "Renamed" },
@@ -101,17 +99,15 @@ describe("dispatchAction: malformed payloads (T12)", () => {
     ];
 
     for (const action of invalidActions) {
-      expect(() =>
-        factory.dispatchAction({
-          channel: uri,
-          clientSeq: 1,
-          action,
-          clientId: CLIENT_ID,
-        }),
-      ).toThrow(SessionsError);
+      await expect(factory.dispatchAction({
+        channel: uri,
+        clientSeq: 1,
+        action,
+        clientId: CLIENT_ID,
+      })).rejects.toThrow(SessionsError);
 
       try {
-        factory.dispatchAction({
+        await factory.dispatchAction({
           channel: uri,
           clientSeq: 1,
           action,
@@ -158,7 +154,7 @@ describe("dispatchAction: clientSeq non-coercion (T13)", () => {
 
     for (const clientSeq of invalidSeqs) {
       try {
-        factory.dispatchAction({
+        await factory.dispatchAction({
           channel: uri,
           clientSeq,
           action,
@@ -182,13 +178,13 @@ describe("dispatchAction: clientSeq non-coercion (T13)", () => {
   it("accepts the SDK starting value and other non-negative safe integers", async () => {
     const { factory, uri } = await readyFactory();
 
-    const first = factory.dispatchAction({
+    const first = await factory.dispatchAction({
       channel: uri,
       clientSeq: 1,
       action: { type: "session/titleChanged", title: "One" },
       clientId: CLIENT_ID,
     });
-    const second = factory.dispatchAction({
+    const second = await factory.dispatchAction({
       channel: uri,
       clientSeq: 0,
       action: { type: "session/titleChanged", title: "Zero" },
@@ -206,7 +202,7 @@ describe("dispatchAction: active clients", () => {
     const { factory, uri, envelopes } = await readyFactory();
     const envelopesBefore = envelopes.length;
 
-    const first = factory.dispatchAction({
+    const first = await factory.dispatchAction({
       channel: uri,
       clientSeq: 1,
       action: {
@@ -224,7 +220,7 @@ describe("dispatchAction: active clients", () => {
       { clientId: "client-a", displayName: "Alpha", tools: [{ name: "read_file" }] },
     ]);
 
-    factory.dispatchAction({
+    await factory.dispatchAction({
       channel: uri,
       clientSeq: 2,
       action: {
@@ -237,7 +233,7 @@ describe("dispatchAction: active clients", () => {
       },
       clientId: CLIENT_ID,
     });
-    factory.dispatchAction({
+    await factory.dispatchAction({
       channel: uri,
       clientSeq: 3,
       action: {
@@ -256,7 +252,7 @@ describe("dispatchAction: active clients", () => {
       { clientId: "client-b", displayName: "Beta", tools: [] },
     ]);
 
-    factory.dispatchAction({
+    await factory.dispatchAction({
       channel: uri,
       clientSeq: 4,
       action: { type: "session/activeClientRemoved", clientId: "client-b" },
@@ -266,12 +262,12 @@ describe("dispatchAction: active clients", () => {
       { clientId: "client-a", displayName: "Alpha Prime", tools: [{ name: "write_file" }] },
     ]);
 
-    expect(() => factory.dispatchAction({
+    await expect(factory.dispatchAction({
       channel: uri,
       clientSeq: 5,
       action: { type: "session/activeClientRemoved", clientId: "absent" },
       clientId: CLIENT_ID,
-    })).not.toThrow();
+    })).resolves.toHaveProperty("serverSeq");
     expect(factory.getSessionSnapshot(uri)?.state.activeClients).toEqual([
       { clientId: "client-a", displayName: "Alpha Prime", tools: [{ name: "write_file" }] },
     ]);
@@ -286,7 +282,7 @@ describe("dispatchAction: active clients", () => {
     const envelopesBefore = envelopes.length;
 
     try {
-      factory.dispatchAction({
+      await factory.dispatchAction({
         channel: uri,
         clientSeq: 1,
         action: {
@@ -319,7 +315,7 @@ describe("dispatchAction: valid-but-unsupported baseline actions", () => {
     const catalogueBefore = catalogue.length;
     const envelopesBefore = envelopes.length;
 
-    const rejected = factory.dispatchAction({
+    const rejected = await factory.dispatchAction({
       channel: uri,
       clientSeq: 4,
       action: {
@@ -399,7 +395,7 @@ describe("summary projection (T21)", () => {
       activeSessions: 1,
     });
 
-    factory.dispatchAction({
+    await factory.dispatchAction({
       channel: uri,
       clientSeq: 1,
       action: { type: "session/titleChanged", title: "Renamed session" },
@@ -407,7 +403,7 @@ describe("summary projection (T21)", () => {
     });
     expect(factory.getSessionSnapshot(uri)?.state.title).toBe("Renamed session");
 
-    factory.dispatchAction({
+    await factory.dispatchAction({
       channel: uri,
       clientSeq: 2,
       action: { type: "session/isReadChanged", isRead: true },
@@ -415,7 +411,7 @@ describe("summary projection (T21)", () => {
     });
     expect(factory.getSessionSnapshot(uri)?.state.status).toBe(1 | 32);
 
-    factory.dispatchAction({
+    await factory.dispatchAction({
       channel: uri,
       clientSeq: 3,
       action: { type: "session/isArchivedChanged", isArchived: true },

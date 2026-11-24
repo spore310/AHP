@@ -14,7 +14,9 @@ Use the smallest relevant instruction set.
 | `docs/plans/`                                             | Plans; honor the status and scope declared by each document        |
 | `docs/architecture/`, `docs/technical/`                   | Cross-cutting architecture and verified technical behavior         |
 
-Read relevant documentation before changing an affected capability.
+Read relevant documentation before changing an affected capability. For
+disposable database testing and recovery, see
+[Local PostgreSQL tests](references/local-postgres-testing.md).
 
 ---
 

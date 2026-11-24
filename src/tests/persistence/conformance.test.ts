@@ -4,10 +4,12 @@ import { createAgentDirectory } from "@agents";
 import { createPersistence } from "@persistence";
 import type { DurableSessionInput } from "@persistence/types";
 import { createSessionOwnerRegistry, createWorkService } from "@work";
+import { createExamplePersistence } from "../../../examples/advanced/persistence";
 
 import {
   assertPersistenceConformance,
   assertRegistrationQuotaConformance,
+  assertDurableResourceConformance,
   createMemoryPersistenceFixture,
 } from "./conformance/helpers";
 
@@ -40,6 +42,40 @@ const composeServices = (fixture: ReturnType<typeof createMemoryPersistenceFixtu
 };
 
 describe("provider conformance through neutral services", () => {
+  it("keeps the example's durable sessions and resources isolated from URI-only writes", async () => {
+    const persistence = createPersistence(createExamplePersistence().provider);
+    try {
+      const storage = persistence.durability;
+      if (!storage) throw new Error("Example durability is missing.");
+      const host = await storage.acquire("example", () => undefined);
+      try {
+        const denied = { code: "unauthorized" };
+        const worker = await persistence.registrations.register({ principalSubject: principal.subject, agentKey: "worker" });
+        const lease = { agentId: worker.id, principalSubject: principal.subject, workId: worker.id, token: "old" };
+        await expect(persistence.sessions.ensure(session)).rejects.toMatchObject(denied);
+        await expect(persistence.sessions.delete(sessionUri)).rejects.toMatchObject(denied);
+        await expect(persistence.work.submit({ session, requestKey: "old", kind: "review", input: {} })).rejects.toMatchObject(denied);
+        await expect(persistence.work.claim({ ...lease, sessionUri, kinds: ["review"] })).rejects.toMatchObject(denied);
+        await expect(persistence.work.renew(lease)).rejects.toMatchObject(denied);
+        await expect(persistence.work.complete({ ...lease, result: {} })).rejects.toMatchObject(denied);
+        await expect(persistence.work.fail({ ...lease, retryable: false })).rejects.toMatchObject(denied);
+        await expect(persistence.work.cancel(lease)).rejects.toMatchObject(denied);
+        await expect(persistence.work.reconcileExpired()).rejects.toMatchObject(denied);
+        await expect(persistence.work.get(lease)).resolves.toBeNull();
+        await expect(persistence.work.hasDependentWork(sessionUri)).resolves.toBe(false);
+      } finally {
+        await host.release();
+      }
+      await assertDurableResourceConformance(storage, "example");
+    } finally {
+      await persistence.dispose();
+    }
+  });
+
+  it("exposes the historical URI-only work contract only on the legacy fixture", () => {
+    expect(createMemoryPersistenceFixture().provider.durability).toBeUndefined();
+  });
+
   it("runs the reusable contract suite against a non-SQL provider", async () => {
     await assertPersistenceConformance(() => createMemoryPersistenceFixture().provider);
   });

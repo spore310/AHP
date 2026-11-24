@@ -5,7 +5,6 @@ import type { SessionCreationContext, SessionFactoryAuthorization } from "@sessi
 
 import { createAgentDirectory } from "@agents";
 import { legacyIdentitySource } from "@agents/helpers/policyIdentity/helpers";
-import type { DurableSessionInput } from "@persistence/types";
 import { createActionSequence, createSessionsFactory } from "@sessions";
 import type { SessionsFactory } from "@sessions/types";
 import { createSessionOwnerRegistry, createWorkService } from "@work";
@@ -21,40 +20,6 @@ import type { AHPServerHandle, AHPServerOptions } from "./types";
 const HOST_STOPPED = "AHP host cannot be started after shutdown has begun.";
 const HOST_SESSIONS_STOPPED = "AHP host sessions cannot be used after shutdown has begun.";
 const HOST_SESSIONS_SETTLING = "A session disposal is still settling; create the session once it completes.";
-
-/**
- * Project the live session snapshot into the durable row shape.
- *
- * Only the session URI should reach this function. The provider is read from
- * the session state the factory exposes; an absent provider is treated as an
- * unavailable projection rather than inventing metadata.
- */
-const describeSession = (
-  sessions: SessionsFactory,
-): ((sessionUri: string) => DurableSessionInput | undefined) =>
-  (sessionUri: string): DurableSessionInput | undefined => {
-    const snapshot = sessions.getSessionSnapshot(sessionUri);
-    if (snapshot === undefined) {
-      return undefined;
-    }
-    const state = snapshot.state as { readonly provider?: unknown };
-    if (typeof state.provider !== "string") {
-      return undefined;
-    }
-    const now = new Date().toISOString();
-    return {
-      sessionUri,
-      ownerPrincipalSubject: "",
-      providerId: state.provider,
-      createdAt: now,
-      modifiedAt: now,
-      lastServerSeq: snapshot.fromSeq,
-      durableState: {
-        fromSeq: snapshot.fromSeq,
-        state: snapshot.state,
-      },
-    };
-  };
 
 /**
  * Compose one sequence allocator, session factory, AHP binding, and transport.
@@ -125,24 +90,21 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
           : {}),
         ...(options.agentWork.now !== undefined ? { now: options.agentWork.now } : {}),
       });
-  const describe = describeSession(sessions);
   const work = options.agentWork === undefined || agents === undefined
     ? undefined
     : createWorkService({
         repository: options.agentWork.work,
         sessions: ownerLookup,
+        ...(sessions.durability
+          ? { currentInstance: (uri, instanceId, subject, domainId) => {
+              const ref = capturedGetResource?.(uri);
+              return ref !== undefined && !stopped && ref.instanceId === instanceId && ref.domainId === domainId && canonicalOwner?.(ref)?.subject === subject && capturedIsReady?.(ref) === true;
+            } }
+          : { legacyReadCurrent: () => !stopped }),
         presence: agents,
         registrations: options.agentWork.registrations,
-        describeSession: (sessionUri): DurableSessionInput | undefined => {
-          const projection = describe(sessionUri);
-          if (projection === undefined) {
-            return undefined;
-          }
-          const owner = ownerLookup.owner(sessionUri);
-          return owner === undefined
-            ? undefined
-            : { ...projection, ownerPrincipalSubject: owner };
-        },
+        // Remote submission is closed through P2. A work caller cannot materialize a session projection.
+        describeSession: () => undefined,
         allowedKinds: options.agentWork.allowedKinds,
         ...(options.agentWork.now !== undefined ? { now: options.agentWork.now } : {}),
       });
@@ -150,17 +112,17 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     sessions,
     () => undefined,
     options.agentWork === undefined || agents === undefined || work === undefined
-      ? { maxInitialSubscriptions, ...(options.toolExecution === undefined ? {} : { toolExecution: options.toolExecution }),
+      ? { maxInitialSubscriptions, nativeWrites: options.nativeWrites, ...(options.toolExecution === undefined ? {} : { toolExecution: options.toolExecution }),
           ...(options.serverToolExecution === undefined ? {} : { serverToolExecution: options.serverToolExecution }),
           ...(options.protectedViews === undefined ? {} : { protectedViews: options.protectedViews }) }
       : {
-          maxInitialSubscriptions,
+          maxInitialSubscriptions, nativeWrites: options.nativeWrites,
           ...(options.protectedViews === undefined ? {} : { protectedViews: options.protectedViews }),
           ...(options.toolExecution === undefined ? {} : { toolExecution: options.toolExecution }),
           ...(options.serverToolExecution === undefined ? {} : { serverToolExecution: options.serverToolExecution }),
           agents,
           work,
-          ...(sessionOwners === undefined ? { ownerLookup } : { sessionOwners }),
+          ...(sessionOwners === undefined ? {} : { sessionOwners }),
         },
   );
   const transport = createWebSocketServer({
@@ -218,20 +180,21 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
           assertSessionsOpen();
           return actualAuthorization.isSettling(uri);
         },
-        disposeSession: async (expected: ResourceRef<"session">) => {
+        disposeSession: async (expected: ResourceRef<"session">, admission?: () => boolean) => {
           assertSessionsOpen();
           const parsed = resourceRefSchema.parse(expected);
           if (parsed.kind !== "session") throw new Error("Invalid session resource.");
           const captured = Object.freeze({ ...parsed, kind: "session" as const });
           const current = actualAuthorization.getResource(captured.id);
-          if (current === undefined) return actualAuthorization.disposeSession(captured);
+          if (current === undefined) return actualAuthorization.disposeSession(captured, admission);
           if (!sameResource(current, captured)) return false;
-          await work?.assertSessionDisposable(captured.id);
-          return actualAuthorization.disposeSession(captured);
+          if (!sessions.durability) await work?.assertSessionDisposable(captured.id);
+          return actualAuthorization.disposeSession(captured, admission);
         },
       });
 
   const hostedSessions: SessionsFactory = {
+    ...(sessions.durability ? { durability: sessions.durability } : {}),
     ...(hostedAuthorization === undefined ? {} : { authorization: hostedAuthorization }),
     ...(sessions.managedTools === undefined ? {} : { managedTools: sessions.managedTools }),
     createSession: (params: unknown): Promise<void> => {
@@ -280,7 +243,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     },
     getCurrentServerSeq: () => sessions.getCurrentServerSeq(),
     listAgents: () => sessions.listAgents(),
-    dispatchAction: (params) => {
+    dispatchAction: async (params) => {
       assertSessionsOpen();
       return sessions.dispatchAction(params);
     },
@@ -341,6 +304,10 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
         throw new Error(HOST_STOPPED);
       }
       try {
+        if (sessions.durability) await sessions.durability.start(() => {
+          void stop().catch(() => undefined);
+        });
+        if (isStopped()) throw new Error(HOST_STOPPED);
         return await transport.start();
       } catch (error) {
         await stop();

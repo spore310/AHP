@@ -231,8 +231,13 @@ registry. This extends assignment cohort validation with genuine independent
 decisions at one final canonical clock sample. Provider callbacks precede it; pure
 registry/instance fences follow it. Sequential callback-bearing checks are not a
 joint proof. Copied/foreign/replayed tickets deny. Retained admission callbacks
-close when the synchronous owner operation returns or throws. These are trusted adapters, not
-a sandbox or an atomic external transaction.
+close when the synchronous owner operation returns or throws.
+
+A durable owner registers `commitDurable` and calls the same single-use admission
+callback immediately before its first persistent mutation. The caller awaits
+`commitDurable(ticket, admission)` for confirmation. A cancelled operation keeps
+its capacity slot until the owner's promise settles. Synchronous registrations
+retain their immediate commit semantics.
 
 Example for a fake workspace adapter's registered write operation:
 
@@ -250,9 +255,8 @@ const write = {
 ```
 
 The host installs exact type/provider policy bindings and scoped grants separately.
-For native sessions, an application adapter passes the final callback to existing
-`SessionsFactory.dispatchAction({ ..., admission })`; it maps only known validated
-actions, never arbitrary executor patches.
+For native sessions, a durable operation maps a validated payload to an action
+and awaits `SessionsFactory.dispatchAction({ ..., admission })`.
 
 Limits:32kinds,128types,64operations/type,64route resources,128policy refs/operation,
 and1MiB action data. Defaults and maxima are64pending operations and5seconds.

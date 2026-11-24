@@ -1,15 +1,17 @@
 # Persistence
 
 Database-neutral repository contracts, facades, and provider selection for
-durable agent registrations, session projections, and work items. The live
-`SessionRegistry` remains synchronous and in memory. Concrete database and ORM
-behavior belongs inside an adapter; the initial production adapter is
-PostgreSQL.
+agent registrations, durable session incarnations, canonical resources and work
+reads. A host configured for durability publishes live state after a successful commit.
+PostgreSQL implements the production storage adapter.
 
 ## Files
 
 | File | Responsibility |
 | ---- | -------------- |
+| `helpers/durability/types.ts` | Exact session/resource records, data CAS, lifecycle operations and host lease. |
+| `helpers/durability/helpers.ts` | Bounded data capture, resource identities and graph order. |
+| `helpers/durability/memory.ts` | Single-owner in-memory lifetime, revisions and retirement transactions. |
 | `types.ts` | Repository ports, plain DTOs, `PersistenceProvider`, and `RepositoryError`. |
 | `index.ts` | Neutral public exports: ports, `createPersistence`, portable-text helpers, and `RepositoryError`. |
 | `helpers/provider/` | Composes repository facades under one lifecycle and disposer. |
@@ -29,12 +31,19 @@ PostgreSQL.
 | `helpers/provider/helpers.ts` | Managed provider composition. |
 | `helpers/provider/index.ts` | `createPersistence` export. |
 
+## Durable host storage
+
+Pass `provider.durability` and a stable logical `hostId` to the protected session factory. The PostgreSQL provider shares its acquired host fence with registration writes. Migration 0003 requires empty legacy identities, registrations and work. Every mutation owns its transaction. The host holds its ownership connection through shutdown. A separate host can take over after release or connection loss. `createMemoryDurableStorage()` keeps state for the lifetime of the storage object and supports deterministic host restarts in one process.
+
+The session/root reservation and retirement transitions are atomic. Resource data uses full-object CAS and independent decimal revisions. Terminal work remains scoped to its original incarnation through retirement. Explicit purge with a retention cutoff deletes eligible history in bounded batches. Applications monitor retained disk usage and choose a cutoff appropriate to their retention policy.
+
 ## Provider contract
 
-`PersistenceProvider` exposes `registrations`, `sessions`, `work`, and one
-`dispose()` method. It contains no query, connection, transaction, ORM, or
-vendor fields. All three repositories in a provider share one logical store and
-ownership scope.
+`PersistenceProvider` exposes `registrations`, `sessions`, `work`, optional
+`durability`, and one `dispose()` method. Its repositories share a logical store
+and ownership scope. The P0 PostgreSQL and advanced example providers accept
+session and resource writes through an acquired `DurableHost`. Both reject
+URI-only session mutations, work submissions and lease commands.
 
 `createPersistence(provider)` returns managed repository facades. Each call
 passes one repository operation through the shared lifecycle; it does not split
@@ -42,7 +51,7 @@ or retry atomic operations. Disposal closes admission synchronously, waits for
 admitted calls to settle, and calls provider cleanup once. A cleanup failure is
 cached and does not reopen the facade. Hung operations have no forced timeout.
 
-Work submission owns its atomic unit. `work.submit(input)` inserts/ensures the
+The legacy work test contract owns its atomic unit. Its `work.submit(input)` inserts/ensures the
 session projection and the work row within the adapter's one coherent operation.
 Callers must not replace that operation with separate session and work writes.
 An idempotent replay compares the immutable JSON value: object key order is
@@ -85,33 +94,34 @@ allowed-kind checks remain with their callers.
 
 ## PostgreSQL behavior
 
-The explicit [adapter entrypoint](helpers/adapters/postgres/README.md) is
-`@persistence/helpers/adapters/postgres`. It owns one pool for all repository
-constructors and releases it once. Work SQL keeps the database clock,
-transaction-client affinity, atomic `SKIP LOCKED` claims, lease-token rotation,
-owner checks, and fenced updates inside adapter operations. SQLSTATE mapping
-and row normalization stay private to that adapter.
+The PostgreSQL provider owns a pool for registration operations and work reads. Each acquired
+host retains a dedicated advisory-lock connection and a separate pool for session
+and resource transactions. Both pools allow five seconds for checkout and
+configure PostgreSQL to terminate a statement or an idle transaction after
+30 seconds. Registration writes check the current ownership epoch before their
+quota check and upsert. [PostgreSQL adapter](helpers/adapters/postgres/README.md)
 
-The PostgreSQL schema stores `session_type_id`, but the existing row mapping
-does not round-trip that ID, and `sessionTypeKey` / `sessionTypeVersion` are not
-persisted. No schema change is part of this refactor. Live session state is not
-restored automatically after restart.
+Migration 0003 ties each session incarnation to its persisted catalogue ID, key,
+version and provider. Startup of a protected durable host loads recoverable records,
+matches the registered provider and type, and requires fresh restoration approval
+before publishing live state. Work reads select the active incarnation by trusted
+domain and owner and omit lease credentials. Retirement fences nonterminal work
+and retains terminal rows until purge. [Session recovery](../sessions/README.md)
 
 ## Testing and evidence
 
-Unit tests exercise the neutral contracts/facades with an independent in-memory
-provider. PostgreSQL query doubles cover parameters, mappings, transactions,
-rollback/release, SQLSTATE handling, and query predicates. They do not prove
-database locking or clock behavior. Real PostgreSQL contention, rollback, and
-expiry acceptance remains **BLOCKED / NOT RUN**; no database was provisioned,
-migrated, or queried for this work.
+Routine tests exercise the advanced example provider, the historical URI-only
+work fixture, and PostgreSQL query doubles. The opt-in PostgreSQL 17 runner
+exercises migration 0003, ownership takeover, blocked registration shutdown,
+concurrent resource writes, exact-instance retirement, purge, and public host
+recovery on a disposable database.
 
 | Test | Pins |
 | ---- | ---- |
 | [`src/tests/persistence/contracts.test.ts`](../tests/persistence/contracts.test.ts) | Provider shape and neutral contract constraints. |
 | [`src/tests/persistence/facade.test.ts`](../tests/persistence/facade.test.ts) | Exact delegation, receiver preservation, shared draining, and no driver evaluation. |
-| [`src/tests/persistence/conformance.test.ts`](../tests/persistence/conformance.test.ts) | Provider substitution, sentinels, idempotency, leases, and instance isolation. |
-| [`src/tests/persistence/adapters/postgres/`](../tests/persistence/adapters/postgres/) | Offline PostgreSQL query-double coverage; no live connection. |
+| [`src/tests/persistence/conformance.test.ts`](../tests/persistence/conformance.test.ts) | Example provider durability and closed mutations, historical work fixture and provider substitution. |
+| [`src/tests/persistence/adapters/postgres/`](../tests/persistence/adapters/postgres/) | Driver-double unit tests and opt-in PostgreSQL 17 conformance. |
 
 The explicit real-database conformance runner is
 [`src/tests/persistence/adapters/postgres/conformance.ts`](../tests/persistence/adapters/postgres/conformance.ts).

@@ -6,6 +6,7 @@
  * `next()` call.
  */
 export interface ActionSequence {
+  seed?(checkpoint: number): void;
   next(): number;
   current(): number;
 }

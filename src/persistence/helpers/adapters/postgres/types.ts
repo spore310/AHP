@@ -85,3 +85,8 @@ export interface WorkRow extends QueryResultRow {
 export interface PostgresWorkRepositoryOptions {
   readonly leaseTtlSeconds?: number;
 }
+
+/** Columns selected by the owner/domain-scoped P0 work read. */
+export type VisibleWorkRow = Pick<WorkRow, "id" | "session_uri" | "request_key" | "kind" | "input" | "status"
+  | "result" | "target_agent_id" | "lease_expires_at" | "attempt_count" | "max_attempts" | "created_at" | "updated_at">
+  & { readonly session_instance_id: string };

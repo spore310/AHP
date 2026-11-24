@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 
 import { createPersistence } from "@persistence/helpers/provider";
+import { createMemoryDurableStorage, type DurableHost } from "@persistence";
 import type {
   AgentRegistrationRecord,
   PersistenceProvider,
@@ -99,6 +100,31 @@ const deferred = <TResult>() => {
 };
 
 describe("neutral persistence facade", () => {
+  it("preserves class-backed durable host getters and method receivers", async () => {
+    const memory = await createMemoryDurableStorage().acquire("facade-test", () => undefined);
+    class Lease implements DurableHost {
+      #host = memory;
+      get epoch() { return this.#host.epoch; }
+      get serverSeq() { return this.#host.serverSeq; }
+      get resources() { return this.#host.resources; }
+      get sessions() { return this.#host.sessions; }
+      isOpen() { return this.#host.isOpen(); }
+      release() { return this.#host.release(); }
+    }
+    const facade = createPersistence({ ...makeProvider().provider, durability: { acquire: async () => new Lease() } });
+    assert.isDefined(facade.durability);
+    const host = await facade.durability.acquire("facade-test", () => undefined);
+    try {
+      expect(host.isOpen()).toBe(true);
+      expect(host.sessions).toBe(memory.sessions);
+      expect(host.resources).toBe(memory.resources);
+      expect(host.epoch).toBe(memory.epoch);
+      expect(host.serverSeq).toBe(memory.serverSeq);
+    } finally {
+      await facade.dispose();
+    }
+    expect(host.isOpen()).toBe(false);
+  });
   it("loads and uses the neutral facade without evaluating a driver", async () => {
     const { provider } = makeProvider();
     expect(createPersistence(provider)).toBeDefined();

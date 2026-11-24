@@ -58,6 +58,7 @@ const workItem = (overrides: Partial<WorkItemRecord> = {}): WorkItemRecord => ({
 
 const createFakes = (overrides: {
   readonly describeSession?: (sessionUri: string) => DurableSessionInput | undefined;
+  readonly currentInstance?: (uri: string, instance: string, subject: string, domain: string) => boolean;
 } = {}) => {
   const submit = vi.fn((): Promise<{ readonly id: string; readonly created: boolean }> => (
     Promise.resolve({ id: "work-1", created: true })
@@ -105,6 +106,7 @@ const createFakes = (overrides: {
   const owners = createSessionOwnerRegistry();
   owners.bind(session.sessionUri, principal.subject);
   const service = createWorkService({
+    currentInstance: overrides.currentInstance,
     repository,
     sessions: owners,
     presence: {
@@ -141,6 +143,38 @@ const agentContext = {
 } as const;
 
 describe("work service", () => {
+  it("rechecks the original work incarnation and connection at protected reply delivery", async () => {
+    const { createAgentWorkExtension } = await import("@websocket/helpers/ahp/agentWork");
+    let instance = "first";
+    let connected = true;
+    const { get, service } = createFakes({ currentInstance: (_uri, id) => id === instance });
+    const item = workItem({ sessionInstanceId: instance });
+    get.mockResolvedValueOnce(item);
+    const handler = createAgentWorkExtension({ work: service }).handlers["x-ahp/work/get"];
+    if (!handler) throw new Error("Missing work read handler");
+    const guard = vi.fn<(check: () => boolean) => void>();
+    const call = (read: typeof handler) => read({ version: 1, workId: item.id }, {
+      connectionId: "reader", principal, isSecurityCurrent: () => connected,
+      security: { context: { connectionId: "reader", authRevision: "1", actor: { kind: "user", principal: { domainId: "domain", subject: principal.subject } } },
+        fence: { connectionId: "reader", connectionGeneration: 1 }, scopes: [], allowGlobalSequence: true, validUntil: Date.now() + 10000 },
+      send: () => true, onClose() {}, close() {},
+    }, { kind: "request", onReplySettled() {}, guardReply: guard });
+    const reply = await call(handler);
+    expect(reply).toMatchObject({ work: { id: item.id } });
+    expect(guard).toHaveBeenCalledOnce();
+    const check = guard.mock.calls[0]?.[0];
+    expect(check?.()).toBe(true);
+    instance = "replacement";
+    expect(check?.()).toBe(false);
+    instance = "first";
+    connected = false;
+    expect(check?.()).toBe(false);
+    connected = true;
+    get.mockResolvedValueOnce(item);
+    const wrapped = createAgentWorkExtension({ work: { get: (actor, id, domain) => service.get(actor, id, domain) } }).handlers["x-ahp/work/get"];
+    if (!wrapped) throw new Error("Missing wrapped work read handler");
+    await expect(call(wrapped)).rejects.toThrow();
+  });
   it("submits only through an authenticated owned live session", async () => {
     const { submit, service } = createFakes();
     await expect(service.submit(principal, {

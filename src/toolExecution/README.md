@@ -356,8 +356,9 @@ Rejected mapping, unsupported operation or stale authority produces safe
 Execution is never retried or claimed rolled back. Cancellation/timeouts retain
 job/output ownership until pending projector/authorization work actually settles,
 using the resource handle's separate `settled` promise even after ticket timeout. Native
-mutation uses the owner's existing action schema, reducer and sequence allocation;
-asynchronous external commits are outside this contract.
+mutation uses the owner's action schema, reducer and sequence allocation. A
+durable owner checks the same synchronous admission callback at the repository
+write boundary. Projection awaits the owner's commit before reporting success.
 
 ## Host-controlled actions
 

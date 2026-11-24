@@ -44,8 +44,7 @@ export function createInitialSessionState(input: NewSessionStateInput): SessionS
  * This is the only path that mutates a session's state. The wire-level sequence
  * comes from the host's shared {@link SessionsDependencies.nextServerSeq}
  * allocator rather than from the record, so actions across every session share
- * one ordered, gap-free stream that an ordinary connection-wide replay cursor
- * can select from.
+ * an ordered host stream. Rejected or rolled-back operations may leave gaps.
  */
 export function applySessionAction(
   record: SessionRecord,

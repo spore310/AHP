@@ -3,9 +3,8 @@ import type { SessionRecord, SessionRegistry } from "@sessions/types";
 /**
  * Creates the in-memory {@link SessionRegistry}.
  *
- * This is the only session store while the capability has no persistence: it
- * tracks live sessions for uniqueness enforcement and snapshot/event fan-out.
- * A durable store implements the same contract later.
+ * Tracks the live records used for snapshots and event delivery. Durable hosts
+ * also reserve, update and recover exact instances in their storage adapter.
  */
 export function createInMemorySessionRegistry(): SessionRegistry {
   const sessions = new Map<string, SessionRecord>();

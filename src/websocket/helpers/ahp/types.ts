@@ -1,12 +1,14 @@
 import type { ServerToolBrokerOptions } from "@toolExecution/server";
 import type { Snapshot } from "@microsoft/agent-host-protocol";
 import { z } from "zod";
+import type { ResourceRef, TrustedRequestContext } from "@authorization";
+import type { ParsedClientSessionAction } from "@sessions/helpers/actions";
 
 import type { AgentDirectory } from "@agents";
 import type { ClientToolBrokerOptions } from "@toolExecution/helpers/client/helpers/broker";
 import type { ResourceViewOptions } from "@toolExecution/helpers/views";
 import type { JsonRpcMessage } from "@jsonrpc";
-import type { SessionOwnerLookup, SessionOwnerRegistry, WorkService } from "@work";
+import type { SessionOwnerRegistry, WorkService } from "@work";
 import type { WebSocketConnectionContext } from "../../types";
 import { CLIENT_SESSION_ACTION_NAMES } from "./constants";
 
@@ -58,6 +60,15 @@ export const dispatchActionParamsSchema = z.object({
 
 export type DispatchActionParams = z.infer<typeof dispatchActionParamsSchema>;
 
+/** Host policy for durable native commands. The callback runs synchronously at admission. */
+export interface NativeSessionWrites {
+  admit(input: {
+    readonly context: TrustedRequestContext;
+    readonly session: ResourceRef<"session">;
+    readonly command: Extract<ParsedClientSessionAction, { type: "session/titleChanged" | "session/isReadChanged" | "session/isArchivedChanged" }> | { readonly type: "disposeSession" };
+  }): boolean;
+}
+
 export interface AHPDiagnostic {
   readonly event: "malformedNotification" | "publicationFailed";
   readonly method?: string;
@@ -70,6 +81,7 @@ export interface AHPConnectionModuleOptions {
 
 /** Optional authenticated agent/work extension wiring for an AHP binding. */
 export interface AHPBindingOptions {
+  readonly nativeWrites?: NativeSessionWrites;
   readonly protectedViews?: ResourceViewOptions;
   readonly toolExecution?: ClientToolBrokerOptions;
   readonly serverToolExecution?: ServerToolBrokerOptions;
@@ -77,5 +89,4 @@ export interface AHPBindingOptions {
   readonly agents?: AgentDirectory;
   readonly work?: WorkService;
   readonly sessionOwners?: SessionOwnerRegistry;
-  readonly ownerLookup?: SessionOwnerLookup;
 }

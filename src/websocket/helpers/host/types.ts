@@ -34,6 +34,7 @@ export interface AHPServerAgentWorkOptions {
 
 /** Options for a composed Agent Hosting Protocol host. */
 export interface AHPServerOptions {
+  readonly nativeWrites?: import("../ahp/types").NativeSessionWrites;
   readonly protectedViews?: ResourceViewOptions;
   readonly toolExecution?: ClientToolBrokerOptions;
   readonly serverToolExecution?: ServerToolBrokerOptions;

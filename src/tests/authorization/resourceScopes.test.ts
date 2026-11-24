@@ -19,6 +19,30 @@ afterEach(() => {
 });
 
 describe("resource operation authority", () => {
+  it("retains capacity and denies late admission when a durable write is cancelled", async () => {
+    const release = Promise.withResolvers<undefined>();
+    let retained: (() => boolean) | undefined;
+    let writes = 0;
+    const f = fixture({ maxPending: 1, commitDurable: async (_payload, _request, admit) => {
+      retained = admit;
+      await release.promise;
+      if (!admit()) return false;
+      writes++;
+      return true;
+    } });
+    const ticket = required(await f.resources.authorize(f.request()).ticket);
+    expect(f.resources.commit(ticket, f.admission)).toBe(false);
+    const pending = f.resources.commitDurable(ticket, f.admission);
+    expect(retained).toBeDefined();
+    f.resources.cancel(ticket);
+    expect(f.resources.stats().active).toBe(1);
+    expect(await f.resources.authorize(f.request()).ticket).toBeUndefined();
+    release.resolve(undefined);
+    expect(await pending).toBe(false);
+    expect(writes).toBe(0);
+    expect(retained?.()).toBe(false);
+    expect(f.resources.stats().active).toBe(0);
+  });
   it.each([["terminal", "input"], ["terminal", "terminate"], ["workspace", "write"], ["chat", "mutate"]])("R01 %s read cannot authorize %s", async (targetKind, operation) => {
     const f = fixture({ targetKind });
     const read = await f.resources.authorize(f.request()).ticket;

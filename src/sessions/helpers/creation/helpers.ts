@@ -96,6 +96,7 @@ export const captureCreationPolicy = (policy: SessionTypePolicyRegistration): Se
     ...(policy.creatorBootstrap === undefined ? {} : { creatorBootstrap: policy.creatorBootstrap }),
   }));
   return freezeCreation({ rules: data.rules, ...(data.creatorBootstrap === undefined ? {} : { creatorBootstrap: data.creatorBootstrap }),
+    ...(policy.restoration === undefined ? {} : { restoration: { prepare: policy.restoration.prepare.bind(policy.restoration) } }),
     creation: { capability: data.capability, prepare: policy.creation.prepare.bind(policy.creation) },
   });
 };
@@ -156,6 +157,9 @@ export const validateCreationRegistrations = (security: CapturedCreationSecurity
 interface PreparedRecord { readonly record: SessionRecord; readonly config: Readonly<Record<string, unknown>>; readonly workingDirectories: readonly string[] }
 interface CreationHooks {
   prepare(params: unknown): PreparedRecord;
+  reserve?(prepared: PreparedRecord, registration: ResourceRegistration, admission: () => boolean): Promise<void>;
+  retire?(record: SessionRecord, withdraw: () => void, admission: () => boolean): Promise<void>;
+  attachmentFailed?(record: SessionRecord): Promise<void>;
   publish(record: SessionRecord): void;
   start(prepared: PreparedRecord, beforeFailure: () => void): Promise<void>;
   changed(): void;
@@ -236,23 +240,32 @@ export const createSessionAuthorization = (dependencies: SessionsDependencies, s
     },
     getResource: (uri: string) => ownedResource(dependencies.sessions.get(uri)),
     isSettling: (uri: string) => settling.has(uri),
-    disposeSession: async (input: SessionCreationFacts["candidate"]): Promise<boolean> => {
+    disposeSession: async (input: SessionCreationFacts["candidate"], admission = () => true): Promise<boolean> => {
       const expected = freezeCreation(resourceRefSchema.parse(input));
+      if (!live(admission)) unavailable();
       const reservation = pending.get(expected.id);
       if (reservation !== undefined && sameResource(reservation.ref, expected)) {
         reservation.cancel();
         return true;
       }
       const record = dependencies.sessions.get(expected.id);
-      if (record?.resource === undefined || !sameResource(record.resource, expected)) return false;
+      if (record?.resource === undefined || !sameResource(record.resource, expected) || settling.has(expected.id)) return false;
       if (settling.size >= security.settling) unavailable();
       const marker = { ref: record.resource, token: {} };
       settling.set(expected.id, marker);
       try {
-        dependencies.sessions.delete(expected.id);
-        teardown(record);
-        dependencies.emitCatalogueNotification({ method: "root/sessionRemoved", params: { channel: "ahp-root://", session: expected.id } });
-        hooks.changed();
+        const hide = (): void => {
+          if (dependencies.sessions.get(expected.id) !== record) return;
+          dependencies.sessions.delete(expected.id);
+          teardown(record);
+          dependencies.emitCatalogueNotification({ method: "root/sessionRemoved", params: { channel: "ahp-root://", session: expected.id } });
+          hooks.changed();
+        };
+        if (hooks.retire !== undefined) {
+          await hooks.retire(record, hide, admission);
+          return true;
+        }
+        hide();
         if (record.backend !== undefined) {
           try {
             await record.backend.dispose();
@@ -371,6 +384,14 @@ export const createSessionAuthorization = (dependencies: SessionsDependencies, s
           if (wasCancelled() || controller.signal.aborted || callerAborted() || epoch !== attemptEpoch || hooks.isStopping() || pending.get(ref.id) !== reservation
             || settling.has(ref.id) || dependencies.sessions.has(ref.id) || attachmentTime >= Math.min(deadline, approval.validUntil)
             || bindings.some((item) => attachmentTime >= Date.parse(item.expiresAt ?? "")) || security.registry.owner(ref) !== undefined) unavailable();
+          if (hooks.reserve !== undefined) {
+            const current = (): boolean => live(check) && live(approvalCurrent) && !wasCancelled() && !controller.signal.aborted && !callerAborted()
+              && epoch === attemptEpoch && !hooks.isStopping() && pending.get(ref.id) === reservation && !settling.has(ref.id)
+              && !dependencies.sessions.has(ref.id) && now() < Math.min(deadline, approval.validUntil)
+              && bindings.every((item) => now() < Date.parse(item.expiresAt ?? "")) && security.registry.owner(ref) === undefined;
+            await hooks.reserve({ ...prepared, record }, registration, current);
+            if (!current()) unavailable();
+          }
           dependencies.sessions.add(record);
           if (dependencies.sessions.get(ref.id) !== record) unavailable();
           security.registry.installResource(registration, resourceInstallation);
@@ -393,6 +414,7 @@ export const createSessionAuthorization = (dependencies: SessionsDependencies, s
               security.registry.teardownInstalledResource(resourceInstallation);
             } catch { /* Preserve primary error. */ }
           }
+          await hooks.attachmentFailed?.(record);
           throw error;
         }
         committed = true;
@@ -413,7 +435,30 @@ export const createSessionAuthorization = (dependencies: SessionsDependencies, s
       }
     },
   });
-  return { authorization, teardown, cancelAll: (): void => {
+  const restore = (record: SessionRecord, owner: string, bindings: readonly ScopedPolicyBinding[], current: () => boolean): void => {
+    const ref = record.resource;
+    const type = record.application;
+    if (!ref || !type || bindings.length > security.bindings || !current() || dependencies.sessions.has(ref.id)) unavailable();
+    const registration: ResourceRegistration = { resource: ref, owner: { domainId: ref.domainId, subject: owner }, route: { origin: ref, targets: [ref] },
+      externalAuthority: "none", admission: { sessionType: { key: type.key, version: type.version }, providerId: record.provider.providerId } };
+    const token = security.registry.prepareResourceInstallation(registration);
+    const installs = bindings.map((grant) => {
+      if (!sameResource(grant.scope, ref)) unavailable();
+      return { grant, token: security.registry.prepareBindingInstallation(grant, token) };
+    });
+    try {
+      if (!current()) unavailable();
+      security.registry.installResource(registration, token);
+      for (const entry of installs) security.registry.installBinding(entry.grant, entry.token);
+      if (!current()) unavailable();
+      receipts.set(record, { ref, resource: token, bootstrap: installs.map((i) => i.token) });
+      dependencies.sessions.add(record);
+    } catch (error) {
+      security.registry.teardownInstalledResource(token);
+      throw error;
+    }
+  };
+  return { authorization, restore, teardown, cancelAll: (): void => {
     epoch += 1;
     for (const item of pending.values()) item.cancel();
   } };

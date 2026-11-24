@@ -371,13 +371,24 @@ export const createWorkService = (options: WorkServiceOptions): WorkService => {
       }
     },
 
-    async get(principal, workId) {
+    async get(principal, workId, domainId, guardDelivery) {
       requireUuid(workId, "Work ID");
       try {
         const item = await options.repository.get({
+          ...(domainId === undefined ? {} : { domainId }),
           workId,
           principalSubject: principal.subject,
         });
+        if (item && (options.currentInstance || item.sessionInstanceId !== undefined)) {
+          const { sessionUri, sessionInstanceId } = item;
+          const { subject } = principal;
+          if (domainId === undefined || sessionInstanceId === undefined) return null;
+          const current = () => options.currentInstance?.(sessionUri, sessionInstanceId, subject, domainId) === true;
+          if (!current()) return null;
+          guardDelivery?.(current);
+        } else if (item && options.legacyReadCurrent) {
+          guardDelivery?.(options.legacyReadCurrent);
+        }
         return toView(item);
       } catch (error) {
         return mapRepositoryFailure(error);

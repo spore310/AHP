@@ -46,6 +46,13 @@ export const SESSION_LIFECYCLE_CREATING: SessionState["lifecycle"] = "creating" 
 /** `SessionStatus.Idle` — set while no turn is active. */
 export const SESSION_STATUS_IDLE: SessionState["status"] = 1;
 
+export const SESSION_STATUS_READ = 32;
+export const SESSION_STATUS_ARCHIVED = 64;
+
+/** Restore only stable flags under the pinned native idle activity state. */
+export const idleSessionStatus = (isRead: boolean, isArchived: boolean): SessionState["status"] =>
+  SESSION_STATUS_IDLE | (isRead ? SESSION_STATUS_READ : 0) | (isArchived ? SESSION_STATUS_ARCHIVED : 0);
+
 /** `ActionType.SessionReady` — backend initialised successfully. */
 export const ACTION_TYPE_SESSION_READY = "session/ready" as ActionType.SessionReady;
 /** Native metadata replacement, projected by protected resource views. */

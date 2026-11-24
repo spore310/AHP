@@ -5,7 +5,11 @@ It is a POC coordination model: the AHP host stores identity and work state, but
 never runs a model, agent process, or filesystem executor. Workers run
 independently and execute work in their own environment.
 
-## End-to-end sequence
+## Work service sequence
+
+The diagram describes the in-process work service. Through P2 the WebSocket
+binding exposes agent registration, presence renewal, unregistration and work
+reads. Clients receive `MethodNotFound` for work mutations.
 
 ```mermaid
 sequenceDiagram
@@ -164,7 +168,7 @@ to verify a local adapter against the real database.
 ## Current status and evidence
 
 **Implemented in code:** authentication boundary, registration/presence,
-versioned `x-ahp/agents/*` and `x-ahp/work/*` methods, bounded work service,
+versioned `x-ahp/agents/*` and `x-ahp/work/get` methods, bounded work service,
 database-neutral persistence contracts/facades, the PostgreSQL adapter,
 migrations, and unit/protocol tests.
 

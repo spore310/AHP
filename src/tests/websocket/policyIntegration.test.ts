@@ -424,7 +424,7 @@ it("X01/X02/X03 one harness preserves distinct senior, junior and PM user/agent 
     expect(JSON.stringify(native), subject + " native snapshot contains no private descriptor").not.toMatch(/P12-SCHEMA|P12-DESCRIPTOR/);
     const events = peer.client.client.events(), next = events.next();
     const title = "P12-NATIVE-" + subject;
-    const envelope = f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title } });
+    const envelope = await f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title } });
     const delivered = await next;
     await events.return?.();
     expect(delivered.done).toBe(false);

@@ -717,6 +717,7 @@ describe("AHP snapshot reply barrier", () => {
     const inner = createSessionsFactory({ providers: [mockProvider] });
     const channel = `${SESSION_URI_PREFIX}t19-barrier`;
     let injected = false;
+    let pending: ReturnType<SessionsFactory["dispatchAction"]> | undefined;
     const factory: SessionsFactory = {
       createSession: (params) => inner.createSession(params),
       getSessionToolManifest: (sessionUri) => inner.getSessionToolManifest(sessionUri),
@@ -724,7 +725,7 @@ describe("AHP snapshot reply barrier", () => {
         const snapshot = inner.getSessionSnapshot(sessionUri);
         if (!injected && sessionUri === channel && snapshot !== undefined) {
           injected = true;
-          inner.dispatchAction({
+          pending = inner.dispatchAction({
             channel,
             clientSeq: 1,
             action: { type: "session/titleChanged", title: "After snapshot" },
@@ -769,6 +770,7 @@ describe("AHP snapshot reply barrier", () => {
       params: { channel },
     });
     const reply = await frames.waitFor(responseWithId(2));
+    await pending;
     expect(reply).toMatchObject({
       id: 2,
       result: {

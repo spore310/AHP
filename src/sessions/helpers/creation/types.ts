@@ -12,6 +12,10 @@ export interface CreatorBindingTemplate {
 }
 export interface CreatorBootstrapTemplate { readonly id: string; readonly revision: number; readonly bindings: readonly CreatorBindingTemplate[] }
 export interface SessionTypePolicyRegistration {
+  readonly restoration?: {
+    prepare(input: { readonly session: import("@persistence/helpers/durability/types").StoredSession; readonly signal: AbortSignal }):
+    Promise<{ readonly bindings: readonly import("@authorization").ScopedPolicyBinding[]; isCurrent(): boolean } | undefined>;
+  };
   readonly rules: PolicyScopeRules;
   readonly creatorBootstrap?: CreatorBootstrapTemplate;
   readonly creation: {
@@ -71,6 +75,6 @@ export interface SessionFactoryAuthorization {
   isReady(expected: ResourceRef<"session">): boolean;
   createSession(params: unknown, caller: SessionCreationContext): Promise<void>;
   getResource(sessionUri: string): ResourceRef<"session"> | undefined;
-  disposeSession(expected: ResourceRef<"session">): Promise<boolean>;
+  disposeSession(expected: ResourceRef<"session">, admission?: () => boolean): Promise<boolean>;
   isSettling(sessionUri: string): boolean;
 }

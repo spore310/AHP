@@ -80,10 +80,10 @@ describe("P09 guarded client wire admission", () => {
     if (factory === undefined || context === undefined) throw new Error("Missing actual binding inputs");
     const before = f.host.sessions.getSessionSnapshot(channel);
     const dispatch = factory.dispatchAction.bind(factory);
-    vi.spyOn(factory, "dispatchAction").mockImplementation((params) => {
+    vi.spyOn(factory, "dispatchAction").mockImplementation(async (params) => {
       inVeto = true;
       try {
-        return dispatch(params);
+        return await dispatch(params);
       } finally {
         inVeto = false;
       }
@@ -210,7 +210,7 @@ describe("P09 guarded client wire admission", () => {
     const executor = await f.connect("fixture", "executor");
     const execute = vi.fn(() => ({ value: "stale-canonical-row" }));
     await executor.client.joinSession(channel, [{ definition: contract, execute }]);
-    f.host.sessions.dispatchAction({ channel, clientId: "executor", clientSeq: 99,
+    await f.host.sessions.dispatchAction({ channel, clientId: "executor", clientSeq: 99,
       action: { type: "session/activeClientSet", activeClient: { clientId: "executor", tools: [] } } });
     await expect(caller.client.callTool(channel, contract, { path: "removed" })).rejects.toThrow();
     expect(execute).not.toHaveBeenCalled();
@@ -221,16 +221,18 @@ describe("P09 guarded client wire admission", () => {
     const caller = await f.connect("fixture", "caller");
     const executor = await f.connect("fixture", "executor");
     const execute = vi.fn(() => ({ value: "stale-activation" }));
-    let replaced = false;
+    let replacement: ReturnType<SessionsFactory["dispatchAction"]> | undefined;
+    let replacementStarted = false;
     const unsubscribe = f.host.sessions.onSessionEnvelope((envelope) => {
-      if (replaced || envelope.channel !== channel) return;
-      replaced = true;
-      f.host.sessions.dispatchAction({ channel, clientId: "executor", clientSeq: 99,
+      if (replacementStarted || envelope.channel !== channel) return;
+      replacementStarted = true;
+      replacement = f.host.sessions.dispatchAction({ channel, clientId: "executor", clientSeq: 99,
         action: { type: "session/activeClientSet", activeClient: { clientId: "executor", tools: [] } } });
     });
     await executor.client.joinSession(channel, [{ definition: contract, execute }]);
     unsubscribe();
-    expect(replaced).toBe(true);
+    expect(replacement).toBeDefined();
+    await replacement;
     expect(f.host.sessions.getSessionSnapshot(channel)?.state.activeClients[0]?.tools).toEqual([]);
     await expect(caller.client.callTool(channel, contract, { path: "removed-during-fanout" })).rejects.toThrow();
     expect(execute).not.toHaveBeenCalled();
@@ -309,7 +311,7 @@ describe("P09 canonical reducer veto", () => {
     const factory = createSessionsFactory({ providers: [createMockProvider()] });
     await factory.createSession({ channel });
     const before = factory.getSessionSnapshot(channel);
-    const result = factory.dispatchAction({ channel, clientId: "owner", clientSeq: 1,
+    const result = await factory.dispatchAction({ channel, clientId: "owner", clientSeq: 1,
       action: { type: "session/activeClientSet", activeClient: { clientId: "owner", tools: [] } },
       admission: () => Promise.reject(new Error("private-veto-error")) as unknown as boolean });
     expect(result.rejectionReason).toBeDefined();
@@ -327,11 +329,13 @@ describe("P09 canonical reducer veto", () => {
       sequences.push(envelope.serverSeq);
     });
     const action = { type: "session/activeClientSet", activeClient: { clientId: "owner", tools: [] } };
-    const result = factory.dispatchAction({ channel, clientId: "owner", clientSeq: 1, action,
+    let nestedCommit: ReturnType<SessionsFactory["dispatchAction"]> | undefined;
+    const result = await factory.dispatchAction({ channel, clientId: "owner", clientSeq: 1, action,
       admission: () => {
-        factory.dispatchAction({ channel: other, clientId: "owner", clientSeq: 1, action });
+        nestedCommit = factory.dispatchAction({ channel: other, clientId: "owner", clientSeq: 1, action });
         return true;
       } });
+    await nestedCommit;
     expect(result.rejectionReason).toBeDefined();
     expect(sequences).toHaveLength(1);
     expect(factory.getSessionSnapshot(channel)).toEqual(before);
@@ -345,14 +349,16 @@ describe("P09 canonical reducer veto", () => {
     factory.onSessionEnvelope((envelope) => {
       sequences.push(envelope.serverSeq);
     });
+    let nestedCommit: ReturnType<SessionsFactory["dispatchAction"]> | undefined;
     const nested = { channel, clientId: "owner", clientSeq: 2,
       action: { type: "session/activeClientSet", activeClient: { clientId: "nested", tools: [] } } };
-    const result = factory.dispatchAction({ channel, clientId: "owner", clientSeq: 1,
+    const result = await factory.dispatchAction({ channel, clientId: "owner", clientSeq: 1,
       action: { type: "session/activeClientSet", activeClient: { clientId: "outer", tools: [] } },
       admission: () => {
-        factory.dispatchAction(nested);
+        nestedCommit = factory.dispatchAction(nested);
         return true;
       } });
+    await nestedCommit;
     expect(result.rejectionReason).toBeDefined();
     expect(sequences).toHaveLength(1);
     expect(result.serverSeq).toBeGreaterThan(sequences[0] ?? 0);
@@ -364,7 +370,7 @@ describe("P09 canonical reducer veto", () => {
       const factory = createSessionsFactory({ providers: [createMockProvider()] });
       await factory.createSession({ channel });
       const before = factory.getSessionSnapshot(channel);
-      const result = factory.dispatchAction({ channel, clientId: "owner", clientSeq: 1,
+      const result = await factory.dispatchAction({ channel, clientId: "owner", clientSeq: 1,
         action: { type: "session/activeClientSet", activeClient: { clientId: "owner", tools: [] } }, admission: () => value as boolean });
       expect(result.rejectionReason).toBeDefined();
       expect(factory.getSessionSnapshot(channel)).toEqual(before);
@@ -393,7 +399,7 @@ describe("P09 canonical reducer veto", () => {
         } } });
       await factory.createSession({ channel });
       armed = true;
-      const result = factory.dispatchAction({ channel, clientId: "owner", clientSeq: 1,
+      const result = await factory.dispatchAction({ channel, clientId: "owner", clientSeq: 1,
         action: { type: "session/activeClientSet", activeClient: { clientId: "owner", tools: [] } }, admission: () => {
           if (hook === "veto") remove();
           return true;

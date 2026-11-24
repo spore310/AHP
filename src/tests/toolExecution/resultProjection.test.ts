@@ -22,9 +22,9 @@ async function fixture(options: { ttl?: number; resourceTimeout?: number; dispat
   await sessions.createSession({ channel: "ahp-session:/first", provider: "mock" });
   const envelopes: unknown[] = [];
   sessions.onSessionEnvelope((envelope) => envelopes.push(envelope));
-  const f = resourceFixture({ targetKind: "session", ttl: options.ttl, timeoutMs: options.resourceTimeout, commit: (payload, context, admission) => {
+  const f = resourceFixture({ targetKind: "session", ttl: options.ttl, timeoutMs: options.resourceTimeout, commitDurable: async (payload, context, admission) => {
     if (typeof payload !== "object" || payload === null || !("value" in payload) || typeof payload.value !== "string") return false;
-    const result = sessions.dispatchAction({ channel: context.target.id, clientId: context.actor.connectionId, clientSeq: 1,
+    const result = await sessions.dispatchAction({ channel: context.target.id, clientId: context.actor.connectionId, clientSeq: 1,
       action: { type: "session/titleChanged", title: payload.value }, admission });
     return result.rejectionReason === undefined;
   } });

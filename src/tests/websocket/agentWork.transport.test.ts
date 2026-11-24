@@ -17,7 +17,6 @@ import {
   createTestClock,
   createWorkFixture,
   SESSION_URI,
-  WORK_ID,
   WORK_KIND,
 } from "../agents/fixtures";
 import { FrameLog, responseWithId } from "./helpers";
@@ -205,8 +204,8 @@ describe("authenticated agent/work transport", () => {
         input: { path: "experiment.txt" },
       },
     );
-    expect(submission.result).toEqual({ version: 1, workId: WORK_ID });
-    expect(work.submitted[0]?.principal).toEqual({ subject: "bob" });
+    expect(submission.error).toMatchObject({ code: -32601 });
+    expect(work.submitted).toHaveLength(0);
     expect(registrations.records.size).toBe(2);
 
     const anonymous = await connect(url);
@@ -223,7 +222,7 @@ describe("authenticated agent/work transport", () => {
       message: "Connection not initialized",
     });
     expect(registrations.records.size).toBe(2);
-    expect(work.calls).toEqual(["submit"]);
+    expect(work.calls).toEqual([]);
   });
 
   it("buffers frames while an asynchronous authenticator is pending", async () => {

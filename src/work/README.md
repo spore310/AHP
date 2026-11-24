@@ -5,6 +5,9 @@ validation, presence revalidation, and lease lifecycle delegation. This module
 contains no SQL and no WebSocket types. It coordinates the frozen persistence
 ports and the live agent directory.
 
+Remote access through P2 is limited to `x-ahp/work/get`. Work mutation methods
+described below are in-process service calls.
+
 ## Files
 
 | File | Responsibility |
@@ -31,8 +34,10 @@ ports and the live agent directory.
 - `fail(agent, workId, token, reason)` — bounded reason; returns the repository's
   `queued`/`failed` decision.
 - `cancel(principal, workId)` — terminalizes authorized queued or leased work.
-- `get(principal, workId)` — returns a view without `leaseToken` or
-  `leaseAgentId`.
+- `get(principal, workId, domainId?)` returns an authorized view with the lease
+  token and holder omitted. Durable reads require the trusted domain and a
+  current, ready session incarnation owned by the principal. An unavailable or
+  mismatched instance returns `null`.
 - `assertSessionDisposable(sessionUri)` checks the URI against the portable-text
   profile before repository access. It rejects disposal while any work row
   references that session.
@@ -68,10 +73,6 @@ registration fails closed.
 
 - Session URI and request key are non-empty and satisfy the portable-text
   profile; the session URI is capped at 2,048 chars and the request key at 256.
-  The wire schema shares
-  the same request-key cap through the exported
-  `WORK_MAX_REQUEST_KEY_LENGTH`, so a service-length key is never rejected for
-  wire reasons and an over-long key never reaches the service.
 - Kind must be in the configured allowed set and at most 128 chars.
 - Input/result must be JSON objects nesting at most 512 levels — the
   portable-text tree depth budget in `@persistence` — and default size limits
@@ -81,7 +82,7 @@ registration fails closed.
   an application interoperability rule, not a universal JSON requirement. The
   agents directory applies it to `agentKey` and `displayName` before
   registration.
-- Failure messages are 1–2,000 chars; the wire adapter further caps them. The
+- Failure messages are 1–2,000 chars. The
   message is validated and then dropped: the frozen v1 reply contract is
   `{ status }` and no failure-message column exists, so the reason lives only in
   the worker's own logs.
@@ -92,8 +93,8 @@ registration fails closed.
 | Test | Pins |
 | ---- | ---- |
 | [`src/tests/work/workService.test.ts`](../tests/work/workService.test.ts) | Owned-session submission, cross-principal and target-agent denial, bounded validation (including portable-text rejection, terminal-key replays, and a dispose channel refused outside the text profile), a durable projection rejected at the 512-level depth budget before repository access, missing/expired/mismatched presence, disabled registration, fenced renew/complete, stale completion, view redaction, and dependent-work disposal rejection. |
-| [`src/tests/websocket/agentWork.test.ts`](../tests/websocket/agentWork.test.ts) | Versioned wire mapping and sanitized protocol errors for the service; a service-length request key accepted at the wire with a longer one rejected before the service; payloads past the depth budget rejected before the service runs. |
-| [`src/tests/websocket/agentWork.integration.test.ts`](../tests/websocket/agentWork.integration.test.ts) | Composed authenticated A/B flow: A submits, B registers/claims/renews/completes, A gets the result; owner and secret checks. |
+| [`src/tests/websocket/agentWork.test.ts`](../tests/websocket/agentWork.test.ts) | Versioned reads, presence operations, strict request validation and closed work mutations. |
+| [`src/tests/websocket/agentWork.integration.test.ts`](../tests/websocket/agentWork.integration.test.ts) | Internal kernel host composition rejects owner and worker mutations, preserves authorized reads, and redacts lease secrets. |
 | [`src/tests/websocket/agentWork.disposal.test.ts`](../tests/websocket/agentWork.disposal.test.ts) | Backed-disposal races over the real binding: fail-closed recreates inside the settling window (owner and cross-principal), binding release exactly at settlement, post-settle rebind to the true creator, and stale detached starts answering conflict while binding nothing. |
 
 ## Caveats

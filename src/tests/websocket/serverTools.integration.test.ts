@@ -366,7 +366,7 @@ it("E04/E05 shared host identity preserves senior/junior scopes and native snaps
   expect((await observer.assigned()).tools).toEqual([]);
   const before = (await observer.client.client.subscribe(channel)).result.snapshot?.state as SessionState;
   const title = "public native sequence control";
-  const envelope = f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title } });
+  const envelope = await f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title } });
   await observer.client.client.ping();
   const action = observer.received.find((frame) => typeof frame === "object" && frame !== null && "method" in frame && frame.method === "action" && JSON.stringify(frame).includes(title));
   if (typeof action !== "object" || action === null || !("params" in action)) throw new Error("Missing native action");
@@ -437,7 +437,7 @@ it("E05 initial snapshot revocation drops buffered host-session content and desc
     await Promise.race([entered.promise, frames.waitFor(responseWithId(1), 2000).then((frame) => {
       throw new Error("Initialization completed before permission barrier: " + JSON.stringify(frame));
     })]);
-    f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "P15-BUFFERED-PRIVATE-CANARY" } });
+    await f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title: "P15-BUFFERED-PRIVATE-CANARY" } });
     expect(f.registry.removeBinding({ bindingId: "fixture-grant-" + f.caller, scope: required(f.host.sessions.authorization?.getResource(channel)), revision: 1 })).toBe(true);
     waiting = false;
     release.resolve("allow");

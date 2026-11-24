@@ -14,7 +14,7 @@ const nodeLanguageOptions = {
 };
 
 export default tseslint.config(
-  { ignores: ["dist/**", "coverage/**", "node_modules/**"] },
+  { ignores: [".temp/**", "dist/**", "coverage/**", "node_modules/**"] },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked.map((config) => ({ ...config, files: tsFiles })),
   stylistic.configs.customize({

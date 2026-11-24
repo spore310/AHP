@@ -492,7 +492,7 @@ describe("P04 public initialization boundary", () => {
       const client = await connect(host, `${subject}-token`);
       expect(await client.rpc("initialize", { ...initialize, clientId: "same-admin", kind: "user", role: "admin" })).toMatchObject({ result: { snapshots: [] } });
       expect(await client.rpc("x-ahp/work/get", { version: 1, workId: "11111111-1111-4111-8111-111111111111" })).toMatchObject({ result: { version: 1, work: null } });
-      expect(get).toHaveBeenLastCalledWith({ workId: "11111111-1111-4111-8111-111111111111", principalSubject: subject });
+      expect(get).toHaveBeenLastCalledWith({ workId: "11111111-1111-4111-8111-111111111111", principalSubject: subject, domainId: "domain" });
     }
     expect(authenticate).toHaveBeenCalledTimes(2);
     const bad = await connect(host, "bad-token");
@@ -670,7 +670,7 @@ describe("P05 real public create-only boundary", () => {
     expect(f.host.sessions.listSessionSnapshots()).toEqual([]);
   });
 
-  it("S01 canonical owner projection keeps junior work identity distinct from the creator", async () => {
+  it("S01 canonical owner and authorized participant both encounter the closed work mutation boundary", async () => {
     const f = publicCreationFixture();
     const alice = await connect(f.host, "ada-token");
     expect(await alice.rpc("initialize", initialize)).toMatchObject({ result: { snapshots: [] } });
@@ -685,10 +685,25 @@ describe("P05 real public create-only boundary", () => {
     const junior = await connect(f.host, "bob-token");
     expect(await junior.rpc("initialize", { ...initialize, clientId: "ada", role: "senior" })).toMatchObject({ result: { snapshots: [] } });
     const submit = vi.spyOn(f.memory.provider.work, "submit");
-    expect(await junior.rpc("x-ahp/work/submit", { version: 1, sessionUri: uri, requestKey: "bob-request", kind: "test.kind", input: {} })).toMatchObject({ error: { code: -32602 } });
+    expect(await junior.rpc("x-ahp/work/submit", { version: 1, sessionUri: uri, requestKey: "bob-request", kind: "test.kind", input: {} })).toMatchObject({ error: { code: -32601 } });
     expect(submit).not.toHaveBeenCalled();
-    expect(await alice.rpc("x-ahp/work/submit", { version: 1, sessionUri: uri, requestKey: "ada-request", kind: "test.kind", input: {} })).toMatchObject({ result: { version: 1 } });
-    expect(submit.mock.calls[0]?.[0].session.ownerPrincipalSubject).toBe("ada");
+    expect(await alice.rpc("x-ahp/work/submit", { version: 1, sessionUri: uri, requestKey: "ada-request", kind: "test.kind", input: {} })).toMatchObject({ error: { code: -32601 } });
+    expect(submit).not.toHaveBeenCalled();
+    expect(await alice.rpc("x-ahp/agents/register", { version: 1, agentKey: "owner-worker" })).toMatchObject({ result: { version: 1 } });
+    const workId = "11111111-1111-4111-8111-111111111111";
+    const lease = { workId, leaseToken: "22222222-2222-4222-8222-222222222222" };
+    const commands = [
+      ["claim", { sessionUri: uri }],
+      ["renew", lease],
+      ["complete", { ...lease, result: {} }],
+      ["fail", { ...lease, retryable: true, message: "transient" }],
+      ["cancel", { workId }],
+    ] as const;
+    for (const [method, params] of commands) {
+      const mutation = vi.spyOn(f.memory.provider.work, method);
+      expect(await alice.rpc(`x-ahp/work/${method}`, { version: 1, ...params })).toMatchObject({ error: { code: -32601 } });
+      expect(mutation).not.toHaveBeenCalled();
+    }
     expect(f.registry.owner(ref)?.subject).toBe("ada");
   });
 
@@ -799,7 +814,7 @@ describe("P05 real public create-only boundary", () => {
     if (ref === undefined) throw new Error("Missing other-domain resource");
     expect(f.registry.owner(ref)).toEqual({ domainId: "other", subject: "ada" });
     const submit = vi.spyOn(f.memory.provider.work, "submit");
-    expect(await client.rpc("x-ahp/work/submit", { version: 1, sessionUri: uri, requestKey: "domain-collision", kind: "test.kind", input: {} })).toMatchObject({ error: { code: -32602 } });
+    expect(await client.rpc("x-ahp/work/submit", { version: 1, sessionUri: uri, requestKey: "domain-collision", kind: "test.kind", input: {} })).toMatchObject({ error: { code: -32601 } });
     expect(submit).not.toHaveBeenCalled();
   });
 });

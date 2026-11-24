@@ -188,9 +188,11 @@ const initialize = async (
 });
 
 describe("authenticated AHP agent/work composition", () => {
-  it("runs an authenticated A/B submit, claim, renew, complete and get flow", async () => {
+  it("rejects every work mutation for an authenticated owner and registered worker", async () => {
     const registrations = createRegistrationFixture();
     const { repository, captures } = createWorkRepository();
+    const fail = vi.spyOn(repository, "fail");
+    const cancel = vi.spyOn(repository, "cancel");
     const host = createAHPServer({
       host: "127.0.0.1",
       port: 0,
@@ -228,46 +230,24 @@ describe("authenticated AHP agent/work composition", () => {
     expect(registration.error).toBeUndefined();
     const agentId = (registration.result as { readonly agentId: string }).agentId;
 
-    const submission = await rpc(alice.socket, alice.frames, "x-ahp/work/submit", {
-      version: 1,
-      sessionUri: SESSION_URI,
-      requestKey: "request-1",
-      kind: WORK_KIND,
-      input: { instruction: "review" },
-      targetAgentId: agentId,
-    });
-    expect(submission.result).toEqual({ version: 1, workId: WORK_ID });
-    expect(captures.submitted).toEqual([{ owner: "alice", kind: WORK_KIND }]);
-
-    const claim = await rpc(worker.socket, worker.frames, "x-ahp/work/claim", {
-      version: 1,
-      sessionUri: SESSION_URI,
-    });
-    expect(claim.result).toMatchObject({
-      version: 1,
-      work: { workId: WORK_ID, leaseToken: LEASE_TOKEN },
-    });
-    expect(captures.claimed).toEqual([{ agentId, principal: "alice" }]);
-
-    const renewal = await rpc(worker.socket, worker.frames, "x-ahp/work/renew", {
-      version: 1,
-      workId: WORK_ID,
-      leaseToken: LEASE_TOKEN,
-    });
-    expect(renewal.result).toEqual({
-      version: 1,
-      leaseExpiresAt: "2026-10-20T00:02:00.000Z",
-    });
-    expect(captures.renewed).toEqual([{ workId: WORK_ID, token: LEASE_TOKEN }]);
-
-    const completion = await rpc(worker.socket, worker.frames, "x-ahp/work/complete", {
-      version: 1,
-      workId: WORK_ID,
-      leaseToken: LEASE_TOKEN,
-      result: { ok: true },
-    });
-    expect(completion.result).toBeNull();
-    expect(captures.completed).toEqual([{ workId: WORK_ID, token: LEASE_TOKEN }]);
+    const lease = { workId: WORK_ID, leaseToken: LEASE_TOKEN };
+    const commands = [
+      ["submit", { sessionUri: SESSION_URI, requestKey: "request-1", kind: WORK_KIND, input: {}, targetAgentId: agentId }],
+      ["claim", { sessionUri: SESSION_URI }],
+      ["renew", lease],
+      ["complete", { ...lease, result: { ok: true } }],
+      ["fail", { ...lease, retryable: true, message: "transient failure" }],
+      ["cancel", { workId: WORK_ID }],
+      ["updateData", { workId: WORK_ID, expectedDataRevision: "0", data: {} }],
+    ] as const;
+    for (const [method, params] of commands) {
+      const caller = method === "submit" || method === "cancel" ? alice : worker;
+      const response = await rpc(caller.socket, caller.frames, `x-ahp/work/${method}`, { version: 1, ...params });
+      expect(response.error, method).toMatchObject({ code: -32601 });
+    }
+    expect(captures).toEqual({ submitted: [], claimed: [], renewed: [], completed: [] });
+    expect(fail).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
 
     const result = await rpc(alice.socket, alice.frames, "x-ahp/work/get", {
       version: 1,

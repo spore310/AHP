@@ -18,7 +18,6 @@ import {
   type JsonRpcParams,
 } from "@jsonrpc";
 import type { SessionsFactory } from "@sessions/types";
-import type { SessionOwnerRegistry } from "@work";
 import type {
   JsonRpcHandler,
   JsonRpcHandlers,
@@ -95,19 +94,12 @@ export interface AHPBinding {
   toolStats(): { readonly active: number; readonly draining: number; readonly retainedOutputBytes: number };
 }
 
-const NOOP_SESSION_OWNERS: SessionOwnerRegistry = {
-  bind: (): void => undefined,
-  owner: (): string | undefined => undefined,
-  unbind: (): void => undefined,
-  clear: (): void => undefined,
-};
-
 /** Internal canonical compatibility kernel; never exported by supported barrels. */
 export const createAHPKernel = (
   factory: SessionsFactory,
   reportDiagnostic: (diagnostic: AHPDiagnostic) => void = () => undefined,
   options?: AHPBindingOptions,
-): AHPBinding => {
+): AHPBinding & { initializedClientId(context: WebSocketConnectionContext): string | undefined } => {
   const peers = new Map<string, AHPPeer>();
   const adapters: ChannelAdapter[] = [];
   let disposed = false;
@@ -117,7 +109,6 @@ export const createAHPKernel = (
     : createAgentWorkExtension({
         agents: options.agents,
         work: options.work,
-        sessionOwners: options.ownerLookup ?? options.sessionOwners ?? NOOP_SESSION_OWNERS,
       });
 
   const registerAdapter = (adapter: ChannelAdapter): void => {
@@ -499,7 +490,7 @@ export const createAHPKernel = (
       }
       const advertisement = await toolInvocations.prepareAdvertisement(peer, parsed.channel, parsed.action);
       try {
-        const envelope = factory.dispatchAction({
+        const envelope = await factory.dispatchAction({
           channel: parsed.channel,
           clientSeq: parsed.clientSeq,
           action: parsed.action,
@@ -600,6 +591,10 @@ export const createAHPKernel = (
 
   return {
     handlers,
+    initializedClientId(context) {
+      const peer = peers.get(context.connectionId);
+      return peer?.phase === "ready" && peer.context === context ? peer.clientId : undefined;
+    },
     drainTools: toolInvocations.drain,
     toolStats: toolInvocations.stats,
     isToolCompletion: (params: unknown, context: WebSocketConnectionContext): boolean => (

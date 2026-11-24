@@ -51,3 +51,4 @@ export type {
   SessionRemovedCatalogueNotification,
   SessionSummaryChangedCatalogueNotification,
 } from "./types";
+export type { RuntimeResourceDriver, RuntimeResourceContext, RuntimeResourceHandle, SessionResourceLifecycle } from "./helpers/resources/types";

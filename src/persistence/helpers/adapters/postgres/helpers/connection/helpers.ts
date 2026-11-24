@@ -5,23 +5,19 @@ import { RepositoryError } from "@persistence/types";
 import type { PoolClientLike, PoolLike } from "./types";
 import type { PostgresOptions } from "../../types";
 
-/**
- * PostgreSQL connection, transaction, timestamp and error mechanics.
- *
- * Mechanics moved here from the legacy neutral `helpers/pool.ts` (P03). The
- * legacy module remains unchanged until its caller repositories move (P08
- * deletes it, together with every remaining neutral `pg` import). Semantics
- * are preserved byte-for-byte: pool default `max: 10`, one `BEGIN` /
- * operation / `COMMIT` sequence on the single acquired client, a best-effort
- * `ROLLBACK` that never masks the primary failure, and unconditional client
- * release after acquisition.
- */
-
-export const createPostgresPool = (options: PostgresOptions): Pool =>
-  new Pool({
+/** A queued checkout or a blocked transaction must eventually release host shutdown and takeover. */
+export const createPostgresPool = (options: PostgresOptions): Pool => {
+  const pool = new Pool({
     connectionString: options.connectionString,
     max: options.maxConnections ?? 10,
+    connectionTimeoutMillis: 5_000,
+    statement_timeout: 30_000,
+    idle_in_transaction_session_timeout: 30_000,
   });
+  // pg-pool evicts a failed idle client before reporting it outside any query promise.
+  pool.on("error", () => undefined);
+  return pool;
+};
 
 /**
  * Runs the operation inside one transaction on **one acquired client**. A

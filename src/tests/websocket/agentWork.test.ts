@@ -3,8 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ZodError } from "zod";
 
 import { createAgentDirectory } from "@agents";
-import { RpcError, type JsonRpcParams } from "@jsonrpc";
-import { WORK_MAX_REQUEST_KEY_LENGTH, WorkError } from "@work";
+import type { JsonRpcParams } from "@jsonrpc";
 import { createAgentWorkExtension, type AgentWorkExtension } from "@websocket/helpers/ahp/agentWork";
 import {
   AGENT_REGISTER_METHOD,
@@ -13,26 +12,17 @@ import {
   AGENT_WORK_REQUEST_METHODS,
   AHP_NOTIFICATION_METHODS,
   AHP_REQUEST_METHODS,
-  WORK_CANCEL_METHOD,
-  WORK_CLAIM_METHOD,
-  WORK_COMPLETE_METHOD,
-  WORK_FAIL_METHOD,
   WORK_GET_METHOD,
-  WORK_RENEW_METHOD,
-  WORK_SUBMIT_METHOD,
 } from "@websocket/helpers/ahp/constants";
 import type { JsonRpcInvocation, WebSocketConnectionContext } from "@websocket";
 
 import {
   createRegistrationFixture,
-  createSessionOwnersFixture,
   createTestClock,
   createWorkFixture,
-  LEASE_TOKEN,
   SESSION_URI,
   WORK_ID,
   WORK_KIND,
-  type WorkFixtureOptions,
 } from "../agents/fixtures";
 
 const invocation: JsonRpcInvocation = {
@@ -67,7 +57,6 @@ const invoke = (
 interface SetupOptions {
   readonly omitAgents?: boolean;
   readonly omitWork?: boolean;
-  readonly workOptions?: WorkFixtureOptions;
 }
 
 const setup = (options: SetupOptions = {}) => {
@@ -78,14 +67,12 @@ const setup = (options: SetupOptions = {}) => {
     now: clock.now,
     presenceTtlMs: 90_000,
   });
-  const sessionOwners = createSessionOwnersFixture();
-  const work = createWorkFixture(options.workOptions);
+  const work = createWorkFixture();
   const extension = createAgentWorkExtension({
     ...(options.omitAgents === true ? {} : { agents }),
     ...(options.omitWork === true ? {} : { work: work.service }),
-    sessionOwners,
   });
-  return { clock, registrations, agents, sessionOwners, work, extension };
+  return { clock, registrations, agents, work, extension };
 };
 
 const registerAgent = async (
@@ -111,6 +98,15 @@ const registerAgent = async (
 };
 
 describe("agent work extension request surface", () => {
+  it("omits remote work mutations even when the service is configured", () => {
+    const { extension } = setup();
+    for (const method of ["submit", "claim", "renew", "complete", "fail", "cancel", "updateData"]) {
+      const name = `x-ahp/work/${method}`;
+      expect(extension.handlers[name], name).toBeUndefined();
+      expect(AHP_REQUEST_METHODS.has(name), name).toBe(false);
+    }
+  });
+
   it("declares every extension method request-only", () => {
     for (const method of AGENT_WORK_REQUEST_METHODS) {
       expect(AHP_REQUEST_METHODS.has(method)).toBe(true);
@@ -155,12 +151,6 @@ describe("agent work extension request surface", () => {
       AGENT_REGISTER_METHOD,
       AGENT_RENEW_METHOD,
       AGENT_UNREGISTER_METHOD,
-      WORK_SUBMIT_METHOD,
-      WORK_CLAIM_METHOD,
-      WORK_RENEW_METHOD,
-      WORK_COMPLETE_METHOD,
-      WORK_FAIL_METHOD,
-      WORK_CANCEL_METHOD,
       WORK_GET_METHOD,
     ];
 
@@ -172,24 +162,6 @@ describe("agent work extension request surface", () => {
       });
     }
     expect(registrations.registerCalls).toHaveLength(0);
-    expect(work.calls).toHaveLength(0);
-  });
-
-  it("requires a live registered agent for agent-scoped work", async () => {
-    const { work, extension } = setup();
-    const alice = contextFor("connection-1", "alice");
-
-    for (const method of [
-      WORK_CLAIM_METHOD,
-      WORK_RENEW_METHOD,
-      WORK_COMPLETE_METHOD,
-      WORK_FAIL_METHOD,
-    ]) {
-      await expect(invoke(extension, method, { version: 1 }, alice)).rejects.toMatchObject({
-        code: JsonRpcErrorCodes.InvalidParams,
-        message: "Request rejected",
-      });
-    }
     expect(work.calls).toHaveLength(0);
   });
 
@@ -208,14 +180,8 @@ describe("agent work extension request surface", () => {
     });
     await expect(invoke(
       extension,
-      WORK_SUBMIT_METHOD,
-      {
-        version: 1,
-        sessionUri: SESSION_URI,
-        requestKey: "request-1",
-        kind: WORK_KIND,
-        input: {},
-      },
+      WORK_GET_METHOD,
+      { version: 1, workId: WORK_ID },
       alice,
     )).rejects.toMatchObject({
       code: JsonRpcErrorCodes.InvalidRequest,
@@ -241,37 +207,14 @@ describe("agent work extension request surface", () => {
     )).rejects.toBeInstanceOf(ZodError);
     expect(registrations.registerCalls).toHaveLength(0);
 
-    await registerAgent(extension, alice);
-    await expect(invoke(
-      extension,
-      WORK_SUBMIT_METHOD,
-      {
-        version: 2,
-        sessionUri: SESSION_URI,
-        requestKey: "request-1",
-        kind: WORK_KIND,
-        input: {},
-      },
-      alice,
-    )).rejects.toBeInstanceOf(ZodError);
-    await expect(invoke(
-      extension,
-      WORK_SUBMIT_METHOD,
-      {
-        version: 1,
-        sessionUri: SESSION_URI,
-        requestKey: "request-1",
-        kind: WORK_KIND,
-        input: {},
-        extra: true,
-      },
-      alice,
-    )).rejects.toBeInstanceOf(ZodError);
+    for (const params of [{ version: 2, workId: WORK_ID }, { version: 1, workId: WORK_ID, extra: true }]) {
+      await expect(invoke(extension, WORK_GET_METHOD, params, alice)).rejects.toBeInstanceOf(ZodError);
+    }
     expect(work.calls).toHaveLength(0);
   });
 
-  it("rejects blank display names, unstorable scalar text, unsafe payloads, and non-object results", async () => {
-    const { registrations, work, extension } = setup();
+  it("rejects blank display names and unstorable agent keys", async () => {
+    const { registrations, extension } = setup();
     const alice = contextFor("connection-1", "alice");
 
     await expect(invoke(
@@ -289,47 +232,6 @@ describe("agent work extension request surface", () => {
       alice,
     )).rejects.toBeInstanceOf(ZodError);
     expect(registrations.registerCalls).toHaveLength(0);
-
-    await registerAgent(extension, alice);
-    await expect(invoke(
-      extension,
-      WORK_SUBMIT_METHOD,
-      {
-        version: 1,
-        sessionUri: SESSION_URI,
-        requestKey: "request-1",
-        kind: WORK_KIND,
-        input: { note: "a\u0000b" },
-      },
-      alice,
-    )).rejects.toBeInstanceOf(ZodError);
-    expect(work.calls).toHaveLength(0);
-
-    await expect(invoke(
-      extension,
-      WORK_SUBMIT_METHOD,
-      {
-        version: 1,
-        sessionUri: `${SESSION_URI}\u0000`,
-        requestKey: "request-1",
-        kind: WORK_KIND,
-        input: { instruction: "change" },
-      },
-      alice,
-    )).rejects.toBeInstanceOf(ZodError);
-    expect(work.calls).toHaveLength(0);
-
-    await expect(invoke(
-      extension,
-      WORK_COMPLETE_METHOD,
-      {
-        version: 1,
-        workId: WORK_ID,
-        leaseToken: LEASE_TOKEN,
-        result: "not-an-object",
-      },
-      alice,
-    )).rejects.toBeInstanceOf(ZodError);
   });
 
   it("does not create a durable registration row behind a connection conflict", async () => {
@@ -371,118 +273,9 @@ describe("agent work extension request surface", () => {
 });
 
 describe("agent work extension work replies", () => {
-  it("forwards principal-scoped work requests with exact reply shapes", async () => {
-    const { registrations, sessionOwners, work, extension } = setup();
+  it("forwards work reads with the verified principal and versioned reply", async () => {
+    const { work, extension } = setup();
     const alice = contextFor("connection-1", "alice");
-    const registered = await registerAgent(extension, alice);
-    sessionOwners.bind(SESSION_URI, "alice");
-
-    const targetAgentId = "00000000-0000-4000-8000-000000000201";
-    await expect(invoke(
-      extension,
-      WORK_SUBMIT_METHOD,
-      {
-        version: 1,
-        sessionUri: SESSION_URI,
-        requestKey: "request-1",
-        kind: WORK_KIND,
-        input: { path: "experiment.txt" },
-        targetAgentId,
-      },
-      alice,
-    )).resolves.toEqual({ version: 1, workId: WORK_ID });
-    expect(work.submitted[0]).toEqual({
-      principal: { subject: "alice" },
-      input: {
-        sessionUri: SESSION_URI,
-        requestKey: "request-1",
-        kind: WORK_KIND,
-        input: { path: "experiment.txt" },
-        targetAgentId,
-      },
-    });
-
-    const expectedAgent = {
-      principal: { subject: "alice" },
-      agentId: registered.agentId,
-      connectionId: "connection-1",
-      generation: 1,
-    };
-    await expect(invoke(
-      extension,
-      WORK_CLAIM_METHOD,
-      { version: 1, sessionUri: SESSION_URI },
-      alice,
-    )).resolves.toEqual({
-      version: 1,
-      work: {
-        workId: WORK_ID,
-        sessionUri: SESSION_URI,
-        kind: WORK_KIND,
-        input: { path: "experiment.txt" },
-        leaseToken: LEASE_TOKEN,
-        leaseExpiresAt: "2026-01-01T00:00:00.000Z",
-        attempt: 1,
-      },
-    });
-    expect(work.claimed[0]?.agent).toEqual(expectedAgent);
-
-    await expect(invoke(
-      extension,
-      WORK_RENEW_METHOD,
-      { version: 1, workId: WORK_ID, leaseToken: LEASE_TOKEN },
-      alice,
-    )).resolves.toEqual({
-      version: 1,
-      leaseExpiresAt: "2026-01-01T00:00:02.000Z",
-    });
-
-    await expect(invoke(
-      extension,
-      WORK_COMPLETE_METHOD,
-      {
-        version: 1,
-        workId: WORK_ID,
-        leaseToken: LEASE_TOKEN,
-        result: { ok: true },
-      },
-      alice,
-    )).resolves.toBeNull();
-    expect(work.completed[0]).toEqual({
-      agent: expectedAgent,
-      workId: WORK_ID,
-      token: LEASE_TOKEN,
-      result: { ok: true },
-    });
-
-    await expect(invoke(
-      extension,
-      WORK_FAIL_METHOD,
-      {
-        version: 1,
-        workId: WORK_ID,
-        leaseToken: LEASE_TOKEN,
-        retryable: true,
-        message: "transient failure",
-      },
-      alice,
-    )).resolves.toEqual({ version: 1, status: "queued" });
-    expect(work.failed[0]?.reason).toEqual({
-      retryable: true,
-      message: "transient failure",
-    });
-
-    await expect(invoke(
-      extension,
-      WORK_CANCEL_METHOD,
-      { version: 1, workId: WORK_ID },
-      alice,
-    )).resolves.toBeNull();
-    expect(work.cancelled[0]).toEqual({
-      principal: { subject: "alice" },
-      workId: WORK_ID,
-    });
-
     const view = {
       id: WORK_ID,
       sessionUri: SESSION_URI,
@@ -505,161 +298,5 @@ describe("agent work extension work replies", () => {
       principal: { subject: "alice" },
       workId: WORK_ID,
     });
-
-    expect(registrations.records.size).toBe(1);
-  });
-
-  it("returns a null claim when no work is available", async () => {
-    const { sessionOwners, extension } = setup({ workOptions: { lease: null } });
-    const alice = contextFor("connection-1", "alice");
-    await registerAgent(extension, alice);
-    sessionOwners.bind(SESSION_URI, "alice");
-
-    await expect(invoke(
-      extension,
-      WORK_CLAIM_METHOD,
-      { version: 1, sessionUri: SESSION_URI },
-      alice,
-    )).resolves.toEqual({ version: 1, work: null });
-  });
-
-  it("rejects work on a live session owned by a different principal", async () => {
-    const { sessionOwners, work, extension } = setup();
-    const alice = contextFor("connection-1", "alice");
-    await registerAgent(extension, alice);
-    sessionOwners.bind(SESSION_URI, "bob");
-
-    await expect(invoke(
-      extension,
-      WORK_SUBMIT_METHOD,
-      {
-        version: 1,
-        sessionUri: SESSION_URI,
-        requestKey: "request-1",
-        kind: WORK_KIND,
-        input: {},
-      },
-      alice,
-    )).rejects.toMatchObject({
-      code: JsonRpcErrorCodes.InvalidParams,
-      message: "Request rejected",
-    });
-    await expect(invoke(
-      extension,
-      WORK_CLAIM_METHOD,
-      { version: 1, sessionUri: SESSION_URI },
-      alice,
-    )).rejects.toMatchObject({
-      code: JsonRpcErrorCodes.InvalidParams,
-      message: "Request rejected",
-    });
-    expect(work.calls).toHaveLength(0);
-  });
-
-  it("maps stale and exhausted lease failures to an invalid request", async () => {
-    for (const code of ["stale", "exhausted"] as const) {
-      const { sessionOwners, extension } = setup({
-        workOptions: { claimError: new WorkError(code, "internal detail") },
-      });
-      const alice = contextFor("connection-1", "alice");
-      await registerAgent(extension, alice);
-      sessionOwners.bind(SESSION_URI, "alice");
-
-      await expect(invoke(
-        extension,
-        WORK_CLAIM_METHOD,
-        { version: 1, sessionUri: SESSION_URI },
-        alice,
-      )).rejects.toEqual(new RpcError(JsonRpcErrorCodes.InvalidRequest, "Request rejected"));
-    }
-  });
-
-  it("accepts a service-length request key and rejects longer ones at the wire", async () => {
-    const { sessionOwners, work, extension } = setup();
-    const alice = contextFor("connection-1", "alice");
-    await registerAgent(extension, alice);
-    sessionOwners.bind(SESSION_URI, "alice");
-
-    // The wire cap now mirrors the service cap exactly.
-    const maxKey = "k".repeat(WORK_MAX_REQUEST_KEY_LENGTH);
-    await invoke(extension, WORK_SUBMIT_METHOD, {
-      version: 1,
-      sessionUri: SESSION_URI,
-      requestKey: maxKey,
-      kind: WORK_KIND,
-      input: {},
-    }, alice);
-    expect(work.submitted[0]?.input.requestKey).toBe(maxKey);
-
-    await expect(invoke(extension, WORK_SUBMIT_METHOD, {
-      version: 1,
-      sessionUri: SESSION_URI,
-      requestKey: `${maxKey}!`,
-      kind: WORK_KIND,
-      input: {},
-    }, alice)).rejects.toBeInstanceOf(ZodError);
-    expect(work.submitted).toHaveLength(1);
-  });
-
-  it("rejects payloads nested beyond the portable-text depth budget before the service runs", async () => {
-    const { work, extension } = setup();
-    const alice = contextFor("connection-1", "alice");
-    await registerAgent(extension, alice);
-    let deep: Record<string, unknown> = { leaf: true };
-    for (let index = 0; index < 600; index += 1) {
-      deep = { a: deep };
-    }
-
-    await expect(invoke(extension, WORK_SUBMIT_METHOD, {
-      version: 1,
-      sessionUri: SESSION_URI,
-      requestKey: "deep-input",
-      kind: WORK_KIND,
-      input: deep,
-    }, alice)).rejects.toBeInstanceOf(ZodError);
-    expect(work.calls).toHaveLength(0);
-
-    await expect(invoke(extension, WORK_COMPLETE_METHOD, {
-      version: 1,
-      workId: WORK_ID,
-      leaseToken: LEASE_TOKEN,
-      result: deep,
-    }, alice)).rejects.toBeInstanceOf(ZodError);
-    expect(work.calls).toHaveLength(0);
-  });
-
-  it("pins the wire depth boundary at 512 levels accepted and 513 refused", async () => {
-    // The literal boundary pins the shared text helper's budget at the wire:
-    // these numbers and the READMEs' "512-level" wording must move together.
-    // The scalar seed makes the leaf land exactly at recursion depth `levels`.
-    const { sessionOwners, work, extension } = setup();
-    const alice = contextFor("connection-1", "alice");
-    await registerAgent(extension, alice);
-    sessionOwners.bind(SESSION_URI, "alice");
-    const ladder = (levels: number): Record<string, unknown> => {
-      let value: unknown = "leaf";
-      for (let index = 0; index < levels; index += 1) {
-        value = { a: value };
-      }
-      return value as Record<string, unknown>;
-    };
-
-    await invoke(extension, WORK_SUBMIT_METHOD, {
-      version: 1,
-      sessionUri: SESSION_URI,
-      requestKey: "boundary-512",
-      kind: WORK_KIND,
-      input: ladder(512),
-    }, alice);
-    expect(work.calls).toEqual(["submit"]);
-
-    await expect(invoke(extension, WORK_SUBMIT_METHOD, {
-      version: 1,
-      sessionUri: SESSION_URI,
-      requestKey: "boundary-513",
-      kind: WORK_KIND,
-      input: ladder(513),
-    }, alice)).rejects.toBeInstanceOf(ZodError);
-    expect(work.calls).toEqual(["submit"]);
   });
 });

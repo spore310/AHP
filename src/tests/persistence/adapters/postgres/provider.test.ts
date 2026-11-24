@@ -17,4 +17,16 @@ describe("PostgreSQL persistence provider", () => {
     await expect(createPostgresPersistenceProvider({ connectionString: "", leaseTtlSeconds: 0 }))
       .rejects.toThrow("Invalid PostgreSQL persistence options");
   });
+
+  it("closes URI-only mutations and requires acquired host ownership before registration", async () => {
+    const provider = await createPostgresPersistenceProvider({ connectionString: "postgres://localhost/unused" });
+    try {
+      await expect(provider.sessions.delete("ahp-session:/example")).rejects.toMatchObject({ code: "unauthorized" });
+      await expect(provider.work.reconcileExpired()).rejects.toMatchObject({ code: "unauthorized" });
+      await expect(provider.registrations.register({ principalSubject: "user", agentKey: "worker" }))
+        .rejects.toMatchObject({ code: "unauthorized" });
+    } finally {
+      await provider.dispose();
+    }
+  });
 });

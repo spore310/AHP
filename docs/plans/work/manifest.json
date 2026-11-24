@@ -1,0 +1,88 @@
+{
+  "baseline_commit": "bcd85354723bce293e1384af0ca88e84d5ce9dda",
+  "review_mode": "static source/contracts; no SQL or implementation tests executed",
+  "tables": [
+    "schema_migrations",
+    "host_state",
+    "session_types",
+    "tools",
+    "session_type_tools",
+    "sessions",
+    "canonical_resources",
+    "agent_registrations",
+    "work_items",
+    "work_resource_selections"
+  ],
+  "files": [
+    {
+      "name": "00_Shared_Contracts.md",
+      "bytes": 34582,
+      "sha256": "0542bc9e4e3009aa3eb5631d6feec0c7d854843922fa202569cc21cfb79bfe48"
+    },
+    {
+      "name": "01_Wire_and_Service_Contracts.md",
+      "bytes": 12503,
+      "sha256": "fbcd9c1d4e88b26ffb56ac6bb7c73130219c81b99b6f317b6ed724a5737ecc85"
+    },
+    {
+      "name": "02_Source_Evidence_and_Review.md",
+      "bytes": 18631,
+      "sha256": "75437a24759b00b511f9cc9831ec2756d919da1fe4fee44ee9e6aa816f3ad187"
+    },
+    {
+      "name": "03_Acceptance_Matrix.md",
+      "bytes": 28019,
+      "sha256": "3004afe3c51a02e3d2caf5c06c51d0d4e5f3cce93c0b3fa3fd3a15b096b0a583"
+    },
+    {
+      "name": "AHP_V1_P0_P4_Database_Schema_Plan.md",
+      "bytes": 219661,
+      "sha256": "605edc6f4d00837d0ed505a5d5db1ceec29428e8d8bc51bb8b2c503822e2a8d6"
+    },
+    {
+      "name": "AHP_V1_Schema_Smoke.sql",
+      "bytes": 8640,
+      "sha256": "813f01a24be90777d555a8a3337974d5e25a32403fe6d592ad1bb63f9fa4280d"
+    },
+    {
+      "name": "AHP_V1_Target_Schema.sql",
+      "bytes": 19594,
+      "sha256": "351531812d355f8de264274f8bdf24c3144d1077ae9a55c4b90b2bccaf06b420"
+    },
+    {
+      "name": "P0_Durable_Sessions_and_Resources.md",
+      "bytes": 25135,
+      "sha256": "b4c8d4f823ad0423856ebd462cb425713cbb07c247cfd3db8aab690f98e5f729"
+    },
+    {
+      "name": "P1_Work_Contracts_and_Data.md",
+      "bytes": 16034,
+      "sha256": "4c1cd23b635ae358e198bdd817c649897bf3cd12ef15d325d24d3c4b59715629"
+    },
+    {
+      "name": "P2_Work_Authorization_and_Hooks.md",
+      "bytes": 20291,
+      "sha256": "c7e407f890f38c8af88ced89a97475fa3a8e5868fb781740c2e883f881c182d5"
+    },
+    {
+      "name": "P3_Claims_Capacity_and_Diagnostics.md",
+      "bytes": 19717,
+      "sha256": "2526b95ef6a0feaf557207dd963dd5b1f1e3717b77cea77c46f764caa35ffc7c"
+    },
+    {
+      "name": "P4_Events_Snapshots_and_Chat_Projection.md",
+      "bytes": 18993,
+      "sha256": "f90a1784c374c92f10365afbd8bf9247766098cf6fdd5d9dc5a7d7487becabca"
+    },
+    {
+      "name": "P5_Tool_and_Client_Boundaries.md",
+      "bytes": 22558,
+      "sha256": "6b6b441aa008bbfc233a1d36c9df7401eb7aa231557d9d9a6210437fcc7b7c3f"
+    },
+    {
+      "name": "README_Codex_Handoff.md",
+      "bytes": 8557,
+      "sha256": "615b080e238a424aa3f965ea2e19fae51b123553bff7a9b9cf249b33e21a1813"
+    }
+  ]
+}

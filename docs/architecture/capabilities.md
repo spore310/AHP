@@ -94,8 +94,9 @@ purposes. See the [tool client contract](../../src/toolClient/README.md).
 
 ## Agent/work boundary
 
-`x-ahp/agents/*` and `x-ahp/work/*` are namespaced, versioned requests, separate
-from `x-ahp/tools/*`. Tool calls are short-lived client-to-client invocation.
+`x-ahp/agents/*` and `x-ahp/work/get` are namespaced, versioned requests, separate
+from `x-ahp/tools/*`. Remote work mutations stay closed through P2.
+Tool calls are short-lived client-to-client invocation.
 Work is a durable coordination record with an execution lease; the host never
 executes the stored task. Presence is memory-only and must be renewed on the
 authenticated connection. Work and registration rows survive a restart; sockets,

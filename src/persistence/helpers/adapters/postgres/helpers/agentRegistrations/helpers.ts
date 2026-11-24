@@ -3,6 +3,7 @@ import { RepositoryError, type AgentRegistrationLimits, type AgentRegistrationRe
 
 import { databaseFailure, toIso, withTransaction, type PoolLike } from "../connection";
 import type { AgentRegistrationRow } from "../../types";
+import type { PostgresOwnership } from "../ownership";
 
 /** Registration repository over the `agent_registrations` table. */
 
@@ -22,13 +23,16 @@ const mapRegistration = (row: AgentRegistrationRow): AgentRegistrationRecord => 
 export const createPostgresAgentRegistrationRepository = (
   database: PoolLike,
   options?: Partial<AgentRegistrationLimits>,
+  currentOwner?: () => PostgresOwnership,
 ): AgentRegistrationRepository => {
   const limits = captureAgentRegistrationLimits(options);
   return {
     async register(input) {
       try {
+        const owner = currentOwner?.();
         return await withTransaction(database, async (client) => {
           await client.query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
+          if (owner) await owner.lock(client);
           // Serialize the shared limit check and write without blocking ordinary readers.
           await client.query("LOCK TABLE agent_registrations IN SHARE ROW EXCLUSIVE MODE");
           const capacity = await client.query<{ full: boolean }>(`

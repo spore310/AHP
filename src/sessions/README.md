@@ -9,13 +9,28 @@ It is **AHP-aware but transport-agnostic**: it speaks protocol parameters,
 action envelopes, and snapshots, but imports no network transport. A
 *provider* here means an **agent backend** (`SessionProvider`), not a
 client-connection adapter; see
-[`docs/plans/ProvidersPlan.md`](../../docs/plans/ProvidersPlan.md).
+[`docs/plans/ProvidersPlan.md`](../../docs/plans/work/ProvidersPlan.md).
+
+On a protected typed host, `sessions.durability` binds the live registry to a `DurableStorage` and stable `hostId`. Host startup acquires ownership and recovers exact session incarnations before listening. The provider supplies a versioned recovery codec, idempotent provisioning, restoration and retirement. A session type supplies fresh restoration approval and bindings. Inspect `host.sessions.durability.inspect()` for unavailable sessions. Shutdown releases process handles. Explicit retirement destroys provider resources in reverse dependency order, and trusted purge applies a retention cutoff.
+
+Consumer data belongs to each canonical resource, including the session root. The provider's scoped `resources` capability reads or replaces a bounded object using its decimal `dataRevision`. Concurrent replacements with one expected revision have one winner. Title, read/archive flags and approved working directories survive restart. Connections, activity, advertisements and grants are rebuilt from current inputs.
+
+During provisioning, a driver may await creation of a nested child. The host
+reserves its exact identity immediately. It starts the child driver and installs
+its authority once both non-root parents are installed. Recovery reuses the
+original identity and operation key. A failed or pending parent keeps its
+descendants unavailable. Once retirement is committed, recovery can finish
+destruction without requesting permission to restore the session.
 
 ## Files
 
 | File | Responsibility |
 | ---- | -------------- |
 | `types.ts` | The contracts: `SessionProvider`, `SessionConfigContract`, `SessionBackend`, `SessionRegistry`, `SessionsFactory(Options)`, diagnostics, and snapshots. |
+| `helpers/durability/types.ts` | Versioned stable native state contract. |
+| `helpers/durability/helpers.ts` | Encode stable fields and reconstruct idle native state. |
+| `helpers/resources/types.ts` | Provider driver, handle and scoped resource capability. |
+| `helpers/recovery/helpers.ts` | Reserve, activate, recover, retire and release exact instances. |
 | `constants.ts` | Channel URIs, the default title, mirrored protocol literals, and the generic start-failure payload. |
 | `index.ts` | Public surface for the sessions capability. |
 | `createSession/types.ts` | See [`createSession/README.md`](createSession/README.md). |
@@ -86,7 +101,7 @@ throw after installing. See [authorization](../authorization/README.md).
 - `listSessionSnapshots(): SessionSnapshot[]`
 - `getCurrentServerSeq(): number`
 - `listAgents(): AgentInfo[]`
-- `dispatchAction({ channel, clientSeq, action, clientId }): ActionEnvelope` —
+- `dispatchAction({ channel, clientSeq, action, clientId }): Promise<ActionEnvelope>` —
   validate the client action, then apply a supported baseline mutation through
   the protocol reducer. Missing targets throw `SessionsError` with
   `SessionNotFound`. Valid-but-unsupported pinned actions are not reduced and
@@ -288,7 +303,7 @@ const factory = createSessionsFactory({
 
 Share one sequence stream across channels, and observe envelopes for broadcast.
 Inject the same allocator into anything else that publishes to the connection's
-action stream so sequence numbers stay monotonic and gap-free:
+action stream. Committed publications stay ordered and failed durable operations can leave sequence gaps.
 
 ```ts
 import {
@@ -378,7 +393,7 @@ returned canonical envelopes and do not reduce state.
 | [`src/tests/sessions/configuration.test.ts`](../tests/sessions/configuration.test.ts) | `createSessionConfig` descriptor protection, parser defaults, required/type/enum/unknown-key rejection, and sanitized unexpected parser failures. |
 | [`src/tests/sessions/factory.test.ts`](../tests/sessions/factory.test.ts) | Construction guards, queries, listener unsubscribe, snapshot/observer isolation, and the full disposal lifecycle including late backends and reused URIs. |
 | [`src/tests/sessions/dispatch.test.ts`](../tests/sessions/dispatch.test.ts) | Missing-target errors, malformed title/read/archive payloads, `clientSeq` non-coercion, unsupported actions, sequence cursor, and summary/count projections. |
-| [`src/tests/sessions/compliance.test.ts`](../tests/sessions/compliance.test.ts) | Protocol-literal mirrors against the package runtime enums, catalogue/state conformance through the protocol reducer, and the single gap-free action sequence. |
+| [`src/tests/sessions/compliance.test.ts`](../tests/sessions/compliance.test.ts) | Protocol-literal mirrors against the package runtime enums, catalogue/state conformance through the protocol reducer, and the shared host action sequence. |
 | [`src/tests/sessions/createSession.test.ts`](../tests/sessions/createSession.test.ts) | See [`createSession/README.md`](createSession/README.md). |
 | [`src/tests/sessions/sessionTypes.test.ts`](../tests/sessions/sessionTypes.test.ts) | Exact type resolution, disabled-type lookup, and missing tool rejection. |
 | [`src/tests/sessions/typedCreation.test.ts`](../tests/sessions/typedCreation.test.ts) | String header binding and untyped-host rejection. |
@@ -396,5 +411,5 @@ returned canonical envelopes and do not reduce state.
   where sessions sit in the capability map.
 - [`docs/technical/runtime-lifecycles.md`](../../docs/technical/runtime-lifecycles.md)
   — session lifecycle and disposal semantics.
-- [`docs/plans/ProvidersPlan.md`](../../docs/plans/ProvidersPlan.md) — the
+- [`docs/plans/ProvidersPlan.md`](../../docs/plans/work/ProvidersPlan.md) — the
   intended backend/AHP wiring (target state).

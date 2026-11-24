@@ -5,11 +5,11 @@
 | If you want to | Start here |
 | --- | --- |
 | Bring up a typed session from application code | [Five-minute quick start](guides/quickstart.md) |
-| Use authenticated clients, tools, and work leases | [Advanced review application](guides/advanced.md) |
+| Use authenticated clients, tools, and agent presence | [Advanced review application](guides/advanced.md) |
 | Choose the public API for a capability | [Source modules](../src/README.md) |
 | Implement a protocol client or debug a frame | [Wire contract](technical/wire-contract.md) |
 | Configure the default process | [Environment settings](../env/README.md) |
-| Try the opt-in PostgreSQL adapter locally | [PostgreSQL setup and conformance](guides/postgresql.md) |
+| Test persistence against disposable local PostgreSQL | [PostgreSQL setup and conformance](guides/postgresql.md#run-with-disposable-docker-postgresql) |
 
 ## Contribute to AHP
 

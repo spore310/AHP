@@ -8,6 +8,8 @@ import type {
   SessionSummary,
   SessionSummaryChangedParams,
 } from "@microsoft/agent-host-protocol";
+import type { DurableStorage, JsonObject, StoredSession } from "@persistence/helpers/durability/types";
+import type { RuntimeResourceDriver, RuntimeResourceContext, SessionResourceLifecycle } from "./helpers/resources/types";
 import { z } from "zod";
 
 import type { ResourceRef } from "@authorization";
@@ -32,6 +34,13 @@ export const sessionUriSchema = z
 
 /** Everything a {@link SessionProvider} needs to bring up one session backend. */
 export interface ProviderSessionInput {
+  /** Present for a durably reserved incarnation. */
+  readonly session?: ResourceRef<"session">;
+  readonly resources?: SessionResourceLifecycle;
+  readonly operationId?: string;
+  readonly recoveryInput?: JsonObject;
+  readonly runtimeMetadata?: JsonObject;
+  readonly signal?: AbortSignal;
   /** The session channel URI being created. */
   readonly sessionUri: string;
   /** Working directories granted to the session's agent. */
@@ -67,6 +76,7 @@ export interface SessionConfigContract {
 
 /** The live backend a provider returns for a created session. */
 export interface SessionBackend {
+  readonly metadata?: JsonObject;
   /** Releases whatever the backend holds. Called at factory shutdown. */
   dispose(): Promise<void> | void;
 }
@@ -79,6 +89,10 @@ export interface SessionBackend {
  * backend or throws {@link SessionStartError} to surface `session/creationFailed`.
  */
 export interface SessionProvider {
+  readonly drivers?: readonly RuntimeResourceDriver[];
+  readonly recovery?: { readonly version: number; capture(config: Readonly<Record<string, unknown>>): JsonObject };
+  restoreSession?(input: ProviderSessionInput): Promise<SessionBackend>;
+  retireSession?(input: RuntimeResourceContext): Promise<void>;
   /** Stable provider id clients pass in `createSession.provider`. */
   readonly providerId: string;
   /** Agent descriptor advertised on the root channel. */
@@ -138,9 +152,8 @@ export interface SessionRecord {
 /**
  * Storage seam for live sessions.
  *
- * The only implementation is in-memory, since no persistence exists yet; a
- * durable store replaces this contract's implementation without touching the
- * session methods.
+ * Holds process-local records used for delivery and snapshots. Durable storage
+ * reserves identities and commits changes before live installation.
  */
 export interface SessionRegistry {
   readonly size: number;
@@ -200,6 +213,7 @@ export interface SessionSnapshot {
 
 /** Construction options for {@link SessionsFactory}. */
 export interface SessionsFactoryOptions {
+  readonly durability?: { readonly storage: DurableStorage; readonly hostId: string; readonly maxCallbacks?: number; readonly callbackDeadlineMs?: number };
   readonly toolAdmission?: ToolAdmission;
   readonly creationSecurity?: SessionCreationSecurityOptions;
   /** Session types this host can create sessions with. At least one is required. */
@@ -241,6 +255,13 @@ export interface SessionsFactoryOptions {
 
 /** Transport-agnostic session factory: the host's only way to create sessions. */
 export interface SessionsFactory {
+  readonly durability?: {
+    start(onLost?: () => void): Promise<void>;
+    /** Schedule a trusted post-commit hint in the native host publication order. */
+    publishWorkReady(publish: (serverSeq: number) => void): Promise<void>;
+    inspect(): readonly { readonly session: StoredSession["ref"]; readonly reason: string }[];
+    purge(session: ResourceRef<"session">, retainAfter: string): Promise<boolean>;
+  };
   readonly authorization?: SessionFactoryAuthorization;
   readonly managedTools?: {
     readonly admission: ToolAdmission;
@@ -308,7 +329,7 @@ export interface SessionsFactory {
     readonly clientId: string;
     /** Trusted synchronous veto after structural validation; never supplies authority. */
     readonly admission?: () => boolean;
-  }): ActionEnvelope;
+  }): Promise<ActionEnvelope>;
   /** Subscribes to root catalogue events. Returns an unsubscribe function. */
   onCatalogueNotification(listener: (notification: CatalogueNotification) => void): () => void;
   /** Subscribes to session action envelopes. Returns an unsubscribe function. */

@@ -1,3 +1,4 @@
+import type { DurableHost, DurableStorage } from "../durability/types";
 import type { PersistenceProvider } from "../../types";
 import { createAgentRegistrationFacade } from "../agentRegistrations";
 import { createPersistenceOperationScope } from "../lifecycle";
@@ -5,8 +6,33 @@ import { createDurableSessionFacade } from "../sessions";
 import { createWorkFacade } from "../workItems";
 
 export const createPersistence = (provider: PersistenceProvider): PersistenceProvider => {
-  const scope = createPersistenceOperationScope(() => provider.dispose());
+  const active = new Set<DurableHost>();
+  const scope = createPersistenceOperationScope(async () => {
+    const released = await Promise.allSettled([...active].map((host) => host.release()));
+    await provider.dispose();
+    if (released.some((result) => result.status === "rejected")) throw new Error("Durable host release failed.");
+  });
+  const source = provider.durability;
+  const durability: DurableStorage | undefined = source && {
+    acquire: (id, lost) => scope.run(async () => {
+      const lease = await source.acquire(id, lost);
+      const owned: DurableHost = {
+        get epoch() { return lease.epoch; },
+        get serverSeq() { return lease.serverSeq; },
+        get sessions() { return lease.sessions; },
+        get resources() { return lease.resources; },
+        isOpen: () => lease.isOpen(),
+        async release() {
+          await lease.release();
+          active.delete(owned);
+        },
+      };
+      active.add(owned);
+      return owned;
+    }),
+  };
   return {
+    ...(durability ? { durability } : {}),
     registrations: createAgentRegistrationFacade(provider.registrations, scope),
     sessions: createDurableSessionFacade(provider.sessions, scope),
     work: createWorkFacade(provider.work, scope),

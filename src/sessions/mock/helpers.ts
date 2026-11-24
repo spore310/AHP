@@ -26,6 +26,9 @@ export function createMockProvider(options: MockProviderOptions = {}): SessionPr
   return {
     providerId: MOCK_PROVIDER_ID,
     agentInfo: MOCK_AGENT_INFO,
+    recovery: { version: 1, capture: () => ({}) },
+    restoreSession: () => Promise.resolve({ dispose: () => undefined }),
+    retireSession: () => Promise.resolve(),
     startSession: (): Promise<SessionBackend> => {
       if (options.failCreation !== undefined) {
         return Promise.reject(new SessionStartError(options.failCreation));

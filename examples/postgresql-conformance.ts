@@ -14,7 +14,7 @@ try {
 
 try {
   await runPostgresPersistenceConformance({ connectionString: input });
-  process.stdout.write("PostgreSQL repository conformance passed.\n");
+  process.stdout.write("PostgreSQL registration, durable session/resource, migration and ownership conformance passed.\n");
 } catch {
   throw new Error("PostgreSQL conformance failed. Check the dedicated database, applied migrations, and server logs.");
 }

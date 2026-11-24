@@ -28,3 +28,8 @@ desktop.ini
 
 # Tool caches
 .eslintcache
+
+# Machine-local PostgreSQL test runner and recovery records
+/.temp/
+/scripts/Invoke-LocalPostgres.ps1
+/scripts/local-postgres-ready.mjs

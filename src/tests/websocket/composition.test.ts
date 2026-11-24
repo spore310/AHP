@@ -143,12 +143,12 @@ describe("AHP host composition", () => {
     await expect(
       host.sessions.createSession({ channel: `${SESSION_URI_PREFIX}after-stop` }),
     ).rejects.toThrow(/sessions cannot be used after shutdown/);
-    expect(() => host.sessions.dispatchAction({
+    await expect(host.sessions.dispatchAction({
       channel: `${SESSION_URI_PREFIX}after-stop`,
       clientSeq: 1,
       action: { type: "session/titleChanged", title: "Nope" },
       clientId: "t24",
-    })).toThrow(/sessions cannot be used after shutdown/);
+    })).rejects.toThrow(/sessions cannot be used after shutdown/);
   });
 
   it("rejects sessions use and restart after stop, including failed start", async () => {
@@ -198,11 +198,11 @@ describe("AHP host composition", () => {
     await expect(
       host.sessions.createSession({ channel: `${SESSION_URI_PREFIX}after-failed-start` }),
     ).rejects.toThrow(/sessions cannot be used after shutdown/);
-    expect(() => host.sessions.dispatchAction({
+    await expect(host.sessions.dispatchAction({
       channel: `${SESSION_URI_PREFIX}after-failed-start`,
       clientSeq: 1,
       action: { type: "session/titleChanged", title: "Nope" },
       clientId: "t24",
-    })).toThrow(/sessions cannot be used after shutdown/);
+    })).rejects.toThrow(/sessions cannot be used after shutdown/);
   });
 });

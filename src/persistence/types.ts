@@ -84,6 +84,7 @@ export interface WorkLeaseRecord {
 }
 
 export interface WorkItemRecord {
+  readonly sessionInstanceId?: string;
   readonly id: string;
   readonly sessionUri: string;
   readonly requestKey: string;
@@ -135,6 +136,7 @@ export interface WorkRepository {
     readonly principalSubject: string;
   }): Promise<WorkStatus | null>;
   get(input: {
+    readonly domainId?: string;
     readonly workId: string;
     readonly principalSubject: string;
   }): Promise<WorkItemRecord | null>;
@@ -152,6 +154,7 @@ export interface WorkRepository {
  * projection and the work row inside one transactionally coherent operation.
  */
 export interface PersistenceRepositories {
+  readonly durability?: import("./helpers/durability/types").DurableStorage;
   readonly registrations: AgentRegistrationRepository;
   readonly sessions: DurableSessionRepository;
   readonly work: WorkRepository;

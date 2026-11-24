@@ -45,7 +45,7 @@ describe("typed tool advertisement", () => {
   it("accepts a subset, normalizes advisory text, and keeps detached descriptors", async () => {
     const { factory, channel, read, advertise, envelopes } = await readySession();
     try {
-      const accepted = advertise([{ ...read, description: "untrusted", annotations: { destructiveHint: false } }]);
+      const accepted = await advertise([{ ...read, description: "untrusted", annotations: { destructiveHint: false } }]);
       expect(accepted.rejectionReason).toBeUndefined();
       expect(envelopes).toHaveLength(1);
       expect(factory.getSessionSnapshot(channel)?.state.activeClients).toEqual([
@@ -95,7 +95,7 @@ describe("typed tool advertisement", () => {
     const { factory, channel, read, write, advertise, envelopes } = await readySession();
     try {
       const before = factory.getSessionSnapshot(channel);
-      const rejected = advertise(mutate(read, write));
+      const rejected = await advertise(mutate(read, write));
       expect(rejected).toMatchObject({
         origin: { clientId: "owner", clientSeq: 1 },
         rejectionReason: "Tool advertisement is not permitted for this session.",
@@ -121,7 +121,7 @@ describe("typed tool advertisement", () => {
     try {
       expect(factory.getSessionToolManifest(channel)?.toolContracts.map((tool) => tool.key))
         .toEqual(["workspace.read-file"]);
-      expect(advertise([write]).rejectionReason).toBeDefined();
+      expect((await advertise([write])).rejectionReason).toBeDefined();
       expect(factory.getSessionSnapshot(channel)?.state.activeClients).toEqual([]);
       expect(envelopes).toEqual([]);
     } finally {
@@ -135,7 +135,7 @@ describe("typed tool advertisement", () => {
       const missingOutput = { ...write };
       delete missingOutput.outputSchema;
       const before = factory.getSessionSnapshot(channel);
-      expect(advertise([missingOutput]).rejectionReason).toBeDefined();
+      expect((await advertise([missingOutput])).rejectionReason).toBeDefined();
       expect(factory.getSessionSnapshot(channel)).toEqual(before);
       expect(envelopes).toEqual([]);
     } finally {
@@ -146,20 +146,20 @@ describe("typed tool advertisement", () => {
   it("rejects spoofed set/removal, permits an empty set and self removal", async () => {
     const { factory, channel, advertise, envelopes } = await readySession();
     try {
-      expect(advertise([], "someone-else").rejectionReason).toBeDefined();
+      expect((await advertise([], "someone-else")).rejectionReason).toBeDefined();
       expect(factory.getSessionSnapshot(channel)?.state.activeClients).toEqual([]);
       expect(envelopes).toEqual([]);
-      expect(advertise([]).rejectionReason).toBeUndefined();
+      expect((await advertise([])).rejectionReason).toBeUndefined();
       const before = factory.getSessionSnapshot(channel);
-      expect(factory.dispatchAction({
+      expect((await factory.dispatchAction({
         channel, clientSeq: 2, clientId: "owner",
         action: { type: "session/activeClientRemoved", clientId: "someone-else" },
-      }).rejectionReason).toBeDefined();
+      })).rejectionReason).toBeDefined();
       expect(factory.getSessionSnapshot(channel)).toEqual(before);
-      expect(factory.dispatchAction({
+      expect((await factory.dispatchAction({
         channel, clientSeq: 3, clientId: "owner",
         action: { type: "session/activeClientRemoved", clientId: "owner" },
-      }).rejectionReason).toBeUndefined();
+      })).rejectionReason).toBeUndefined();
       expect(factory.getSessionSnapshot(channel)?.state.activeClients).toEqual([]);
       expect(envelopes).toHaveLength(2);
     } finally {
@@ -191,7 +191,7 @@ describe("typed tool advertisement", () => {
       const channel = `${SESSION_URI_PREFIX}rich`;
       await createApplicationSession(factory, { channel, type: type.header });
       const descriptor = toAhpToolDefinition(tool);
-      const accepted = factory.dispatchAction({
+      const accepted = await factory.dispatchAction({
         channel, clientId: "owner", clientSeq: 1,
         action: { type: "session/activeClientSet", activeClient: { clientId: "owner", tools: [descriptor] } },
       });

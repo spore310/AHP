@@ -17,3 +17,5 @@ export type {
 } from "./types";
 export { createPersistence } from "./helpers/provider";
 export { hasPortableTextTree, isPortableText } from "./helpers/text";
+export { createMemoryDurableStorage } from "./helpers/durability/memory";
+export type { DurableHost, DurableStorage, JsonObject, JsonValue, Revision, ReplaceData, ReplaceDataResult, DataSnapshot, StoredSession, ResourceRecord } from "./helpers/durability/types";
