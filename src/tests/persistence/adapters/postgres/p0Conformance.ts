@@ -2,13 +2,16 @@ import { assertDurableResourceConformance } from "../../conformance/helpers";
 import { createPostgresDurableStorage } from "@persistence/helpers/adapters/postgres";
 import { testPublicLifecycle } from "./publicLifecycle";
 import { verifyInitialClaimAuthority } from "./p3InitialAuthority";
+import { verifyWorkSubscription } from "./p4Subscription";
 import { testWorkAuthorityStorage } from "./p2Work";
+import { assertSqlViewFences } from "./p4Views";
 import { testPostgresScheduling } from "./p3Work";
 import { verifyAgentEpochs } from "./p3Epochs";
 import { verifyWorkClock } from "./p3Clock";
 import { testWorkSettlement } from "./p1Work";
 import { testP1Schema } from "./p1Schema";
 import { assertWorkDataConformance } from "../../conformance/work";
+import { assertFiniteWorkPages, assertWorkPageProjection } from "../../conformance/workPages";
 import { assertTypeManifestPinning, assertWorkGraphRevisions } from "../../conformance/workGraph";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -280,6 +283,9 @@ export const runP0PostgresConformance = async (input: string): Promise<void> => 
         const host = await provider.durability.acquire("p0-conformance", () => {});
         try {
           await assertWorkDataConformance(host);
+          await assertFiniteWorkPages(host);
+          await assertWorkPageProjection(host);
+          await assertSqlViewFences(host, first, waitForBlocker);
           await assertWorkGraphRevisions(host);
           await testWorkSettlement(host, first);
           await testWorkAuthorityStorage(host, first, waitForBlocker);
@@ -302,6 +308,7 @@ export const runP0PostgresConformance = async (input: string): Promise<void> => 
       await verifyAgentEpochs(url.href);
       await verifyWorkClock(url.href, first);
       await verifyInitialClaimAuthority(url.href, first, waitForBlocker);
+      await verifyWorkSubscription(url.href);
     } finally {
       await Promise.all([first.end(), second.end()]);
       await admin.query(`DROP SCHEMA ${schema} CASCADE`);

@@ -3,6 +3,7 @@ import { AhpClient } from "@microsoft/agent-host-protocol/client";
 import { WebSocketTransport } from "@microsoft/agent-host-protocol/ws";
 import { ToolInvocationTransport } from "@toolExecution/client/transport";
 import { z } from "zod";
+import { createWorkClient } from "@work/helpers/client";
 import { channel, reviewWorkerKey, type createReviewHost, type Subject } from "./host";
 
 export async function openWorkClient(url: string, subject: Subject, label: string) {
@@ -11,7 +12,7 @@ export async function openWorkClient(url: string, subject: Subject, label: strin
   client.connect();
   try {
     await client.initialize({ clientId: label, protocolVersions: ["1.0.0"], initialSubscriptions: [] });
-    return { client, async request(method: string, params: Record<string, unknown>) {
+    return { client, transport, async request(method: string, params: Record<string, unknown>) {
       try {
         return await transport.request(method, { version: 1, ...params });
       } catch (cause) {
@@ -34,7 +35,11 @@ export function execution(lease: z.infer<typeof claimedLease>["lease"]) {
 /** The PM submits, the senior owns the session and the mapped junior claims and settles. */
 export async function showWorkBoundary(url: string, demo: ReturnType<typeof createReviewHost>): Promise<void> {
   const worker = await openWorkClient(url, "junior", "review-worker");
+  const projection = createWorkClient(worker.transport);
   try {
+    const initial = await projection.subscribe({ resource: { kind: "session", id: channel, instanceId: demo.origin().instanceId } });
+    assert.equal(initial.status, "ready");
+    assert.deepEqual(initial.items, []);
     const { agentId } = z.object({ agentId: z.uuid() })
       .parse(await worker.request("x-ahp/agents/register", { agentKey: reviewWorkerKey }));
     const renewed = z.object({ agentId: z.uuid() }).parse(await worker.request("x-ahp/agents/renew", {}));
@@ -68,6 +73,7 @@ export async function showWorkBoundary(url: string, demo: ReturnType<typeof crea
     assert.equal(await worker.request("x-ahp/agents/unregister", {}), null);
     process.stdout.write("The project manager submitted work in the senior's session. The mapped junior claimed and completed the review before its execution grant was revoked.\n");
   } finally {
+    await projection.dispose();
     await worker.client.shutdown();
   }
 }

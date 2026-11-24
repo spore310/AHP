@@ -25,7 +25,7 @@ export interface WorkPolicyFacts {
 }
 export type WorkPolicyRestriction = { readonly effect: "deny"; release(): void }
   | { readonly effect: "allow"; readonly validUntil: number; isCurrent(): boolean; release(): void;
-    /** Claim/renew must declare a native revocation signal or synchronous registry.invalidateExternal on policy changes. */
+    /** Claim, renewal and paged or announced reads require a native signal or synchronous registry invalidation on policy changes. */
     readonly signal?: AbortSignal; readonly invalidation?: "registry"; };
 export interface SessionWorkPolicyRegistration {
   readonly operations: Readonly<Partial<Record<WorkOperation, WorkOperationPolicy>>>;

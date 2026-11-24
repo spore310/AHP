@@ -17,6 +17,27 @@ for title, read and archive changes and exact-session retirement. The generic
 transport still accepts arbitrary trusted application
 handlers; it does not sandbox application JavaScript.
 
+## Private work subscriptions
+
+The protected durable host exposes its enabled V1 work RPC names in
+`host.workMethods`. A session list filters each row through the registered work
+read policy. Listing by announcement target and subscribing also require
+canonical read access to that exact resource. Subscriptions require coherent
+`protectedViews` and an acquired store with work event support.
+
+`x-ahp/work/subscribe` returns an initial page, a connection-owned ID and an
+opaque stream epoch. Changes arriving during the page query share the native
+delivery queue's 256-entry and 2 MiB limits. They become eligible for delivery
+only after the socket accepts the guarded reply. Changes disclose one authorized
+work ID, revision and change kind. A reset discloses only the subscription ID
+and epoch. Applications reconcile with bounded list sweeps.
+
+A verified connection without global-sequence permission can issue the private
+list, get, subscribe and unsubscribe requests directly. It receives no `serverSeq`
+on its hints. Native initialization still requires permission to read its
+mandatory global cursor, and the private subscription grants no native or
+scheduling permissions. [Public socket regressions](../tests/websocket/workEvents.integration.test.ts)
+
 ## Protected session creation and canonical work ownership
 
 A protected host reads `options.sessions.creationSecurity` only, requires P04 security,
@@ -52,6 +73,7 @@ host fences prevent reuse even though standalone factories may be reused.
 | `helpers/ahp/helpers/kernel/helpers.ts` | Private canonical AHP mechanics: sequencing, subscriptions, reply commit, broker correlation, owner attach and cleanup. Not exported by any supported barrel. |
 | `helpers/ahp/helpers/views/types.ts` | Bounded delivery intent and per-peer view ownership. |
 | `helpers/ahp/helpers/views/helpers.ts` | Canonical view-source adapter, final delivery guards, ordered queues and invalidation cleanup. |
+| `helpers/ahp/helpers/views/work.ts` | Connection-owned work subscriptions, guarded initial pages, buffered changes, resets and optional chat presentation. |
 | `helpers/security/types.ts` | P04-local setup options, scoped seeds, immutable connection fences/snapshots and adapter contracts. |
 | `helpers/security/constants.ts` | Independent initial setup count defaults/absolute ceilings. |
 | `helpers/security/helpers.ts` | Captured limits, scoped read preparation, identity/actor/resource/binding validation, bounded snapshot freshness and release. |

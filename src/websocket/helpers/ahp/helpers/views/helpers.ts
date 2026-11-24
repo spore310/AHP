@@ -4,9 +4,11 @@ import type { JsonRpcMessage } from "@jsonrpc";
 import type { SessionsFactory } from "@sessions";
 import type { ResourceRef } from "@authorization";
 import { sameResource } from "@authorization/helpers/context";
-import { createResourceViews, projectSessionViewAction, type ResourceViewOptions, type ResourceViewProof, type ResourceViewSource } from "@toolExecution/helpers/views";
+import { createResourceViews, projectSessionViewAction, ResourceViewDenied, type ResourceViewOptions, type ResourceViewProof, type ResourceViewSource } from "@toolExecution/helpers/views";
+import { WorkError } from "@work";
 import type { AHPPeer } from "@websocket/helpers/ahp/types";
 import type { PeerViewState, ViewDeliveryIntent } from "./types";
+import type { WorkViewTarget } from "@work/helpers/views/types";
 
 const root = "ahp-root://";
 const unavailable = (): never => {
@@ -48,16 +50,17 @@ export function createProtectedViewDelivery(factory: SessionsFactory, options: R
     },
   };
   const views = createResourceViews(options, source);
-  const stateFor = (peer: AHPPeer): PeerViewState => {
+  const stateFor = (peer: AHPPeer, native = true): PeerViewState => {
+    if (native && peer.context.security?.allowGlobalSequence !== true) return unavailable();
     const existing = states.get(peer);
     if (existing !== undefined) return existing;
     const setup = peer.context.security;
     const generation = peer.context.connectionGeneration;
-    if (setup === undefined || generation === undefined || (setup.allowGlobalSequence as unknown) !== true
+    if (setup === undefined || generation === undefined
       || setup.fence.connectionId !== peer.context.connectionId || setup.context.connectionId !== peer.context.connectionId
       || setup.fence.connectionGeneration !== generation) return unavailable();
     const controller = new AbortController();
-    const state: PeerViewState = { controller, queue: [], fromSeq: new Map(), generations: new Map(), known: new Set(), proofs: new Map(), bytes: 0, running: false, refresh: false,
+    const state: PeerViewState = { controller, queue: [], workPending: new Map(), fromSeq: new Map(), generations: new Map(), known: new Set(), proofs: new Map(), bytes: 0, running: false, refresh: false,
       recipient: { actor: setup.context, signal: controller.signal,
         current: () => peer.context.security === setup && peer.context.isSecurityCurrent?.() === true,
         fence: () => !disposed && states.get(peer) === state && !controller.signal.aborted
@@ -71,6 +74,7 @@ export function createProtectedViewDelivery(factory: SessionsFactory, options: R
   };
   const close = (peer: AHPPeer, state: PeerViewState): void => {
     state.controller.abort();
+    state.workPending.clear();
     state.queue.length = 0;
     state.bytes = 0;
     state.proofs.clear();
@@ -169,7 +173,8 @@ export function createProtectedViewDelivery(factory: SessionsFactory, options: R
         const next = state.queue.shift();
         if (next === undefined) break;
         try {
-          await deliver(peer, state, next);
+          if (next.type === "work") await next.deliver();
+          else await deliver(peer, state, next);
         } finally {
           state.bytes = Math.max(0, state.bytes - next.bytes);
         }
@@ -186,7 +191,60 @@ export function createProtectedViewDelivery(factory: SessionsFactory, options: R
       void pump(peer, state);
     }
   });
+  function fits(peer: AHPPeer, state: PeerViewState, size: number) {
+    let count = state.queue.length + (state.running ? 1 : 0);
+    let bytes = state.bytes + size;
+    for (const items of state.workPending.values()) count += items.length;
+    for (const items of peer.pending.values()) for (const item of items) {
+      count++;
+      bytes += intents.get(item)?.bytes ?? 2 * 1024 * 1024 + 1;
+    }
+    if (count < 256 && bytes <= 2 * 1024 * 1024) return true;
+    close(peer, state);
+    return false;
+  }
   return Object.freeze({
+    authorizeWork: async (peer: AHPPeer, target: WorkViewTarget, deadline?: number) => {
+      const state = stateFor(peer, false);
+      const proof = await views.authorize(state.recipient, { ...target.record, session: target.session },
+        target.fence?.bind(target) ?? target.isCurrent.bind(target), deadline).catch((error: unknown) => {
+        if (error instanceof ResourceViewDenied) throw new WorkError("unauthorized", "Work view denied.");
+        throw error;
+      });
+      return { isCurrent: () => views.current(state.recipient, [proof]), fence: proof.fence.bind(proof), release() {} };
+    },
+    workPending(peer: AHPPeer, id: string) {
+      stateFor(peer, false).workPending.set(id, []);
+    },
+    enqueueWork(peer: AHPPeer, id: string, bytes: number, deliver: () => Promise<void>) {
+      const state = stateFor(peer, false);
+      if (state.controller.signal.aborted || !fits(peer, state, bytes)) return;
+      const intent = { type: "work" as const, channel: id, bytes, deliver };
+      const pending = state.workPending.get(id);
+      (pending ?? state.queue).push(intent);
+      state.bytes += bytes;
+      if (!pending) void pump(peer, state);
+    },
+    activateWork(peer: AHPPeer, id: string) {
+      const state = states.get(peer);
+      const pending = state?.workPending.get(id);
+      if (!state || !pending) return;
+      state.workPending.delete(id);
+      state.queue.push(...pending);
+      void pump(peer, state);
+    },
+    removeWork(peer: AHPPeer, id: string) {
+      const state = states.get(peer);
+      if (!state) return;
+      for (const item of state.workPending.get(id) ?? []) state.bytes -= item.bytes;
+      state.workPending.delete(id);
+      for (let i = state.queue.length - 1; i >= 0; i--) {
+        const item = state.queue[i];
+        if (item?.type !== "work" || item.channel !== id) continue;
+        state.bytes -= item.bytes;
+        state.queue.splice(i, 1);
+      }
+    },
     changed: () => {
       catalogueRevision += 1;
     },
@@ -206,32 +264,23 @@ export function createProtectedViewDelivery(factory: SessionsFactory, options: R
       const catalogue = raw === undefined ? undefined : { ...raw, current: () => !disposed && raw.rows.every((row) => getResource(row.resource.id) === row.resource) };
       const bytes = Buffer.byteLength(JSON.stringify(message)) + (catalogue === undefined ? 0 : Buffer.byteLength(JSON.stringify(catalogue.rows)));
       if (bytes > 2 * 1024 * 1024) return unavailable();
-      intents.set(message, { channel, message, ...(record === undefined ? {} : { record }), ...(catalogue === undefined ? {} : { catalogue }), bytes });
+      intents.set(message, { type: "native", channel, message, ...(record === undefined ? {} : { record }), ...(catalogue === undefined ? {} : { catalogue }), bytes });
     },
     enqueue: (peer: AHPPeer, message: JsonRpcMessage): void => {
       const state = stateFor(peer);
       const intent = intents.get(message);
-      if (intent === undefined || state.queue.length + (state.running ? 1 : 0) >= 256 || state.bytes + intent.bytes > 2 * 1024 * 1024) {
+      if (intent === undefined) {
         close(peer, state);
         return;
       }
+      if (!fits(peer, state, intent.bytes)) return;
       state.queue.push(intent);
       state.bytes += intent.bytes;
       void pump(peer, state);
     },
     buffer: (peer: AHPPeer, message: JsonRpcMessage): boolean => {
       const state = stateFor(peer);
-      let count = state.queue.length + (state.running ? 1 : 0);
-      let bytes = state.bytes + (intents.get(message)?.bytes ?? 2 * 1024 * 1024 + 1);
-      for (const pending of peer.pending.values()) for (const item of pending) {
-        count += 1;
-        bytes += intents.get(item)?.bytes ?? 2 * 1024 * 1024 + 1;
-      }
-      if (count >= 256 || bytes > 2 * 1024 * 1024) {
-        close(peer, state);
-        return false;
-      }
-      return true;
+      return fits(peer, state, intents.get(message)?.bytes ?? 2 * 1024 * 1024 + 1);
     },
     snapshot: (peer: AHPPeer, uri: string) => views.snapshot(stateFor(peer).recipient, uri),
     list: (peer: AHPPeer, params: unknown) => views.list(stateFor(peer).recipient, params),
@@ -257,7 +306,7 @@ export function createProtectedViewDelivery(factory: SessionsFactory, options: R
       } else if (!peer.subscriptions.has(root)) state.known.delete(uri);
       for (let index = state.queue.length - 1; index >= 0; index -= 1) {
         const intent = state.queue[index];
-        if (intent?.channel === uri) {
+        if (intent?.type === "native" && intent.channel === uri) {
           state.bytes = Math.max(0, state.bytes - intent.bytes);
           state.queue.splice(index, 1);
         }
@@ -269,6 +318,7 @@ export function createProtectedViewDelivery(factory: SessionsFactory, options: R
       if (state === undefined) return;
       state.controller.abort();
       state.queue.length = 0;
+      state.workPending.clear();
       state.bytes = 0;
       views.forget(state.recipient);
       states.delete(peer);
@@ -278,6 +328,7 @@ export function createProtectedViewDelivery(factory: SessionsFactory, options: R
       unsubscribe();
       for (const state of states.values()) {
         state.controller.abort();
+        state.workPending.clear();
         state.queue.length = 0;
       }
       states.clear();

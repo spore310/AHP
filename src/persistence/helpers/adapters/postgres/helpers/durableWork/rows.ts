@@ -1,10 +1,21 @@
 import { resourceKey } from "@authorization/helpers/resources";
 import type { WorkResourceSelection } from "@work/helpers/selections/types";
-import type { StoredWork, WorkFence } from "@persistence/helpers/durability/workTypes";
+import type { StoredWork, WorkFence, WorkPageKey } from "@persistence/helpers/durability/workTypes";
 import type { QueryableClient } from "../../types";
 
 // Keep all six PostgreSQL fractional-second digits for work list keysets.
 const stamp = (column: string): string => `to_char(${column} AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+
+export async function pageKeys(db: QueryableClient, session: StoredWork["session"], limit: number, after?: WorkPageKey, upper?: WorkPageKey) {
+  const keys = `SELECT id,${stamp("created_at")} AS "createdAt" FROM work_items WHERE session_instance_id=$1 AND domain_id=$2`;
+  const scope = [session.instanceId, session.domainId];
+  const end = upper ?? (await db.query<WorkPageKey>(keys + " ORDER BY created_at DESC,id DESC LIMIT 1", scope)).rows[0];
+  if (!end) return { rows: [] };
+  const lower = after ? " AND (created_at,id)>($6::timestamptz,$7::uuid)" : "";
+  const result = await db.query<WorkPageKey>(keys + " AND (created_at,id)<=($3::timestamptz,$4::uuid)" + lower + " ORDER BY created_at,id LIMIT $5",
+    [...scope, end.createdAt, end.id, limit, ...(after ? [after.createdAt, after.id] : [])]);
+  return { rows: result.rows, upper: end };
+}
 
 /** Preparation must see committed facts without waiting behind a candidate held by another worker. */
 export async function sampleLease(db: QueryableClient, { id, session, revision }: Pick<WorkFence, "id" | "session" | "revision">) {

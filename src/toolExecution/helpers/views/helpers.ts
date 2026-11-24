@@ -16,6 +16,7 @@ const exact = (value: unknown): boolean => {
 const deny = (): never => {
   throw new Error("Protected view unavailable");
 };
+export class ResourceViewDenied extends Error {}
 const limits = { maxBytes: 2 * 1024 * 1024, maxDepth: 64, maxKeys: 131072 };
 const capture = <T>(value: T): T => captureToolValue(value, limits).value as T;
 const clientView = (client: SessionActiveClient): SessionActiveClient => ({ clientId: client.clientId,
@@ -94,7 +95,7 @@ export function createResourceViews(options: ResourceViewOptions, source: Resour
     const resolution = capture<ClientToolRoute>(await resolve({ actor: recipient.actor, resource: record.resource, signal: recipient.signal }));
     if (!sameResource(resolution.route.origin, record.resource)) return deny();
     const selected = await select({ sessionType: record.sessionType, providerId: record.providerId,
-      context: { actor: recipient.actor, resource: record.resource, session: record.resource, input: null } });
+      context: { actor: recipient.actor, resource: record.resource, session: record.session ?? record.resource, input: null } });
     if (selected.effect !== "selected") return undefined;
     const alternatives = selected.alternatives.filter((ref) => admitted.some((allowed) => allowed.id === ref.id && allowed.revision === ref.revision));
     let attempts = 0;
@@ -111,8 +112,9 @@ export function createResourceViews(options: ResourceViewOptions, source: Resour
     }
     return undefined;
   };
-  const run = async <T>(recipient: ResourceViewRecipient, work: (pending: () => boolean) => Promise<T>): Promise<T> => {
-    if (!live(recipient) || active >= 64) return deny();
+  const run = async <T>(recipient: ResourceViewRecipient, work: (pending: () => boolean) => Promise<T>, deadline = performance.now() + 5000): Promise<T> => {
+    const remaining = Math.min(5000, deadline - performance.now());
+    if (!live(recipient) || active >= 64 || remaining <= 0) return deny();
     active += 1;
     let waiting = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -123,7 +125,7 @@ export function createResourceViews(options: ResourceViewOptions, source: Resour
       return await Promise.race([pending, new Promise<never>((_yes, no) => {
         timer = setTimeout(() => {
           no(new Error("Protected view unavailable"));
-        }, 5000);
+        }, remaining);
       })]);
     } finally {
       waiting = false;
@@ -176,15 +178,16 @@ export function createResourceViews(options: ResourceViewOptions, source: Resour
         return false;
       }
     },
-    authorize: (recipient: ResourceViewRecipient, record: ResourceViewRecord) => run(recipient, async () => {
-      const owned = source.captureResourceFence(record.resource);
+    authorize: (recipient: ResourceViewRecipient, record: ResourceViewRecord, exactResource?: () => boolean, deadline?: number) => run(recipient, async (pending) => {
+      const owned = exactResource ?? source.captureResourceFence(record.resource);
       const fence = captureFence();
       const stamp = await authorize(recipient, record);
-      if (stamp === undefined) return deny();
+      if (!pending() || !live(recipient) || !owned() || !fence()) return deny();
+      if (stamp === undefined) throw new ResourceViewDenied("Resource view denied");
       const proof = makeProof(recipient, null, [stamp], fence, owned, [record.resource]);
       if (!proof.current()) return deny();
       return proof;
-    }),
+    }, deadline),
     catalogue: (recipient: ResourceViewRecipient, basis = source.catalogue()) => run(recipient, () => catalogue(recipient, basis)),
     list: (recipient: ResourceViewRecipient, params: unknown) => run(recipient, async (pending) => {
       const parsed = z.object({ channel: z.literal("ahp-root://"), limit: z.number().int().min(1).max(100).optional(), cursor: z.uuid().optional() }).parse(params);

@@ -18,6 +18,7 @@ import type { WebSocketTransportLimits } from "../../types";
  * methods are not registered.
  */
 export interface AHPServerAgentWorkOptions {
+  readonly chatProjection?: import("@work/helpers/chatProjection/types").WorkChatProjectionOptions;
   readonly configuration?: import("@agents").AgentWorkConfig;
   readonly leaseMs?: number;
   readonly authenticator?: ConnectionAuthenticator;
@@ -64,6 +65,8 @@ export interface AHPServerOptions {
  * `sessions` is not usable to revive the host after `stop()`.
  */
 export interface AHPServerHandle {
+  /** Private V1 work request methods enabled by this host's current configuration. */
+  readonly workMethods: readonly string[];
   readonly workConfiguration?: import("@agents").AgentWorkConfiguration;
   readonly setAgentEnabled?: (agentId: string, enabled: boolean) => Promise<unknown>;
   /** Trusted in-process commands sharing the host's canonical session policy and durable store. */

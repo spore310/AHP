@@ -13,6 +13,7 @@ export interface ResourceViewOptions {
 }
 export interface ResourceViewRecord {
   readonly resource: ResourceRef;
+  readonly session?: ResourceRef<"session">;
   readonly sessionType: { readonly key: string; readonly version: number };
   readonly providerId: string;
 }

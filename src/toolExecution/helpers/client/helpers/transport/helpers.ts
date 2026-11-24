@@ -23,6 +23,10 @@ export class ToolInvocationTransport implements AhpTransport {
   private closed = false;
   private sendCount = 0;
   private readonly readers = new Set<(frame: null) => void>();
+  private readonly notifications = new Map<string, Set<(params: unknown) => unknown>>();
+  private readonly closeListeners = new Set<() => unknown>();
+  private readonly lateReleases = new Map<string, (response: unknown) => unknown>();
+  private listenerCount = 0;
   private closing: Promise<void> | undefined;
 
   constructor(private readonly inner: AhpTransport,
@@ -62,13 +66,16 @@ export class ToolInvocationTransport implements AhpTransport {
       }
       const parsed = parseFrame(frame);
       if (!isRecord(parsed) || parsed.jsonrpc !== "2.0") return frame;
-      if (typeof parsed.id === "string" && this.requests.has(parsed.id) && !Object.hasOwn(parsed, "method")) {
+      if (typeof parsed.id === "string" && parsed.id.startsWith("x-ahp-tool:") && !Object.hasOwn(parsed, "method")) {
         const pending = this.requests.get(parsed.id);
-        this.requests.delete(parsed.id);
         if (pending !== undefined) {
           clearTimeout(pending.timer);
           if (Object.hasOwn(parsed, "error") || !Object.hasOwn(parsed, "result")) pending.reject(new Error("Tool operation unavailable."));
           else pending.resolve(parsed.result);
+        } else {
+          const release = this.lateReleases.get(parsed.id);
+          this.lateReleases.delete(parsed.id);
+          if (release && Object.hasOwn(parsed, "result")) this.notice(() => release(parsed.result));
         }
         continue;
       }
@@ -103,6 +110,11 @@ export class ToolInvocationTransport implements AhpTransport {
         } catch { /* Invalid hints do not change registrations. */ }
         continue;
       }
+      const listeners = typeof parsed.method === "string" ? this.notifications.get(parsed.method) : undefined;
+      if (listeners) {
+        for (const listener of [...listeners]) if (listeners.has(listener)) this.notice(() => listener(parsed.params));
+        continue;
+      }
       return frame;
     }
   }
@@ -110,6 +122,12 @@ export class ToolInvocationTransport implements AhpTransport {
   close(): Promise<void> {
     if (this.closing !== undefined) return this.closing;
     this.closed = true;
+    this.closing = Promise.resolve().then(() => this.release());
+    this.lateReleases.clear();
+    for (const listener of [...this.closeListeners]) this.notice(listener);
+    this.closeListeners.clear();
+    this.notifications.clear();
+    this.listenerCount = 0;
     for (const resolve of this.readers) resolve(null);
     this.readers.clear();
     for (const pending of this.requests.values()) {
@@ -120,9 +138,41 @@ export class ToolInvocationTransport implements AhpTransport {
     this.implementations.clear();
     this.staged.clear();
     this.queued.length = 0;
-    this.closing = Promise.resolve().then(() => this.release());
     for (const entry of this.active.values()) entry.controller.abort();
     return this.closing;
+  }
+
+  private notice(run: () => unknown): void {
+    try {
+      void Promise.resolve(run()).catch(() => undefined);
+    } catch { /* Observers cannot end the SDK reader. */ }
+  }
+
+  onNotification(method: string, receive: (params: unknown) => unknown): () => void {
+    this.assertOpen();
+    if (!/^x-ahp\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+$/u.test(method) || method.length > 128 || this.listenerCount >= 64) {
+      throw new Error("Extension observer unavailable.");
+    }
+    const listeners = this.notifications.get(method) ?? new Set();
+    if (listeners.has(receive)) throw new Error("Duplicate extension observer.");
+    listeners.add(receive);
+    this.notifications.set(method, listeners);
+    this.listenerCount++;
+    return () => {
+      if (!this.closed && listeners.delete(receive)) {
+        this.listenerCount--;
+        if (!listeners.size) this.notifications.delete(method);
+      }
+    };
+  }
+
+  onClose(receive: () => unknown): () => void {
+    this.assertOpen();
+    if (this.closeListeners.size >= 64) throw new Error("Extension observer unavailable.");
+    this.closeListeners.add(receive);
+    return () => {
+      this.closeListeners.delete(receive);
+    };
   }
 
   private isClosed(): boolean {
@@ -138,22 +188,40 @@ export class ToolInvocationTransport implements AhpTransport {
     if (this.closed) throw new Error("Tool invocation transport closed.");
   }
 
-  request(method: string, params: unknown, timeoutMs = 5000): Promise<unknown> {
+  request(method: string, params: unknown, timeoutMs = 5000, signal?: AbortSignal, releaseLate?: (response: unknown) => unknown): Promise<unknown> {
     this.assertOpen();
+    if (signal?.aborted) return Promise.reject(new Error("Extension request cancelled."));
     if (this.requests.size >= 64 || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 35_000) throw new Error("Tool request capacity unavailable.");
+    if (releaseLate && this.requests.size + this.lateReleases.size >= 64) throw new Error("Extension cleanup capacity unavailable.");
     const id = `x-ahp-tool:${globalThis.crypto.randomUUID()}`;
     const message = JSON.stringify({ jsonrpc: "2.0", id, method, params });
     return new Promise<unknown>((resolve, reject) => {
+      const cancel = (message: string) => {
+        if (releaseLate && !this.closed) this.lateReleases.set(id, releaseLate);
+        this.requests.get(id)?.reject(new Error(message));
+      };
+      const abort = () => {
+        cancel("Extension request cancelled.");
+      };
       const timer = setTimeout(() => {
-        this.requests.delete(id);
-        reject(new Error("Tool operation timed out."));
+        cancel("Tool operation timed out.");
       }, timeoutMs);
-      this.requests.set(id, { timer, resolve, reject });
+      const cleanup = () => {
+        this.requests.delete(id);
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
+      };
+      this.requests.set(id, { timer, resolve(value) {
+        cleanup();
+        resolve(value);
+      }, reject(error) {
+        cleanup();
+        reject(error);
+      } });
+      signal?.addEventListener("abort", abort, { once: true });
       void this.send(message).catch((error: unknown) => {
         const pending = this.requests.get(id);
-        this.requests.delete(id);
-        if (pending !== undefined) clearTimeout(pending.timer);
-        reject(error instanceof Error ? error : new Error("Tool operation send failed."));
+        pending?.reject(error instanceof Error ? error : new Error("Tool operation send failed."));
       });
     });
   }

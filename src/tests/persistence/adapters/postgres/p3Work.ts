@@ -219,11 +219,18 @@ async function checkOrdering(host: DurableHost, sql: Pool, register: Register) {
   const observer = host.work.observe?.(f.ref, urgent);
   assert.ok(observer);
   const one = f.prepare(all);
+  const published: string[] = [];
+  assert.ok(host.workEvents);
+  const stopEvents = host.workEvents.subscribe((event) => {
+    published.push(event.workId);
+  });
   const discarded = await loseCommitAcknowledgement("UPDATE work_items SET status='leased'", urgent, () => host.work.claimPrepared(one, () => {
     assert.equal(observer.current(), true);
     return undefined;
   }));
   assert.equal(observer.current(), false);
+  stopEvents();
+  assert.deepEqual(published, []);
   observer.release();
   const disconnected = async () => !(await sql.query("SELECT 1 FROM pg_stat_activity WHERE pid=$1", [discarded])).rowCount;
   const deadline = performance.now() + 5000;

@@ -74,6 +74,8 @@ export interface ClaimActor {
   readonly executionEpoch: Revision;
 }
 export type ClaimCursor = Pick<StoredWork, "priority" | "createdAt" | "id">;
+export type WorkPageKey = Pick<StoredWork, "createdAt" | "id">;
+export interface WorkKeyPage { readonly rows: readonly WorkPageKey[]; readonly upper?: WorkPageKey }
 export interface CandidateScan {
   readonly session: WorkIntent["session"];
   readonly registrationId: string;
@@ -111,7 +113,8 @@ export interface WorkScheduling {
 
 /** Exact-host work operations. Each write checks admission after obtaining its durable locks. */
 export interface DurableWorkRepository extends WorkScheduling {
-  observe?(session: ResourceRef<"session">, id: string): { current(): boolean; release(): void };
+  observe?(session: ResourceRef<"session">, id?: string): { current(): boolean; release(): void };
+  pageKeys(session: ResourceRef<"session">, limit: number, after?: WorkPageKey, upper?: WorkPageKey): Promise<WorkKeyPage>;
   /** Unlocked preparation sample for one exact leased revision, using the store clock. */
   sampleLease(fence: Pick<WorkFence, "session" | "id" | "revision">): Promise<{ readonly expiresAt: string; readonly databaseTime: number } | undefined>;
   inspect(domainId: string, id: string): Promise<WorkInspection | undefined>;

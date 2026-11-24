@@ -6,6 +6,10 @@ import type { SessionsFactory } from "@sessions/types";
 import { createWorkService, WorkError, type RegisteredAgentIdentity, type WorkAgentContext } from "@work";
 import { createWorkAuthorizer } from "@work/helpers/authorization";
 import { createSchedulingStamp } from "@work/helpers/claims/admission";
+import { createWorkEventPublisher } from "@work/helpers/events";
+import { createWorkChatProjection } from "@work/helpers/chatProjection";
+import { createWorkViews } from "@work/helpers/views";
+import { randomUUID } from "node:crypto";
 import { lostWorkPolicy } from "@work/helpers/authorityLoss/helpers";
 import type { WorkAuthorityLossReason } from "@work/helpers/authorityLoss/types";
 import { createWorkSelectionGraph } from "@work/helpers/selections";
@@ -138,6 +142,15 @@ export function createHostedWork(options: AHPServerOptions, sessions: SessionsFa
     },
     authorityLoss: settings.hooks && { hooks: settings.hooks, deadlineMs: settings.hookDeadlineMs, maxPending: settings.maxPendingHooks, assess } });
   const unsubscribe = security.registry.onInvalidate(service.authorityChanged.bind(service));
+  const events = createWorkEventPublisher(() => {
+    diagnostic("publicationFailed");
+  });
+  const views = createWorkViews({ repository: () => host().work, allowedKinds: hostKinds, resolveType,
+    prepare: authorizer.prepareViewRead.bind(authorizer), captureAuthority: () => security.registry.captureFence() });
+  let epoch: string | undefined;
+  let stopEvents: (() => void) | undefined;
+  const chatProjection = settings.chatProjection && createWorkChatProjection(settings.chatProjection);
+  const projections = { views, events, chatProjection, streamEpoch: () => epoch ?? unavailable() };
   let timer: ReturnType<typeof setInterval> | undefined;
   const prepareToolWork: NonNullable<AHPBindingOptions["prepareToolWork"]> = async (connection, context, execution, route, input, signal) => {
     const agent = await worker(connection);
@@ -152,7 +165,7 @@ export function createHostedWork(options: AHPServerOptions, sessions: SessionsFa
     if (error instanceof RepositoryError && error.code === "outcome_unknown") diagnostic("storageOutcomeUnknown", error.correlationId);
     else diagnostic(error instanceof RepositoryError && error.code === "database" ? "storageFailed" : "bindingFailed");
   }
-  return { service, configuration, prepareToolWork, prepareResourceWork, binding: { agentKey, worker, service, bindingFailed, get: service.get.bind(service), changed: service.authorityChanged.bind(service) },
+  return { service, configuration, prepareToolWork, prepareResourceWork, binding: { agentKey, worker, service, projections, bindingFailed, get: service.get.bind(service), changed: service.authorityChanged.bind(service) },
     connected(connection: WebSocketConnectionContext) {
       connections.set(connection.connectionId, connection);
       connection.onClose(() => {
@@ -163,6 +176,10 @@ export function createHostedWork(options: AHPServerOptions, sessions: SessionsFa
     async start() {
       // Startup does a bounded pass. Normal claims continue per-session reconciliation.
       const durable = host();
+      if (durable.workEvents && !stopEvents) {
+        stopEvents = durable.workEvents.subscribe(events.publish.bind(events));
+        epoch = randomUUID();
+      }
       for (const session of (await durable.sessions.listRecoverable()).slice(0, 32)) {
         if (session.lifecycle === "active") await durable.work.expireExhausted(session.ref, 32);
       }
@@ -173,6 +190,11 @@ export function createHostedWork(options: AHPServerOptions, sessions: SessionsFa
       }
     },
     close() {
+      epoch = undefined;
+      stopEvents?.();
+      events.dispose();
+      chatProjection?.dispose();
+      views.close();
       clearInterval(timer);
       unsubscribe();
       service.close();

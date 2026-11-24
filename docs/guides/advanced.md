@@ -79,11 +79,20 @@ while the provider write waits preserves both its previous data and revision.
 
 ## Read the example code
 
+Run `pnpm exec vite-node examples/work-events.ts` to follow the same review across
+two protected clients and two provider-created chats. The senior receives
+authorized system notifications through an explicit presentation handler.
+The observer can discover the chat and receives an empty work view. An
+excluded child stays empty for the senior as well. The sample drops the final
+change hint, waits for the five-second reconciliation interval, and reconnects
+the senior with a fresh transport to recover the cancelled item.
+
 | File | Why to read it |
 | --- | --- |
 | [index.ts](../../examples/advanced/index.ts) | Runs both forms of client invocation, the denial, the host action, and the proposal-to-artifact flow. |
 | [host.ts](../../examples/advanced/host.ts) | Composes the registry, provider rules, SDK host, and public extension ports. |
 | [work.ts](../../examples/advanced/work.ts) | Submits a targeted review and checks the worker's presence, separate execution and read permissions, and revocation. |
+| [workEvents.ts](../../examples/advanced/workEvents.ts) | Connects the native SDK and work projection to one reader, registers the guarded chat presentation, and checks recovery and recipient isolation. |
 | [work-capacity.ts](../../examples/work-capacity.ts) | Exercises default and identity-specific limits across two sessions, then reconnects, waits for a lease to expire, reclaims the work and completes the new attempt. Run with `pnpm exec vite-node examples/work-capacity.ts`. |
 | [persistence.ts](../../examples/advanced/persistence.ts) | Supplies in-memory registrations and exact-instance durable storage, and rejects URI-only session and work mutations. |
 

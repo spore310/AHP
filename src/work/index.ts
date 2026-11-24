@@ -1,4 +1,10 @@
 export { WorkError } from "./helpers/errors";
+export { createWorkClient } from "./helpers/client";
+export type * from "./helpers/client/types";
+export { createWorkChatProjection } from "./helpers/chatProjection";
+export type * from "./helpers/chatProjection/types";
+export { createWorkEventPublisher } from "./helpers/events";
+export type { WorkEvent, WorkEventKind, WorkEventPublisher } from "./helpers/events";
 export { createWorkService, workDetail, workSummary } from "./helpers/helpers";
 export { createSessionOwnerRegistry, createWorkReadPort } from "./helpers/reads/helpers";
 export type { WorkReadPort } from "./helpers/reads/types";

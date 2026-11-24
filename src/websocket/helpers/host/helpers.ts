@@ -323,6 +323,10 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
 
   return {
     work: hostedWork?.service,
+    get workMethods() {
+      return Object.freeze(Object.keys(binding.handlers).filter((method) => method.startsWith("x-ahp/work/")
+        && (currentLease?.workEvents || (method !== "x-ahp/work/subscribe" && method !== "x-ahp/work/unsubscribe"))));
+    },
     prepareResourceWork: hostedWork?.prepareResourceWork,
     workConfiguration: hostedWork?.configuration,
     setAgentEnabled: hostedWork && agents.setEnabled.bind(agents),

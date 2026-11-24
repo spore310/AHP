@@ -47,7 +47,7 @@ function factsCopy<T>(input: T): T {
   return captureValue(input, { maxBytes: 512 * 1024, maxDepth: 24, maxKeys: 20000, postgres: true }).value as T;
 }
 interface Restriction { readonly validUntil: number; readonly isCurrent: () => boolean; readonly active?: () => boolean; release(): void }
-function restriction(value: WorkPolicyRestriction | null | undefined, scheduling: boolean): Restriction {
+function restriction(value: WorkPolicyRestriction | null | undefined, needsFence: boolean): Restriction {
   if (!value || typeof value.release !== "function") return deny();
   const drop: () => unknown = value.release.bind(value);
   const release = () => {
@@ -59,7 +59,7 @@ function restriction(value: WorkPolicyRestriction | null | undefined, scheduling
     const effect: unknown = value.effect;
     if (effect === "deny") return refused();
     if (value.effect !== "allow" || !Number.isSafeInteger(value.validUntil) || typeof value.isCurrent !== "function") return deny();
-    if (scheduling && value.signal === undefined && value.invalidation !== "registry") return deny();
+    if (needsFence && value.signal === undefined && value.invalidation !== "registry") return deny();
     const active = value.signal === undefined ? undefined : captureSignal(value.signal);
     return { validUntil: value.validUntil, isCurrent: value.isCurrent.bind(value), active, release };
   } catch (error) {
@@ -90,8 +90,8 @@ export function createWorkAuthorizer(options: WorkAuthorizerOptions) {
   const resourceByRef = options.resource?.bind(options);
   const sessionIsCurrent = options.isSessionCurrent.bind(options);
   let pending = 0;
-  return { async prepare(caller: WorkRequestContext, operation: WorkOperation, request: WorkIntent, previous?: StoredWork,
-    execution?: WorkPolicyFacts["execution"]) {
+  async function evaluateRequest(caller: WorkRequestContext, operation: WorkOperation, request: WorkIntent, previous?: StoredWork,
+    execution?: WorkPolicyFacts["execution"], fencedRead = false) {
     if (pending >= maxPending || caller.signal.aborted) return deny();
     if (!operations.has(operation)) return refused();
     const controller = new AbortController();
@@ -235,7 +235,7 @@ export function createWorkAuthorizer(options: WorkAuthorizerOptions) {
       if (!stillCurrent() || !preparing()) return deny();
       if (work.prepare) {
         for (const facts of policyFacts) {
-          const receipt = restriction(await work.prepare(facts, controller.signal), operation === "claim" || operation === "renew");
+          const receipt = restriction(await work.prepare(facts, controller.signal), fencedRead || operation === "claim" || operation === "renew");
           if (!preparing()) {
             receipt.release();
             return deny();
@@ -264,5 +264,13 @@ export function createWorkAuthorizer(options: WorkAuthorizerOptions) {
       clearTimeout(timer);
       caller.signal.removeEventListener("abort", stop);
     }
-  } };
+  }
+  return {
+    prepare(caller: WorkRequestContext, operation: WorkOperation, request: WorkIntent, previous?: StoredWork, execution?: WorkPolicyFacts["execution"]) {
+      return evaluateRequest(caller, operation, request, previous, execution);
+    },
+    prepareViewRead(caller: WorkRequestContext, operation: "read", request: WorkIntent, row: StoredWork) {
+      return evaluateRequest(caller, operation, request, row, undefined, true);
+    },
+  };
 }

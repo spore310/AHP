@@ -15,7 +15,7 @@ The existing `ToolAction` class and presentation schemas remain the contract. Op
 | `helpers/client/helpers.ts` | Minimal SDK initialization, private negotiation/assignment, serialized registration, receipt/status APIs and bounded polling. |
 | `helpers/client/helpers/transport/index.ts` | Client transport wrapper export. |
 | `helpers/client/helpers/transport/types.ts` | Staged and active exact private registration contracts. |
-| `helpers/client/helpers/transport/helpers.ts` | Strict v2 local invocation router, exact staging, replay protection, cooperative cancellation, bounded work and endpoint cleanup. |
+| `helpers/client/helpers/transport/helpers.ts` | Single SDK transport reader, private extension notification/close observers, abortable requests, exact staging, replay protection and endpoint cleanup. |
 | `helpers/action/index.ts` | Action registration exports and the existing ToolAction class. |
 | `helpers/action/types.ts` | Trusted schema/action registration and compatibility JSON capture type exports. |
 | `helpers/action/helpers.ts` | Captured schema/implementation registration and compatibility bounded JSON capture export. |

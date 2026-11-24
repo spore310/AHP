@@ -9,7 +9,8 @@ import { createWorkSelectionGraph } from "@work/helpers/selections";
 import type { PoolClientLike } from "../connection";
 import { reject, resourceRows, sessionRow } from "../resources/rows/helpers";
 import type { DurableTransaction, ResourceRow } from "../resources/types";
-import { sampleLease, workRow } from "./rows";
+import { pageKeys, sampleLease, workRow } from "./rows";
+import { pageLimit } from "@persistence/helpers/durability/workPages";
 import { createPostgresScheduling } from "./scheduling";
 
 function anchors(rules: readonly WorkResourceSelection[], rows: readonly ResourceRow[], domainId: string) {
@@ -48,6 +49,14 @@ async function lockWork(client: PoolClientLike, fence: WorkFence): Promise<void>
 export function createPostgresDurableWork(tx: DurableTransaction, authorize: (check: Admission) => void, hostEpoch: string): DurableWorkRepository {
   return {
     ...createPostgresScheduling(tx, authorize, hostEpoch),
+    pageKeys(ref, limit, after, upper) {
+      const input = structuredClone({ ref, after, upper });
+      pageLimit(limit);
+      return tx(async (client) => {
+        if ((await sessionRow(client, input.ref, "share"))?.lifecycle !== "active") return reject();
+        return pageKeys(client, input.ref, limit, input.after, input.upper);
+      });
+    },
     leased(after, limit) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 128) return reject();
       return tx(async (client) => (await client.query<{ domainId: string; id: string }>(

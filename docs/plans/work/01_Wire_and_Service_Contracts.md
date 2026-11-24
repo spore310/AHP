@@ -99,6 +99,7 @@ export interface WorkListRequest {
   readonly filter?: WorkListFilter;
   readonly limit?: number;                 // default 50; 1..100
   readonly cursor?: string;                // opaque server-owned handle
+  readonly subscriptionId?: string;        // active subscription owning this refresh
 }
 export interface WorkPage {
   readonly items: readonly WorkListSummary[];
@@ -119,7 +120,7 @@ export interface WorkSubscribeReply extends WorkPage {
 
 The authorized detail serializer may include the listed optional fields only within its current read projection. A consumer can narrow that projection; it cannot add unapproved fields or disclose internal records. Default list and hints never contain these detail fields. A summary is not a valid lease response. There is deliberately no leaseToken, executionEpoch, submitted_data or recovery metadata member on AuthorizedWorkView.
 
-A list request requires session or announceTo; the latter may infer the one canonical session. Omitted kinds means the current allowed registered kind set, not unknown kinds. An explicit empty kinds list returns no items. Unknown kinds/statuses reject before SQL. Cursors bind the complete normalized filter/limit, actor/connection generation, exact resource/session, authority basis and finite upper key. A subsequent list request must match that binding; for subscription pagination include the returned subscription identity in the client-owned cursor state. Subscriptions apply the same optional filter as their initial snapshot and hints.
+A list request requires session or announceTo; the latter may infer the one canonical session. Omitted kinds means the current allowed registered kind set, not unknown kinds. An explicit empty kinds list returns no items. Unknown kinds/statuses reject before SQL. Cursors bind the complete normalized filter/limit, actor/connection generation, exact resource/session, authority basis and finite upper key. A subsequent list request must match that binding. Every refresh of an active subscription carries its returned `subscriptionId`, including the first cursorless page and manual continuations. The server checks the subscription owner and the exact view and releases its cursors on unsubscribe. Subscriptions apply the same optional filter as their initial snapshot and hints.
 
 Return `{version:1, ...WorkPage}` for list. WorkPage.nextCursor is present even on a zero-visible-item page when the examined-row budget stopped the scan. It is absent only at the actual end of the finite sweep. Keep at most 1,024 server list cursor handles, expire them after 60 seconds of inactivity and invalidate them with their owning connection/subscription/authority generation. Claim continuations have a separate bounded 1,024-entry owner; neither exposes raw hidden row IDs/counts. An expired cursor is a sanitized stale request requiring restart, not an empty page.
 

@@ -3,10 +3,11 @@ import { isDeepStrictEqual } from "node:util";
 import type { ResourceRef } from "@authorization";
 import { atomic, canRetrySessionStart, captureData, captureRef, memoryResourceKey as key, resourceOrder } from "./helpers";
 import { createMemoryWorkRepository } from "./memoryWork";
+import { memoryWorkPages } from "./workPages";
 import { fenceHostWork } from "./workFences";
 import type { StoredWork } from "./workTypes";
 import type { AgentRegistrationRecord } from "../../types";
-import type { Admission, DurableHost, DurableStorage, ResourceRecord, StoredSession, Transition } from "./types";
+import type { Admission, DurableHost, DurableStorage, ResourceRecord, RetirementObserver, StoredSession, Transition } from "./types";
 
 const advance = (revision: string): string => (BigInt(revision) + 1n).toString();
 function unavailable(): never {
@@ -29,6 +30,7 @@ export function createMemoryDurableStorage(work = new Map<string, StoredWork>(),
       hostId = id;
       occupied = true;
       const owned = ++epoch;
+      const pages = memoryWorkPages(work);
       const isOpen = (): boolean => occupied && epoch === owned;
       const guard = (admit: Admission = () => true): void => {
         if (!isOpen()) unavailable();
@@ -69,7 +71,7 @@ export function createMemoryDurableStorage(work = new Map<string, StoredWork>(),
             ...(r.ref.kind === "session" ? { lifecycle: input.next } : {}) });
         });
       };
-      const begin = (session: ResourceRef<"session">, ref: ResourceRef, admit: Admission): readonly ResourceRecord[] => {
+      const begin = (session: ResourceRef<"session">, ref: ResourceRef, admit: Admission, onCancelled?: RetirementObserver): readonly ResourceRecord[] => {
         guard(admit);
         const s = sessions.get(key(session));
         const target = find(ref);
@@ -80,10 +82,13 @@ export function createMemoryDurableStorage(work = new Map<string, StoredWork>(),
           if (row.lifecycle === "retired") continue;
           if ((row.parent && closure.has(key(row.parent))) || (row.grantParent && closure.has(key(row.grantParent)))) closure.add(key(row.ref));
         }
+        const cancelled: { id: string; revision: string }[] = [];
         for (const [id, job] of work) {
           if (!sameResource(job.session, session) || !["queued", "leased"].includes(job.status)) continue;
           if (sameResource(session, ref) || job.scope.some((anchor) => anchor.include && closure.has(key(anchor.resource)))) {
-            work.set(id, { ...job, lease: undefined, status: "cancelled", revision: advance(job.revision), updatedAt: new Date().toISOString() });
+            const revision = advance(job.revision);
+            work.set(id, { ...job, lease: undefined, status: "cancelled", revision, updatedAt: new Date().toISOString() });
+            cancelled.push({ id, revision });
           }
         }
         let changed = false;
@@ -95,7 +100,9 @@ export function createMemoryDurableStorage(work = new Map<string, StoredWork>(),
           }
         }
         if (changed) sessions.set(key(session), { ...s, graphRevision: advance(s.graphRevision), ...(sameResource(ref, session) ? { lifecycle: "retiring" } : {}) });
-        return structuredClone(ordered.filter((r) => closure.has(key(r.ref))).reverse().map((r) => find(r.ref)));
+        const records = structuredClone(ordered.filter((r) => closure.has(key(r.ref))).reverse().map((r) => find(r.ref)));
+        onCancelled?.(cancelled);
+        return records;
       };
       const finish = (session: ResourceRef<"session">, ref: ResourceRef): void => {
         guard();
@@ -117,7 +124,7 @@ export function createMemoryDurableStorage(work = new Map<string, StoredWork>(),
           if (isOpen()) occupied = false;
         });
       },
-      work: createMemoryWorkRepository(work, registrations, resources, (ref) => sessions.get(key(ref)), guard, String(owned)),
+      work: createMemoryWorkRepository(work, registrations, resources, (ref) => sessions.get(key(ref)), guard, String(owned), pages),
       sessions: {
         reserve(s, root, admit) {
           return atomic(() => {
@@ -169,9 +176,9 @@ export function createMemoryDurableStorage(work = new Map<string, StoredWork>(),
           });
         },
         transition,
-        beginRetirement(s, admit) {
+        beginRetirement(s, admit, onCancelled) {
           return atomic(() => {
-            return begin(s, s, admit);
+            return begin(s, s, admit, onCancelled);
           });
         },
         finishRetirement(s) {
@@ -186,7 +193,10 @@ export function createMemoryDurableStorage(work = new Map<string, StoredWork>(),
             if (!s || s.lifecycle !== "retired" || !(Date.parse(s.modifiedAt) < Date.parse(retainAfter)) || sessionRows(ref).some((r) => r.lifecycle !== "retired")) return false;
             const jobs = [...work.entries()].filter(([,job]) => sameResource(job.session, ref));
             if (jobs.some(([,job]) => job.status === "queued" || job.status === "leased" || Date.parse(job.updatedAt) >= Date.parse(retainAfter))) return false;
-            for (const [id] of jobs.slice(0, 256)) work.delete(id);
+            for (const [id, job] of jobs.slice(0, 256)) {
+              pages.remove(job);
+              work.delete(id);
+            }
             if (jobs.length > 256) return false;
             for (const r of sessionRows(ref)) resources.delete(key(r.ref));
             return sessions.delete(key(ref));
@@ -234,9 +244,9 @@ export function createMemoryDurableStorage(work = new Map<string, StoredWork>(),
             return { status: "updated", value: structuredClone({ data, dataRevision }) };
           });
         },
-        beginRetirement(s, ref, admit) {
+        beginRetirement(s, ref, admit, onCancelled) {
           return atomic(() => {
-            return begin(s, ref, admit);
+            return begin(s, ref, admit, onCancelled);
           });
         },
         finishRetirement(s, ref) {

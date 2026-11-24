@@ -11,7 +11,9 @@ PostgreSQL implements the production storage adapter.
 | ---- | -------------- |
 | `helpers/durability/types.ts` | Exact session/resource records, data CAS, lifecycle operations and host lease. |
 | `helpers/durability/workTypes.ts` | Work intent, internal records, lease fences and the owned repository. |
+| `helpers/durability/workPages.ts` | Ordered per-session work keys and bounded finite pages in memory. |
 | `helpers/durability/workFences.ts` | Synchronous readers tied to the acquired host, exact session lifecycle and work revision. |
+| `helpers/durability/workEvents.ts` | Publishes confirmed work revisions after invalidation, including lease expiry and retirement cancellation. |
 | `helpers/durability/workIntent.ts` | Canonical work capture and structural replay equality. |
 | `helpers/durability/memoryWork.ts` | Work admission, quotas, data CAS and settlement over the same records used for retirement. |
 | `helpers/durability/memoryScheduling.ts` | In-memory candidate ordering, identity-wide capacity, lease renewal and bounded exhaustion. |
@@ -135,6 +137,7 @@ work service applies its configured selector budget at the request boundary.
 | [`src/tests/persistence/facade.test.ts`](../tests/persistence/facade.test.ts) | Exact delegation, receiver preservation, shared draining, and no driver evaluation. |
 | [`src/tests/persistence/conformance.test.ts`](../tests/persistence/conformance.test.ts) | Example provider durability and closed mutations, historical work fixture and provider substitution. |
 | [`src/tests/persistence/scheduling.test.ts`](../tests/persistence/scheduling.test.ts) | Bound capacity, exact lease attempts, stale epochs and bounded expiry against the memory repository. |
+| [`src/tests/persistence/conformance/workPages.ts`](../tests/persistence/conformance/workPages.ts) | Finite sweeps, denied-row continuations and cursor lifetimes on both stores. |
 | [`src/tests/persistence/adapters/postgres/`](../tests/persistence/adapters/postgres/) | Driver-double unit tests and opt-in PostgreSQL 17 conformance. |
 
 The explicit real-database conformance runner is

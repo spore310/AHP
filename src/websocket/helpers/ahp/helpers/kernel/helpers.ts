@@ -38,6 +38,7 @@ import {
 import { createAgentWorkExtension, mapWorkError } from "@websocket/helpers/ahp/agentWork";
 import { createToolInvocationBroker } from "@websocket/helpers/ahp/toolInvocation";
 import { createProtectedViewDelivery } from "@websocket/helpers/ahp/helpers/views/helpers";
+import { createWorkViewHandlers } from "@websocket/helpers/ahp/helpers/views/work";
 import type { ResourceViewProof } from "@toolExecution/helpers/views";
 import { isSettlingSession } from "@websocket/helpers/settling";
 import {
@@ -221,6 +222,9 @@ export const createAHPKernel = (
 
   const toolInvocations = createToolInvocationBroker(factory, peers, requirePeer, options?.toolExecution, options?.serverToolExecution, options?.prepareToolWork);
   const protectedDelivery = options?.protectedViews === undefined ? undefined : createProtectedViewDelivery(factory, options.protectedViews, failPeer);
+  const workViews = options?.protectedWork?.projections && createWorkViewHandlers(options.protectedWork, factory, protectedDelivery,
+    requirePeer, failPeer, () => { reportDiagnostic({ event: "publicationFailed" }); });
+  const stopWorkInvalidation = workViews && options.protectedViews?.registry.onInvalidate(workViews.invalidate.bind(workViews));
 
   const beginPending = (peer: AHPPeer, uri: string): void => {
     if (!peer.pending.has(uri)) {
@@ -253,6 +257,7 @@ export const createAHPKernel = (
       return;
     }
     const session = notification.params.session;
+    workViews?.retire(session);
     toolInvocations.removeSession(session);
     for (const peer of peers.values()) {
       const subscribedToSession = peer.subscriptions.has(session) || peer.pending.has(session);
@@ -510,7 +515,7 @@ export const createAHPKernel = (
     },
   };
 
-  const handlers: Record<string, JsonRpcHandler> = { ...baselineHandlers, ...toolInvocations.privateHandlers };
+  const handlers: Record<string, JsonRpcHandler> = { ...baselineHandlers, ...toolInvocations.privateHandlers, ...workViews?.handlers };
   if (protectedDelivery !== undefined) {
     handlers.initialize = async (params, context, invocation): Promise<InitializeResult> => {
       const peer = requirePeer(context);
@@ -620,6 +625,7 @@ export const createAHPKernel = (
         }
         peer.closeNotified = true;
         peer.phase = "closed";
+        workViews?.remove(peer);
         protectedDelivery?.remove(peer);
         toolInvocations.removeConnection(context.connectionId);
         extension?.onConnectionClose(context.connectionId);
@@ -633,7 +639,7 @@ export const createAHPKernel = (
       if (peer === undefined || peer.phase === "closed" || peer.phase === "closing") {
         throw new RpcError(JsonRpcErrorCodes.InvalidRequest, "Connection is closing");
       }
-      if (peer.phase !== "ready" && dispatch.method !== "initialize") {
+      if (peer.phase !== "ready" && dispatch.method !== "initialize" && !workViews?.supportsRestricted(peer, dispatch.method)) {
         throw new RpcError(JsonRpcErrorCodes.InvalidRequest, "Connection not initialized");
       }
       if (AHP_REQUEST_METHODS.has(dispatch.method) && dispatch.kind !== "request") {
@@ -664,6 +670,8 @@ export const createAHPKernel = (
 
       }
       toolInvocations.dispose();
+      stopWorkInvalidation?.();
+      workViews?.dispose();
       protectedDelivery?.dispose();
       for (const peer of [...peers.values()]) {
         extension?.onConnectionClose(peer.context.connectionId);

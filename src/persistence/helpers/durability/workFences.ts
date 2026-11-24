@@ -1,5 +1,6 @@
 import type { DurableHost } from "./types";
 import { synchronousAdmission } from "./scheduling";
+import { publishHostWork } from "./workEvents";
 
 /** All writes on an acquired host invalidate affected synchronous readers before touching the store. */
 export function fenceHostWork(host: DurableHost): DurableHost {
@@ -44,7 +45,7 @@ export function fenceHostWork(host: DurableHost): DurableHost {
   const work = host.work;
   const sessions = host.sessions;
   const resources = host.resources;
-  return { ...host,
+  return publishHostWork({ ...host,
     work: { ...work,
       claimPrepared: (input, admit) => selectedWrite((mark) => work.claimPrepared(input, (locked) => {
         const id = locked.row.id;
@@ -64,7 +65,9 @@ export function fenceHostWork(host: DurableHost): DurableHost {
         return undefined;
       })),
       observe(session, id) {
-        const watched = [key("session", session.instanceId), key("work", id)].map((k) => {
+        const keys = [key("session", session.instanceId)];
+        if (id !== undefined) keys.push(key("work", id));
+        const watched = keys.map((k) => {
           const value = state(k);
           value.readers++;
           return { k, value, revision: value.revision, ready: value.writers === 0 };
@@ -86,12 +89,12 @@ export function fenceHostWork(host: DurableHost): DurableHost {
     },
     sessions: { ...sessions,
       transition: (change, check) => write(key("session", change.session.instanceId), () => sessions.transition(change, check)),
-      beginRetirement: (ref, check) => write(key("session", ref.instanceId), () => sessions.beginRetirement(ref, check)),
+      beginRetirement: (ref, check, save) => write(key("session", ref.instanceId), () => sessions.beginRetirement(ref, check, save)),
     },
     resources: { ...resources,
       reserve: (row, check) => write(key("session", row.session.instanceId), () => resources.reserve(row, check)),
       activate: (change, check) => write(key("session", change.session.instanceId), () => resources.activate(change, check)),
-      beginRetirement: (session, ref, check) => write(key("session", session.instanceId), () => resources.beginRetirement(session, ref, check)),
+      beginRetirement: (session, ref, check, save) => write(key("session", session.instanceId), () => resources.beginRetirement(session, ref, check, save)),
     },
-  };
+  });
 }

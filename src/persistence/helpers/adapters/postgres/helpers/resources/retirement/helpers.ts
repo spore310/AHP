@@ -1,15 +1,15 @@
 import type { ResourceRef } from "@authorization";
 import { sameResource } from "@authorization/helpers/context";
 import { captureRef, resourceOrder } from "@persistence/helpers/durability/helpers";
-import type { Admission, ResourceRecord } from "@persistence/helpers/durability/types";
+import type { Admission, ResourceRecord, RetirementObserver } from "@persistence/helpers/durability/types";
 import type { DurableTransaction } from "../types";
 import { reject, requireRow, resourceRows, sessionRow } from "../rows/helpers";
 
 export function retirement(tx: DurableTransaction, authorize: (check: Admission) => void) {
-  async function begin(sessionRef: ResourceRef<"session">, resourceRef: ResourceRef, check: Admission): Promise<readonly ResourceRecord[]> {
+  async function begin(sessionRef: ResourceRef<"session">, resourceRef: ResourceRef, check: Admission, onCancelled?: RetirementObserver): Promise<readonly ResourceRecord[]> {
     const session = captureRef(sessionRef);
     const ref = captureRef(resourceRef);
-    return tx(async (client) => {
+    const result = await tx(async (client) => {
       const s = await sessionRow(client, session, "exclusive");
       if (!s || s.lifecycle === "retired") reject();
       const rows = await resourceRows(client, session);
@@ -35,11 +35,13 @@ export function retirement(tx: DurableTransaction, authorize: (check: Admission)
         updated_at=clock_timestamp(),resource_revision=resource_revision+1 WHERE resource_pk=ANY($1::uuid[]) AND lifecycle_status<>'retiring'`, [[...keys]]);
       if (changed.rowCount) await client.query(`UPDATE sessions SET graph_revision=graph_revision+1,modified_at=clock_timestamp(),
         lifecycle_status=CASE WHEN $2 THEN 'retiring' ELSE lifecycle_status END WHERE session_instance_id=$1`, [session.instanceId, whole]);
-      await client.query(`UPDATE work_items w SET status='cancelled',lease_agent_id=NULL,lease_execution_epoch=NULL,lease_token=NULL,lease_expires_at=NULL,revision=revision+1,updated_at=clock_timestamp()
-        WHERE ${workPredicate}`, workParams);
+      const cancelled = await client.query<{ id: string; revision: string }>(`UPDATE work_items w SET status='cancelled',lease_agent_id=NULL,lease_execution_epoch=NULL,lease_token=NULL,lease_expires_at=NULL,revision=revision+1,updated_at=clock_timestamp()
+        WHERE ${workPredicate} RETURNING id,revision::text`, workParams);
       const current = await resourceRows(client, session);
-      return closure.reverse().map((row) => requireRow(current, row.ref).record);
+      return { records: closure.reverse().map((row) => requireRow(current, row.ref).record), cancelled: cancelled.rows };
     });
+    onCancelled?.(result.cancelled);
+    return result.records;
   }
   async function finish(sessionRef: ResourceRef<"session">, resourceRef: ResourceRef): Promise<void> {
     const session = captureRef(sessionRef);

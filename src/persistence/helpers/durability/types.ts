@@ -9,6 +9,8 @@ export interface ReplaceData { readonly expectedDataRevision: Revision; readonly
 export type ReplaceDataResult = { readonly status: "updated"; readonly value: DataSnapshot } | { readonly status: "conflict" };
 export type Lifecycle = "creating" | "active" | "suspended" | "failed" | "retiring" | "retired";
 export type Admission = () => unknown;
+export type RetiredWork = readonly { readonly id: string; readonly revision: Revision }[];
+export type RetirementObserver = (cancelled: RetiredWork) => unknown;
 export interface ResourceRecord extends DataSnapshot {
   readonly ref: ResourceRef;
   readonly session: ResourceRef<"session">;
@@ -60,7 +62,7 @@ export interface DurableSessionRepository {
   listRecoverable(after?: string): Promise<readonly StoredSession[]>;
   commitState(input: StateWrite, admission: Admission): Promise<Revision>;
   transition(input: Transition, admission: Admission): Promise<void>;
-  beginRetirement(session: ResourceRef<"session">, admission: Admission): Promise<readonly ResourceRecord[]>;
+  beginRetirement(session: ResourceRef<"session">, admission: Admission, onCancelled?: RetirementObserver): Promise<readonly ResourceRecord[]>;
   finishRetirement(session: ResourceRef<"session">): Promise<void>;
   purge(session: ResourceRef<"session">, retainAfter: string): Promise<boolean>;
 }
@@ -70,10 +72,11 @@ export interface DurableResourceRepository {
   listSession(session: ResourceRef<"session">): Promise<readonly ResourceRecord[]>;
   activate(input: Transition, admission: Admission): Promise<void>;
   replaceData(session: ResourceRef<"session">, ref: ResourceRef, input: ReplaceData, admission: Admission): Promise<ReplaceDataResult>;
-  beginRetirement(session: ResourceRef<"session">, ref: ResourceRef, admission: Admission): Promise<readonly ResourceRecord[]>;
+  beginRetirement(session: ResourceRef<"session">, ref: ResourceRef, admission: Admission, onCancelled?: RetirementObserver): Promise<readonly ResourceRecord[]>;
   finishRetirement(session: ResourceRef<"session">, ref: ResourceRef): Promise<void>;
 }
 export interface DurableHost {
+  readonly workEvents?: Pick<import("@work/helpers/events/types").WorkEventPublisher, "subscribe">;
   readonly work: import("./workTypes").DurableWorkRepository;
   readonly epoch: Revision;
   readonly serverSeq: number;

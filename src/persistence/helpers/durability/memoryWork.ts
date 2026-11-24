@@ -8,6 +8,7 @@ import type { DurableWorkRepository, StoredWork, WorkFence } from "./workTypes";
 import { captureWorkIntent, durableSelectionLimits, sameWorkIntent } from "./workIntent";
 import { createWorkSelectionGraph } from "@work/helpers/selections";
 import { createMemoryScheduling } from "./memoryScheduling";
+import type { memoryWorkPages } from "./workPages";
 
 function conflict(): never {
   throw new RepositoryError("conflict", "Work state or capacity changed.");
@@ -19,7 +20,7 @@ const active = (row: StoredWork) => row.status === "queued" || row.status === "l
 export function createMemoryWorkRepository(
   jobs: Map<string, StoredWork>, registrations: ReadonlyMap<string, AgentRegistrationRecord>,
   resources: ReadonlyMap<string, ResourceRecord>, session: (ref: ResourceRef<"session">) => StoredSession | undefined,
-  guard: (admit?: Admission) => void, hostEpoch: string,
+  guard: (admit?: Admission) => void, hostEpoch: string, pages: ReturnType<typeof memoryWorkPages>,
 ): DurableWorkRepository {
   // SQL serializes fresh work inserts under the host quota lock. A synchronous
   // admission callback can reenter this adapter before the outer insert lands.
@@ -45,6 +46,13 @@ export function createMemoryWorkRepository(
   }
   return {
     ...createMemoryScheduling(jobs, registrations, resources, session, guard, hostEpoch),
+    pageKeys(ref, limit, after, upper) {
+      return atomic(() => {
+        guard();
+        if (session(ref)?.lifecycle !== "active") return conflict();
+        return pages.page(ref, limit, after, upper);
+      });
+    },
     leased(after, limit) {
       return atomic(() => {
         guard();
@@ -180,6 +188,7 @@ export function createMemoryWorkRepository(
           // Every lifecycle transition advances the owning session's graph revision.
           if (session(root.ref)?.graphRevision !== graphRevision || !targetCurrent()) conflict();
           jobs.set(id, row);
+          pages.add(row);
         } finally {
           inserting = false;
         }

@@ -20,7 +20,7 @@ contract and do not inspect this adapter.
 | `helpers/ownership/helpers.ts` | Dedicated advisory-lock connection, takeover epoch and loss notification. |
 | `helpers/resources/index.ts` | Durable storage factory. |
 | `helpers/durableWork/helpers.ts` | Exact-instance work submissions, quota serialization, epoch-fenced data writes and atomic settlement. |
-| `helpers/durableWork/rows.ts` | Internal work record and selectors, including microsecond timestamps. |
+| `helpers/durableWork/rows.ts` | Internal work records, selector hydration, lease samples and exact-session work pages with microsecond timestamp/UUID keys. |
 | `helpers/durableWork/scheduling.ts` | Keyset candidate scans, registration-wide capacity, locked claim and renewal admission, and bounded expiry. |
 | `helpers/resources/types.ts` | Transaction and resource-row types. |
 | `helpers/resources/helpers.ts` | Session/root reservation, fenced state writes, resource data CAS and recovery reads. |
@@ -76,6 +76,7 @@ under [`database/migrations/`](../../../../../database/migrations/).
 - The acquired host exposes exact-instance work graph lookup, submission, data replacement and settlement. Submission serializes quota reservations on the host state row and writes work and selections atomically. Settlement checks the registration epoch, attempt, token and database deadline.
 - Claim and renewal lock the host, session, its canonical rows in primary-key order, and the requesting registration. A separate READ COMMITTED statement counts active leases across all sessions and epochs for that registration. Claim checks prepared revisions and locks one eligible row with `SKIP LOCKED`. Renewal checks the database clock after acquiring its work lock and again in its update. Each expiry batch locks up to 32 exhausted leases in the requested session.
 - Policy preparation reads the lease deadline and database time in a single nonlocking statement for the expected session and work revision. This lets a worker claim a lower-priority item while another transaction holds an expired higher-priority item.
+- A list sweep reads its upper creation-time/UUID key from the session list index. Subsequent queries start strictly after the last examined key and include the upper key. Projection reads lock and reconcile a visible row's revision before delivery. [Live paging proofs](../../../../tests/persistence/adapters/postgres/p4Views.ts)
 - Session rows join exact catalogue ID, key, version, provider and work manifest.
   State commits take the host checkpoint lock first. Ordinary resource data
   writers take shared session locks and compare the exact data revision.

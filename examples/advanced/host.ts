@@ -91,6 +91,7 @@ export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
   readonly persistence?: import("@persistence").PersistenceProvider;
   readonly nativeWrites?: import("@websocket").NativeSessionWrites;
   readonly initialAuthority?: import("@websocket/helpers/security").InitialAuthoritySource;
+  readonly chatProjection?: import("@work").WorkChatProjectionOptions;
   readonly capacityDemo?: { readonly leaseMs: number; readonly configuration: import("@agents").AgentWorkConfig };
 }) {
   const { admitted, namespaces } = createExamplePolicyAdmission(mode, definitions);
@@ -205,6 +206,7 @@ export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
     serverToolExecution: { registry, policies, dispatcher, resolve: ({ origin: resource }) => routeFor(resource), registrations: [serverTool],
       executor: { context: executorContext, generation: 1, current: () => true, fence: () => true } },
     agentWork: { registrations: persistence.registrations, work: persistence.work, allowedKinds: new Set(["code.review"]),
+      ...(lifecycle?.chatProjection && { chatProjection: lifecycle.chatProjection }),
       ...lifecycle?.capacityDemo,
       agentMappings: [{ domainId, subject: "junior", actorAgentId: reviewActorId, agentKey: reviewWorkerKey }, ...(lifecycle?.capacityDemo ? [backupWorker] : [])],
       ceiling: { admitted: { policies: [workPolicy, submitPolicy], namespaces: [] }, mandatory: [providerPolicy] }, dispose: () => persistence.dispose() },
@@ -269,6 +271,16 @@ export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
   };
 
   return { host, catalogue, artifacts, bytes, serverTool, connection, provision, registry, allowTool, allowClientExecutor,
+    async createReviewChat(id: string, driver: { key: string; version: number }) {
+      const port = ports.get(origin.instanceId);
+      assert.ok(port);
+      const chat = await port.create({ kind: "chat", id, driver, parent: origin, grantParent: origin });
+      for (const subject of ["senior", "observer"] as const) registry.installBinding({
+        id: "chat-" + chat.instanceId + "-" + subject, actor: actorFor(subject), scope: chat, roles: roles[subject],
+        policies: [policy, providerPolicy, workPolicy], revision: 1, authority: { kind: "host-policy", policy },
+      });
+      return chat;
+    },
     async replaceReviewData(actor: TrustedRequestContext, work: WorkExecutionRef, change: ReplaceData) {
       const { ticket } = resources.authorize({ actor, target: origin, route: routeFor(origin).route, operation: "replace-review-data",
         payload: change, signal: new AbortController().signal, work });

@@ -1,11 +1,18 @@
 # Work
 
-Work submissions resolve an exact session and its canonical resources. The service captures immutable intent, prepares trusted admission and commits through the acquired host’s work repository. A configured protected host exposes V1 submit, claim, renew, complete, fail, cancel, updateData and get requests.
+Work submissions resolve an exact session and its canonical resources. The service captures immutable intent, prepares trusted admission and commits through the acquired host’s work repository. A configured protected host exposes V1 submit, claim, renew, complete, fail, cancel, updateData, get and list requests. With protected views, web clients can subscribe to work announced to an exact resource. The [transport guide](../websocket/README.md#private-work-subscriptions) describes the wire methods and cursor permission.
 
 ## Files
 
 | File | Responsibility |
 | ---- | -------------- |
+| `helpers/client/types.ts` | Portable extension transport, work view and client lifetime contracts. |
+| `helpers/client/schemas.ts` | Bounded V1 summary pages, read hints, reset and subscription acknowledgements. |
+| `helpers/client/helpers.ts` | Exact-target subscriptions, bounded periodic reconciliation, cancellation and cache replacement. |
+| `helpers/client/index.ts` | Portable client factory and types. |
+| `helpers/chatProjection/types.ts` | Pinned Microsoft message types and the consuming application's presentation boundary. |
+| `helpers/chatProjection/helpers.ts` | Bounded, cancellable formatting and authorized system-notification handoff. |
+| `helpers/chatProjection/index.ts` | Optional work chat presentation factory and types. |
 | `helpers/authorization/types.ts` | Work operations, registered policies, callback facts, restrictions, and host ceilings. |
 | `helpers/authorization/registration.ts` | Capture operation policy maps and validate compiler references at session registration. |
 | `helpers/authorization/helpers.ts` | Prepare scoped canonical decisions, bound consumer restrictions, and check fresh approval cohorts. |
@@ -25,6 +32,10 @@ Work submissions resolve an exact session and its canonical resources. The servi
 | `helpers/commands/facts.ts` | Detached, recursively frozen authority facts for trusted command and acquisition preparers. |
 | `helpers/commands/helpers.ts` | Strict capture, type resolution, submission, data updates and settlement. |
 | `helpers/commands/views.ts` | Detail and summary serializers. |
+| `helpers/views/types.ts` | List filters, authorized pages, exact targets and receipt ownership. |
+| `helpers/views/schemas.ts` | Strict V1 list, subscription and unsubscription requests. |
+| `helpers/views/helpers.ts` | Finite authorized pages, scoped opaque continuations and guarded announcement hints. |
+| `helpers/views/index.ts` | Work view contracts, request schemas and projection factory. |
 | `helpers/commands/failure.ts` | Bounded application failure formatter, generic fallback and callback settlement. |
 | `helpers/claims/helpers.ts` | Priority candidate sweeps, private continuations, capacity admission, renewal and guarded claimant disclosure. |
 | `helpers/claims/admission.ts` | Captures native revocation signals and framework-issued scheduling receipts for locked admission. |
@@ -32,8 +43,66 @@ Work submissions resolve an exact session and its canonical resources. The servi
 | `helpers/authorityLoss/types.ts` | Consumer decisions and captured facts for the affected attempt. |
 | `helpers/authorityLoss/helpers.ts` | Paged authority checks, callback deadlines, retained capacity and fenced disposition. |
 | `helpers/protocol/execution.ts` | Portable work ID, attempt and lease-token schema shared by private dispatch and work requests. |
+| `helpers/events/types.ts` | Minimal committed work event and listener contracts. |
+| `helpers/events/helpers.ts` | Bounded best-effort listener delivery and failure isolation. |
+| `helpers/events/index.ts` | Work event publisher exports. |
 | `helpers/protocol/schemas.ts` | Strict V1 request shapes, canonical UUID capture, retry and data revisions, and bounded JSON. |
 | `index.ts` | Public surface for the module. |
+
+## Work pages and announcement hints
+
+A session list evaluates read permission for each candidate. An `announceTo`
+list or subscription also checks the recipient's visibility of the exact target
+and applies the stored announcement selectors. Summaries contain only the work
+ID, session, kind, priority, status, revision and timestamps.
+
+Each request examines up to 128 rows within five seconds. The first page
+captures the upper creation-time and ID key for its sweep. Reuse the original
+filter and page limit with the returned cursor. An empty page can carry a
+continuation when policy hides the entire examined prefix. Cursors expire
+after 60 seconds of inactivity and are invalidated on revocation, disconnect, subscription
+removal or a change to the exact session graph.
+If a continuation reply is lost, retry its incoming cursor within its lifetime.
+The host rechecks each row and keeps at most the last requested cursor and its
+successor for that sweep. An authorized page refreshes the idle deadline for its
+incoming cursor and the successor it offers. Reading the successor retires the earlier cursor.
+Each reconciliation list uses the active subscription's UUID from the first
+page onward, so unsubscribe also releases cursors from a restarted sweep.
+
+Consumer read restrictions used by list, subscribe and hints must supply a
+native revocation signal or declare synchronous registry invalidation. The
+host rechecks retained row and authority fences immediately before delivery.
+Standalone detail reads continue to support an `isCurrent` check.
+
+## Recipient projections
+
+`createWorkClient(port)` observes the SDK transport's existing reader.
+`subscribe({resource, filter, limit})` pins the resource's `instanceId`.
+Changed hints trigger a coalesced read, and periodic reconciliation runs even
+when the last hint was lost. It defaults to 30 seconds and accepts intervals
+of at least 5 seconds. A rejected read for the active subscription releases
+its ID. Reconciliation tries the exact target once more under the same refresh
+budget, or on the next interval when that budget is exhausted. Only a
+complete sweep removes vanished summaries.
+A scan keeps at most 500 displayed items and a bounded candidate snapshot
+for atomic replacement, configurable up to 5,000 items each. One refresh
+reads at most 20 pages in 10 seconds. A `limit` snapshot pauses scanning and
+includes its continuation when available. A limited scan preserves the old
+display and may fill its free slots. Its detached `remainingItems` holds
+scanned summaries absent from that display (up to the tracked-item limit),
+followed by any unread suffix of the last page (up to 100 summaries).
+Each scan replaces this handoff. Consume it before using `nextCursor` with the original filter,
+page size and `subscriptionId`. The caller can subscribe with a
+narrower exact view. On disconnect the client clears cached data. Call
+`reconnect(port)` with the new authenticated transport to recover the view.
+Await `dispose()` to abort scans, remove observers and release the subscription.
+
+Applications may supply `agentWork.chatProjection: { deliver, adapter }`.
+After the host verifies work and
+destination visibility, the optional formatter receives a detached detailed
+view. The handoff rechecks its proofs and delivers a bounded Microsoft v1
+`SystemNotification` to the explicit application handler. The handler owns
+presentation. The adapter does not dispatch native chat actions.
 
 ## Work kinds
 

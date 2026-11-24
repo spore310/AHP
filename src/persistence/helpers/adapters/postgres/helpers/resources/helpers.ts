@@ -205,7 +205,7 @@ export function createOwnedPostgresStorage(
             }, true);
           },
           transition,
-          beginRetirement: (session, check) => retire.begin(session, session, check),
+          beginRetirement: (session, check, onCancelled) => retire.begin(session, session, check, onCancelled),
           finishRetirement: (session) => retire.finish(session, session),
           purge: retire.purge,
         },

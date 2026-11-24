@@ -24,6 +24,12 @@ export interface AgentWorkExtensionOptions {
 }
 
 export interface ProtectedWorkBinding {
+  readonly projections?: {
+    readonly views: import("@work/helpers/views/types").WorkViews;
+    readonly events: Pick<import("@work").WorkEventPublisher, "subscribe">;
+    readonly chatProjection?: import("@work/helpers/chatProjection/types").WorkChatPresentation;
+    streamEpoch(): string;
+  };
   bindingFailed?(error: unknown): void;
   service?: ProtectedWorkMutations["service"];
   worker?: ProtectedWorkMutations["worker"];
