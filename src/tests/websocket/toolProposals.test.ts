@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
 import { sessionReducer, type SessionAction, type SessionState } from "@microsoft/agent-host-protocol";
-import { connectToolClient, type ToolClient } from "@toolExecution/client";
-import { createApprovedArtifactSource } from "@toolExecution";
+import { connectToolClient, type ToolClient } from "@tool/client";
+import { createApprovedArtifactSource } from "@tool/execution";
 import type { ToolAssignmentRecord } from "@authorization/helpers/evaluate";
-import { TOOL_SCHEMA_DIALECT, type ToolContractDefinition } from "@tools";
+import { TOOL_SCHEMA_DIALECT, type ToolContractDefinition } from "@tool";
 import { createActionSequence } from "@sessions";
 import { connectPolicyTransport, createToolPolicyHost, toolPolicyChannel as channel } from "./toolPolicyFixture";
 
@@ -27,7 +27,7 @@ async function fixture(allowSelfApproval = false, options: Pick<NonNullable<Para
     const transport = await connectPolicyTransport(`ws://127.0.0.1:${String(port)}/capacity`, subject);
     const client = await connectToolClient({ transport, ownership: "owned" }, { clientId: subject, protocolVersions: ["1.0.0"] });
     cleanups.push(() => client.shutdown());
-    await client.client.subscribe(channel);
+    await client.connection.protocol.subscribe(channel);
     return client;
   };
   const context = (subject: keyof typeof roles) => {
@@ -66,11 +66,11 @@ it("Q01/Q03/Q04 publishes an exact proposal, activates the current instance, and
   const proposal = await proposer.proposeTool(channel, definition);
   if (proposal.status !== "proposed") throw new Error("Proposal was not accepted.");
   expect(await executor.dispatchTool(channel, definitionSelector(), {})).toMatchObject({ status: "denied" });
-  expect(await proposer.approveTool(channel, proposal.proposalId, 1)).toEqual({ version: 2, status: "unavailable" });
-  expect(await publisher.approveTool(channel, proposal.proposalId, 1)).toEqual({ version: 2, status: "unavailable" });
+  expect(await proposer.approveTool(channel, proposal.proposalId, 1)).toEqual({ version: 1, status: "unavailable" });
+  expect(await publisher.approveTool(channel, proposal.proposalId, 1)).toEqual({ version: 1, status: "unavailable" });
   const approvals = await Promise.all([approver.approveTool(channel, proposal.proposalId, 1), approver.approveTool(channel, proposal.proposalId, 1)]);
   expect(approvals.map(({ status }) => status).sort()).toEqual(["approved", "unavailable"]);
-  expect(await approver.publishTool(channel, proposal.proposalId, 2)).toEqual({ version: 2, status: "unavailable" });
+  expect(await approver.publishTool(channel, proposal.proposalId, 2)).toEqual({ version: 1, status: "unavailable" });
   expect(await publisher.publishTool(channel, proposal.proposalId, 2)).toMatchObject({ status: "published", revision: 3 });
   expect(host.sessions.getSessionSnapshot(channel)).toEqual(before);
   expect(host.sessions.getSessionToolManifest(channel)?.toolContracts).toEqual([]);
@@ -84,8 +84,8 @@ it("Q01/Q03/Q04 publishes an exact proposal, activates the current instance, and
   expect(await tools.activate({ ...request, actor: f.context("activator").context, current: () => current, fence: () => current })).toBeUndefined();
   expect(host.sessions.getSessionSnapshot(channel)).toEqual(before);
   expect(tools.revision(origin)).toBe(0);
-  const oldView = (await activator.client.subscribe(channel)).result.snapshot?.state as SessionState;
-  const events = activator.client.events();
+  const oldView = (await activator.connection.protocol.subscribe(channel)).result.snapshot?.state as SessionState;
+  const events = activator.connection.protocol.events();
   const received = events.next();
   const enabled = await tools.activate({ ...request, actor: f.context("activator").context });
   if (enabled === undefined) throw new Error("Tool activation was not accepted.");
@@ -93,7 +93,7 @@ it("Q01/Q03/Q04 publishes an exact proposal, activates the current instance, and
   await events.return?.();
   if (event.done || event.value.event.type !== "action") throw new Error("Missing metadata envelope.");
   expect(event.value.event.params.action).toEqual({ type: "session/metaChanged", _meta: {} });
-  const snapshot = (await activator.client.subscribe(channel)).result.snapshot;
+  const snapshot = (await activator.connection.protocol.subscribe(channel)).result.snapshot;
   expect(snapshot?.state).toEqual(sessionReducer(oldView, event.value.event.params.action as SessionAction));
   expect(enabled.revision).toBe(1);
   expect(await tools.activate({ ...request, actor: f.context("activator").context })).toBeUndefined();
@@ -191,12 +191,12 @@ it("Q02/Q03 bounds proposal input and permits explicit self-approval without pub
   const proposer = await f.connect("proposer");
   const oversized = { ...definition, description: "x".repeat(64 * 1024) };
   const unsupported = { ...definition, inputSchema: { ...definition.inputSchema, $ref: "https://example.invalid/definition" } };
-  for (const candidate of [oversized, unsupported]) expect(await proposer.proposeTool(channel, candidate)).toEqual({ version: 2, status: "unavailable" });
+  for (const candidate of [oversized, unsupported]) expect(await proposer.proposeTool(channel, candidate)).toEqual({ version: 1, status: "unavailable" });
   const proposed = await proposer.proposeTool(channel, definition);
   if (proposed.status !== "proposed") throw new Error("Missing proposal.");
-  expect(await proposer.proposeTool(channel, { ...definition, id: "9920f651-c24e-4a69-bb8d-140f67da0ca8" })).toEqual({ version: 2, status: "unavailable" });
+  expect(await proposer.proposeTool(channel, { ...definition, id: "9920f651-c24e-4a69-bb8d-140f67da0ca8" })).toEqual({ version: 1, status: "unavailable" });
   expect(await proposer.approveTool(channel, proposed.proposalId, 1)).toMatchObject({ status: "approved" });
-  expect(await proposer.publishTool(channel, proposed.proposalId, 2)).toEqual({ version: 2, status: "unavailable" });
+  expect(await proposer.publishTool(channel, proposed.proposalId, 2)).toEqual({ version: 1, status: "unavailable" });
 });
 
 function definitionSelector() {

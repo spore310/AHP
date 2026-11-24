@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { executionSchema, workUuid } from "./execution";
 export { executionSchema, workUuid } from "./execution";
-import { captureValue } from "@jsonrpc/helpers/value/helpers";
+import { captureValue } from "@jsonrpc/value";
 import type { JsonObject } from "@persistence/helpers/durability/types";
 import { isPortableText } from "@persistence/helpers/text";
 

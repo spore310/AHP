@@ -4,7 +4,7 @@ import type { JsonRpcMessage } from "@jsonrpc";
 import type { SessionsFactory } from "@sessions";
 import type { ResourceRef } from "@authorization";
 import { sameResource } from "@authorization/helpers/context";
-import { createResourceViews, projectSessionViewAction, ResourceViewDenied, type ResourceViewOptions, type ResourceViewProof, type ResourceViewSource } from "@toolExecution/helpers/views";
+import { createResourceViews, projectSessionViewAction, ResourceViewDenied, type ResourceViewOptions, type ResourceViewProof, type ResourceViewSource } from "@sessions/views";
 import { WorkError } from "@work";
 import type { AHPPeer } from "@websocket/helpers/ahp/types";
 import type { PeerViewState, ViewDeliveryIntent } from "./types";

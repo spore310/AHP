@@ -7,7 +7,8 @@ import {
 import type {
   EvaluateSelector, ProjectAssignmentsInput, ReferenceInputLimits, ToolAssignmentRecord,
 } from "@authorization/helpers/evaluate";
-import { createToolPolicyFactory, defineToolPolicyNamespace, projectAssignedDescriptors, type CompiledToolPolicy } from "@toolPolicy";
+import { createPolicyFactory, definePolicyNamespace, type CompiledPolicy } from "@authorization/policies";
+import { projectAssignedDescriptors } from "@tool/policy";
 
 const start = 1_700_000_000_000;
 const scope: ResourceRef = { domainId: "domain", kind: "session", id: "session", instanceId: "instance" };
@@ -21,7 +22,7 @@ const owner = { domainId: "domain", subject: "owner" };
 const contractId = "11111111-1111-4111-8111-111111111111";
 const secondId = "22222222-2222-4222-8222-222222222222";
 const ref = (id: string) => ({ id, revision: 1 });
-const direct = (id: string): CompiledToolPolicy => ({
+const direct = (id: string): CompiledPolicy => ({
   id, revision: 1,
   operations: {
     invoke: { actor: { mode: "direct-grant", actors: ["user"] }, requiredPermissions: ["blocked"] },
@@ -52,7 +53,7 @@ const projection = (input: EvaluateSelector): ProjectAssignmentsInput => ({
 const rig = (inputLimits: Partial<ReferenceInputLimits> = {}, wide = false, proofs = false, mandatory = false) => {
   let calls = 0;
   const options = {
-    policies: createToolPolicyFactory({
+    policies: createPolicyFactory({
       policies: [direct("allow"), direct("restriction-a"), direct("restriction-b")],
       limits: policyLimitsSchema.parse({ maxPolicyRefs: 1 }),
     }),
@@ -104,9 +105,9 @@ const expectRejected = (decision: { readonly effect: string; readonly code?: str
 describe("P03 admission and input limits", () => {
   it("allows namespace closure only with an exact binding and never calls the resolver", async () => {
     let calls = 0;
-    const factory = createToolPolicyFactory({
+    const factory = createPolicyFactory({
       policies: [direct("outside")],
-      namespaces: [defineToolPolicyNamespace({
+      namespaces: [definePolicyNamespace({
         name: "workspace", revision: 1, policies: [direct("inside")], resolve: () => {
           calls += 1;
           return [];
@@ -140,7 +141,7 @@ describe("P03 admission and input limits", () => {
 
   for (const fault of ["unknown-namespace", "unknown-policy"] as const) {
     it(`${fault} admission installation fails atomically without consuming the cap`, async () => {
-      const compiled = createToolPolicyFactory({ namespaces: [defineToolPolicyNamespace({
+      const compiled = createPolicyFactory({ namespaces: [definePolicyNamespace({
         name: "workspace", revision: 1, policies: [direct("allow")], resolve: () => [],
       })], bindings: [{ sessionType: { key: "chat", version: 1 }, providerId: "host",
         admitted: { policies: [], namespaces: [{ name: "workspace", revision: 1 }] }, mandatory: [],
@@ -170,7 +171,7 @@ describe("P03 admission and input limits", () => {
   }
 
   it("preserves missing-evaluator denial rather than silently dropping a permission", async () => {
-    const host = createReferenceAuthorizer({ policies: createToolPolicyFactory({ policies: [direct("allow")] }), now: () => start });
+    const host = createReferenceAuthorizer({ policies: createPolicyFactory({ policies: [direct("allow")] }), now: () => start });
     host.installResource({ resource: scope, owner, route, externalAuthority: "none" });
     bind(host, "grant", "allow");
     expect((await host.evaluate(base)).decision).toEqual({ effect: "deny", code: "missing-evaluator" });
@@ -337,7 +338,7 @@ describe("P03 admission and input limits", () => {
     const targets = [scope, ...Array.from({ length: 127 }, (_, index) => ({ ...scope, id: `target-${String(index)}`, instanceId: `target-${String(index)}` }))];
     const permittedRoute = { origin: scope, targets };
     const host = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [direct("allow")] }), now: () => start,
+      policies: createPolicyFactory({ policies: [direct("allow")] }), now: () => start,
       permissionEvaluators: { blocked: () => {
         calls += 1;
         return "allow";

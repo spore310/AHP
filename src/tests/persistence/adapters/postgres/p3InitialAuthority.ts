@@ -54,7 +54,7 @@ export async function verifyInitialClaimAuthority(connectionString: string, db: 
     assert.equal((await outcome)[0]?.status, "rejected");
     assert.deepEqual(await state(), before);
   } finally {
-    await Promise.allSettled(peers.map(({ client }) => client.shutdown()));
+    await Promise.allSettled(peers.map(({ connection }) => connection.shutdown()));
     await demo.stop();
   }
 }

@@ -38,7 +38,7 @@ Types: `SecuritySubjectRef`, `PolicyActorRef`, `ResourceRef`, `ResourceRoute`, `
 
 Values: `POLICY_LIMIT_DEFAULTS`, `POLICY_LIMIT_ABSOLUTE`, `MAX_POLICY_REVISION`, `RESERVED_OBJECT_KEYS`, `policyLimitsSchema`, `createAuthorizationSchemas`, `identifierSchema`, `roleNameSchema`, `securitySubjectRefSchema`, `policyActorRefSchema`, `resourceRefSchema`, `trustedRequestContextSchema`, `policyRefSchema`, `namespaceRefSchema`, `policyAdmissionSchema`, `policyScopeRulesSchema`, `grantAuthoritySchema`, `scopedPolicyBindingSchema`, `executorRevisionSchema`, `authorityRevisionStampSchema`, `policyDecisionSchema`, `capturePlainJson`, `rejectReservedKeys`.
 
-`PolicyDecision` is defined here so the evaluator port does not import tool policy. `@toolPolicy` re-exports it.
+`PolicyDecision` is defined here so the evaluator port does not import tool policy. `@authorization/policies` re-exports it.
 
 ## Limits
 
@@ -195,7 +195,7 @@ Installing a resource, binding, or assignment is trusted host administration, no
 policy-aware issuance. A compiler `select()` result is not a grant. Requests do not
 supply mandatory rules. External proofs are trusted in-process adapter facts, copied
 before callbacks, and are not wire credentials. `matches` re-reads live registration
-without calling `FreshnessPort`. Descriptor materialization stays in `@toolPolicy`.
+without calling `FreshnessPort`. Descriptor materialization stays in `@tool/policy`.
 No database restoration, private assignment transport, challenge continuation or
 remote execution attestation is implemented by this module's grant service.
 

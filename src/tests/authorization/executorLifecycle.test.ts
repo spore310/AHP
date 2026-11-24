@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createReferenceAuthorizer } from "@authorization";
-import { createToolPolicyFactory } from "@toolPolicy";
+import { createPolicyFactory } from "@authorization/policies";
 
 const fixture = () => {
   const policy = { id: "executor", revision: 1 };
@@ -10,7 +10,7 @@ const fixture = () => {
   const route = { origin: scope, targets: [scope] };
   const contract = { id: "11111111-1111-4111-8111-111111111111", key: "test.echo", version: 1,
     name: "echo", schemaDialect: "draft-07" as const, inputSchema: { type: "object" } };
-  const policies = createToolPolicyFactory({ policies: [{ ...policy, operations: {
+  const policies = createPolicyFactory({ policies: [{ ...policy, operations: {
     execute: { actor: { mode: "direct-grant", actors: ["user"] } },
   }, challenge: { required: false } }] });
   const registry = createReferenceAuthorizer({ policies, now: Date.now });

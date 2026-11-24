@@ -5,8 +5,8 @@ import { parseUnknownJson } from "@jsonrpc";
 import { ACTION_TYPE_ROOT_ACTIVE_SESSIONS_CHANGED, ACTION_TYPE_SESSION_META_CHANGED, ROOT_CHANNEL_URI } from "@sessions/constants";
 import { sameResource } from "@authorization/helpers/context";
 import type { ResourceRef } from "@authorization";
-import { APPLICATION_META_KEY, MAX_TOOLS_PER_TYPE, type ToolContractDefinition } from "@tools";
-import type { PublishedTool } from "@toolPolicy/helpers/admission";
+import { APPLICATION_META_KEY, MAX_TOOLS_PER_TYPE, type ToolContractDefinition } from "@tool";
+import type { PublishedTool } from "@tool/helpers/policy/helpers/admission";
 import { executeCreateSession, prepareCreateSession, publishCreatedSession, startSessionBackend } from "@sessions/createSession";
 import { captureCreationSecurity, createSessionAuthorization, freezeCreation, validateCreationRegistrations } from "@sessions/helpers/creation";
 import {

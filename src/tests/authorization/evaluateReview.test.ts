@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { createReferenceAuthorizer, type ScopedPolicyBinding, type TrustedRequestContext } from "@authorization";
-import { createToolPolicyFactory, projectAssignedDescriptors } from "@toolPolicy";
+import { createPolicyFactory } from "@authorization/policies";
+import { projectAssignedDescriptors } from "@tool/policy";
 
 const start = 1_700_000_000_000;
 const scope = { domainId: "domain", kind: "session", id: "session", instanceId: "instance" };
@@ -29,7 +30,7 @@ const fixture = (options: {
   external?: boolean;
 } = {}) => {
   const host = createReferenceAuthorizer({
-    policies: createToolPolicyFactory({ policies: [
+    policies: createPolicyFactory({ policies: [
       { id: "allow", revision: 1, operations: {
         invoke: { ...directRule, ...(options.primaryPermission === true ? { requiredPermissions: ["blocked"] } : {}) },
       }, challenge: { required: false } },
@@ -66,7 +67,7 @@ describe("P03 authority review regressions", () => {
   it("does not disclose descriptors through a synchronous permission-check bypass", async () => {
     let calls = 0;
     const host = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [{
+      policies: createPolicyFactory({ policies: [{
         id: "allow", revision: 1,
         operations: { discover: { ...directRule, requiredPermissions: ["blocked"] } },
         challenge: { required: false },

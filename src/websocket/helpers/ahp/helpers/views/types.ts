@@ -1,5 +1,5 @@
 import type { JsonRpcMessage } from "@jsonrpc";
-import type { ResourceViewCatalogue, ResourceViewProof, ResourceViewRecipient, ResourceViewRecord } from "@toolExecution/helpers/views";
+import type { ResourceViewCatalogue, ResourceViewProof, ResourceViewRecipient, ResourceViewRecord } from "@sessions/views";
 
 export interface ViewDeliveryIntent {
   readonly type: "native";

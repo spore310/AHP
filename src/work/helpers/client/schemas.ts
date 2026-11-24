@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { captureValue } from "@jsonrpc/helpers/value/helpers";
+import { captureValue } from "@jsonrpc/value";
 import { workViewStatuses } from "../views/schemas";
 
 const revision = z.string().regex(/^[1-9][0-9]{0,18}$/u).refine((s) => BigInt(s) <= 9223372036854775807n);

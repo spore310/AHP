@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createReferenceAuthorizer, type ResourceRef, type ScopedPolicyBinding } from "@authorization";
-import { createToolPolicyFactory } from "@toolPolicy";
+import { createPolicyFactory } from "@authorization/policies";
 
 const scope: ResourceRef = { domainId: "local", kind: "session", id: "ahp-session:/delegation", instanceId: "instance" };
 const actor = { kind: "user" as const, principal: { domainId: "local", subject: "alice" } };
@@ -12,7 +12,7 @@ const registration = { resource: scope, owner: actor.principal, route, externalA
 const grant = (): ScopedPolicyBinding => ({ id: "bootstrap", actor, scope, roles: [], policies: [policy], revision: 1, authority: { kind: "host-policy", policy } });
 const invocation = { actor: caller, operation: "invoke" as const, bindingId: "bootstrap", policyRef: policy, scope, route };
 const fixture = (capacity = 1, now = () => 1000, maxInvalidationListeners = 16, maxGrantResourceDepth = 8) => createReferenceAuthorizer({
-  policies: createToolPolicyFactory({ policies: [{ ...policy, operations: { invoke: { actor: { mode: "direct-grant", actors: ["user"] } } }, challenge: { required: false } }] }),
+  policies: createPolicyFactory({ policies: [{ ...policy, operations: { invoke: { actor: { mode: "direct-grant", actors: ["user"] } } }, challenge: { required: false } }] }),
   now,
   maxInvalidationListeners,
   maxGrantResourceDepth,

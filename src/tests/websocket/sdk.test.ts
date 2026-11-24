@@ -1,17 +1,10 @@
 import { AhpClient } from "@microsoft/agent-host-protocol/client";
-import { WebSocketTransport } from "@microsoft/agent-host-protocol/ws";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { connectPolicyTransport, createToolPolicyHost } from "./toolPolicyFixture";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { SESSION_URI_PREFIX } from "@sessions";
 import { ACTION_TYPE_SESSION_TITLE_CHANGED } from "@sessions/constants";
-import { createMockProvider } from "@sessions/mock";
-import { createAHPServer, type AHPServerHandle } from "@websocket";
-
-// INTERNAL canonical SDK compatibility, not authorized public-host/P12 evidence.
-// File-isolated substitution preserves real host composition and all canonical assertions.
-vi.mock("@websocket/helpers/ahp", async () => ({
-  createAHPBinding: (await import("@websocket/helpers/ahp/helpers/kernel/helpers")).createAHPKernel,
-}));
+import type { AHPServerHandle } from "@websocket";
 
 const hosts: AHPServerHandle[] = [];
 const clients: AhpClient[] = [];
@@ -43,7 +36,7 @@ const nextEvent = async (
 };
 
 const openClient = async (url: string, clientId: string): Promise<AhpClient> => {
-  const transport = await WebSocketTransport.connect(url);
+  const transport = await connectPolicyTransport(url, "creator");
   const client = new AhpClient(transport);
   clients.push(client);
   client.connect();
@@ -66,21 +59,18 @@ afterEach(async () => {
 
 describe("SDK host baseline", () => {
   it("lets two SDK clients observe the same created session and one rename", async () => {
-    const host = createAHPServer({
-      host: "127.0.0.1",
-      port: 0,
-      sessions: { providers: [createMockProvider()] },
-    });
+    const { host, sessionHeader } = await createToolPolicyHost([], { protectedViews: true, creatorView: true,
+      roles: { creator: ["discover"] } });
     hosts.push(host);
     const address = await host.start();
-    const url = `ws://127.0.0.1:${String(address.port)}/`;
+    const url = `ws://127.0.0.1:${String(address.port)}/capacity`;
     const creator = await openClient(url, "creator");
     const observer = await openClient(url, "observer");
     const creatorEvents = creator.events();
     const observerEvents = observer.events();
     const channel = `${SESSION_URI_PREFIX}sdk-shared`;
 
-    const created = creator.request("createSession", { channel });
+    const created = creator.request("createSession", { channel, config: { "x-ahp-session-type": sessionHeader } });
     await expect(nextEvent(creatorEvents, "sessionAdded")).resolves.toMatchObject({
       channel: "ahp-root://",
       event: { type: "sessionAdded" },
@@ -93,7 +83,7 @@ describe("SDK host baseline", () => {
 
     await creator.subscribe(channel);
     await observer.subscribe(channel);
-    creator.dispatch(channel, { type: ACTION_TYPE_SESSION_TITLE_CHANGED, title: "Shared title" });
+    await host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: ACTION_TYPE_SESSION_TITLE_CHANGED, title: "Shared title" } });
 
     await expect(nextEvent(creatorEvents, "action", channel)).resolves.toMatchObject({
       channel,

@@ -3,17 +3,16 @@ import { readFileSync } from "node:fs";
 import { expect } from "vitest";
 import type { AhpTransport } from "@microsoft/agent-host-protocol/client";
 import type { ResourceRef, PolicyActorRef } from "@authorization";
-import type { ClientToolRegistration, ClientToolRoute } from "@toolExecution/helpers/client/helpers/broker";
-import { connectToolClient, type ToolClient } from "@toolExecution/client";
-import { connectToolClient as compatibilityConnect } from "@toolClient";
+import type { ClientToolRegistration, ClientToolRoute } from "@tool/helpers/execution/helpers/remote";
+import { connectToolClient, type ToolClient } from "@tool/client";
 import { parseUnknownJson } from "@jsonrpc";
-import { parseToolWire, toolAssignedReplySchema, toolAdvertiseReplySchema, toolDispatchReplySchema } from "@toolExecution/helpers/client/helpers/protocol";
+import { parseToolWire, toolAssignedReplySchema, toolAdvertiseReplySchema, toolDispatchReplySchema } from "@tool/protocol";
 import { createToolPolicyHost, connectPolicyTransport, toolPolicyChannel as channel } from "./toolPolicyFixture";
-import { codingHarnessContracts, createCodingHarness } from "../toolExecution/fixtures";
+import { codingHarnessContracts, createCodingHarness } from "../tool/execution/fixtures";
 
 export { channel, codingHarnessContracts, createCodingHarness };
-export const sourceEvidence = Object.freeze({ path: "src/tests/toolExecution/fixtures.ts", export: "createCodingHarness",
-  candidate: createHash("sha256").update(readFileSync("src/tests/toolExecution/fixtures.ts")).digest("hex"), revision: 7 });
+export const sourceEvidence = Object.freeze({ path: "src/tests/tool/execution/fixtures.ts", export: "createCodingHarness",
+  candidate: createHash("sha256").update(readFileSync("src/tests/tool/execution/fixtures.ts")).digest("hex"), revision: 7 });
 
 export function expectNoDeniedDispatchFrames(frames: readonly unknown[], deniedPath: string, recipient?: string): void {
   expect(frames, recipient).not.toContainEqual(expect.objectContaining({ method: "action" }));
@@ -120,7 +119,7 @@ export async function createPolicyIntegrationFixture(options: {
   const address = await f.host.start(), clients: ToolClient[] = [];
   const captures: Array<{ subject: string; received: unknown[]; sent: unknown[]; closed: Promise<void> }> = [];
   const url = "ws://127.0.0.1:" + String(address.port) + "/capacity";
-  const connect = async (subject: string, clientId = "display-" + subject, compatibility = false,
+  const connect = async (subject: string, clientId = "display-" + subject,
     transformInvoke?: (frame: unknown) => unknown) => {
     const inner = await connectPolicyTransport(url, subject);
     const received: unknown[] = [], sent: unknown[] = [];
@@ -161,7 +160,7 @@ export async function createPolicyIntegrationFixture(options: {
         }
       }, close: inner.close.bind(inner),
     };
-    const client = await (compatibility ? compatibilityConnect : connectToolClient)({ transport, ownership: "owned" }, { clientId, protocolVersions: ["1.0.0"] });
+    const client = await connectToolClient({ transport, ownership: "owned" }, { clientId, protocolVersions: ["1.0.0"] });
     clients.push(client);
     const request = async (method: string, params: unknown): Promise<unknown> => {
       const id = "p12-test-" + globalThis.crypto.randomUUID(), result = Promise.withResolvers<unknown>();
@@ -181,10 +180,10 @@ export async function createPolicyIntegrationFixture(options: {
       if (typeof frame !== "object" || frame === null || !("result" in frame)) throw new Error("Private request denied");
       return frame.result;
     };
-    const assigned = async () => parseToolWire(toolAssignedReplySchema, result(await request("x-ahp/tools/assigned", { version: 2, channel })));
-    const advertise = async (viewRevision: string, contracts: unknown[]) => parseToolWire(toolAdvertiseReplySchema, result(await request("x-ahp/tools/advertise", { version: 2, channel, viewRevision, contracts })));
-    const dispatch = async (contract: unknown, input: unknown) => parseToolWire(toolDispatchReplySchema, result(await request("x-ahp/tools/dispatch", { version: 2, channel, contract, input })));
-    await client.client.subscribe(channel);
+    const assigned = async () => parseToolWire(toolAssignedReplySchema, result(await request("x-ahp/tools/assigned", { version: 1, channel })));
+    const advertise = async (viewRevision: string, contracts: unknown[]) => parseToolWire(toolAdvertiseReplySchema, result(await request("x-ahp/tools/advertise", { version: 1, channel, viewRevision, contracts })));
+    const dispatch = async (contract: unknown, input: unknown) => parseToolWire(toolDispatchReplySchema, result(await request("x-ahp/tools/dispatch", { version: 1, channel, contract, input })));
+    await client.connection.protocol.subscribe(channel);
     const actual = [...f.contexts.values()].find((entry) => entry.context.actor.principal.subject === subject);
     if (actual === undefined) throw new Error("Missing authenticated context");
     return { client, received, sent, request, assigned, advertise, dispatch, actual, transport, closed: closed.promise };
@@ -194,7 +193,7 @@ export async function createPolicyIntegrationFixture(options: {
     if (canonical === undefined) throw new Error("Missing canonical session snapshot");
     const serverSeq = f.host.sessions.getCurrentServerSeq();
     const views = await Promise.all(viewers.map(async (viewer) => {
-      const { result: { snapshot } } = await viewer.client.subscribe(channel);
+      const { result: { snapshot } } = await viewer.connection.protocol.subscribe(channel);
       if (snapshot?.resource !== channel) throw new Error("Missing recipient session snapshot");
       return snapshot;
     }));

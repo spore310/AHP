@@ -8,7 +8,7 @@ import {
   type ScopedPolicyBinding,
   type TrustedRequestContext,
 } from "@authorization";
-import { createToolPolicyFactory, type ToolOperation } from "@toolPolicy";
+import { createPolicyFactory, type PolicyOperation } from "@authorization/policies";
 
 const NOW = 1_700_000_000_000;
 
@@ -34,7 +34,7 @@ const actorContext = (value: string, domainId = "local"): TrustedRequestContext 
 
 const policy = (
   id: string,
-  operation: ToolOperation,
+  operation: PolicyOperation,
   actor: { readonly mode: "direct-grant"; readonly actors: readonly ("user" | "agent")[] }
     | { readonly mode: "roles"; readonly actors: { readonly user?: { readonly anyOf: readonly string[] }; readonly agent?: { readonly anyOf: readonly string[] } } },
   extra: { readonly reveal?: boolean; readonly requiredPermissions?: readonly string[]; readonly challenge?: boolean } = {},
@@ -76,7 +76,7 @@ const authorizerFor = (
   now: () => number = () => NOW,
   permissionEvaluators?: Parameters<typeof createReferenceAuthorizer>[0]["permissionEvaluators"],
 ) => createReferenceAuthorizer({
-  policies: createToolPolicyFactory({ policies }),
+  policies: createPolicyFactory({ policies }),
   now,
   permissionEvaluators,
 });

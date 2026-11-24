@@ -3,7 +3,7 @@ import { setTimeout } from "node:timers/promises";
 import type { DurableHost } from "@persistence";
 import { workFixture } from "../../work/commandsFixture";
 import { createReferenceAuthorizer } from "@authorization";
-import { createToolPolicyFactory } from "@toolPolicy";
+import { createPolicyFactory } from "@authorization/policies";
 import { createWorkAuthorizer } from "@work/helpers/authorization";
 import { captureCreationPolicy } from "@sessions/helpers/creation";
 import { createWorkViews, type WorkListRequest } from "@work/helpers/views";
@@ -32,7 +32,7 @@ export async function assertWorkPageProjection(host: DurableHost) {
   const policy = { id: "review.list", revision: 1 };
   const rules = { admitted: { policies: [policy], namespaces: [] }, mandatory: [] };
   const purpose = { actor: { mode: "direct-grant" as const, actors: ["user" as const] }, reveal: true };
-  const policies = createToolPolicyFactory({ policies: [{ ...policy, operations: { discover: purpose }, challenge: { required: false } }],
+  const policies = createPolicyFactory({ policies: [{ ...policy, operations: { discover: purpose }, challenge: { required: false } }],
     bindings: [{ sessionType: f.session.type, providerId: f.session.providerId, ...rules }] });
   const registry = createReferenceAuthorizer({ policies, now: Date.now });
   const admission = { sessionType: f.session.type, providerId: f.session.providerId };

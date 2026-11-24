@@ -24,7 +24,7 @@ it("recovers an active work view after the final reset hint is lost with no furt
     const { port } = await demo.host.start();
     await demo.provision();
     peer = await openWorkClient("ws://127.0.0.1:" + String(port), "senior", "lost-final-reset");
-    const transport = peer.transport;
+    const transport = peer.workPort;
     let lost = 0;
     client = createWorkClient({ request: transport.request.bind(transport), onClose: transport.onClose.bind(transport),
       onNotification: (method, receive) => transport.onNotification(method, (params) => {
@@ -51,7 +51,7 @@ it("recovers an active work view after the final reset hint is lost with no furt
     expect(recovered.items).toEqual(original.items);
   } finally {
     await client?.dispose();
-    await peer?.client.shutdown();
+    await peer?.connection.shutdown();
     await demo.stop();
   }
 }, 12000);
@@ -69,8 +69,8 @@ it("invalidates refresh cursors on disposal and preserves a live continuation fo
     peer = await openWorkClient("ws://127.0.0.1:" + String(port), "senior", "client-cursor-lifetime");
     const { kind, id, instanceId } = demo.origin(), resource = { kind, id, instanceId };
     // Drop hints to force a new full refresh of an already active subscription.
-    client = createWorkClient({ request: peer.transport.request.bind(peer.transport), onNotification: () => () => undefined,
-      onClose: peer.transport.onClose.bind(peer.transport) }, { maxPages: 1 });
+    client = createWorkClient({ request: peer.workPort.request.bind(peer.workPort), onNotification: () => () => undefined,
+      onClose: peer.workPort.onClose.bind(peer.workPort) }, { maxPages: 1 });
     const initial = await client.subscribe({ resource, limit: 1 });
     expect(initial).toMatchObject({ status: "ready", items: [] });
     const sender = peer;
@@ -86,7 +86,7 @@ it("invalidates refresh cursors on disposal and preserves a live continuation fo
     await expect(peer.request("x-ahp/work/list", continuation)).rejects.toThrow();
     await expect(peer.request("x-ahp/work/list", { ...continuation, subscriptionId: initial.subscriptionId })).rejects.toThrow();
     for (const key of ["third", "fourth", "fifth"]) ids.push(z.object({ workId: z.uuid() }).parse(await submit(key)).workId);
-    client = createWorkClient(peer.transport, { maxTrackedItems: 3 });
+    client = createWorkClient(peer.connection, { maxTrackedItems: 3 });
     const limited = await client.subscribe({ resource, limit: 2 });
     expect(limited.status).toBe("limit");
     expect(limited.items).toHaveLength(3);
@@ -97,7 +97,7 @@ it("invalidates refresh cursors on disposal and preserves a live continuation fo
     expect([...limited.items, ...(limited.remainingItems ?? []), ...final.items].map((item) => item.id).sort()).toEqual(ids.sort());
   } finally {
     await client?.dispose();
-    await peer?.client.shutdown();
+    await peer?.connection.shutdown();
     await demo.stop();
   }
 });

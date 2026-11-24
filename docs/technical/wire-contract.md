@@ -117,18 +117,16 @@ consent alone grants no mutation authority.
 
 Trusted canonical typed session snapshots carry the server-authored contract manifest
 under `_meta["x-ahp-application"]`. This does not extend AHP's top-level state or
-claim the host implements `serverTools`. Client advertisements use the standard
-`session/activeClientSet` action with exact revision metadata under each tool's
-`_meta["x-ahp-tool-contract"]`; full schemas survive parsing for comparison.
+claim the host implements `serverTools`. A client advertises exact implementations through the private V1 `x-ahp/tools/advertise` request. Native active-client metadata does not register an executor.
 
-The public host negotiates project-owned tool protocol v2 separately from native
+The public host negotiates project-owned tool protocol V1 separately from native
 AHP 1.0.0. `x-ahp/tools/assigned`, `advertise`, `dispatch`, `status`, `resume`, and
 `cancel` use exact private envelopes. Remote execution uses correlated host
 `invoke` and client `complete` notifications. Host-registered actions use the same
-dispatcher and settle locally. The [tool client adapter](../../src/toolClient/README.md)
-owns this exchange. The compatibility kernel's unversioned `call` stays private.
+dispatcher and settle locally. The [tool client adapter](../../src/tool/helpers/client/README.md)
+owns this exchange.
 
-A separate `x-ahp/tools/extensions` request preserves the base v2 reply shape.
+A separate `x-ahp/tools/extensions` request preserves the base V1 reply shape.
 Negotiated `manage` carries propose, approve and publish operations. Negotiated
 `artifact` carries authorized exact artifact metadata and bounded bytes in one
 private response. The host keeps activation as an in-process session operation.

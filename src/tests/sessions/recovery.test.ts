@@ -1,6 +1,6 @@
 import { openWorkClient } from "../../../examples/advanced/work";
 import { ACTION_TYPE_SESSION_READY } from "@sessions/constants";
-import { TOOL_CONTRACT_META_KEY } from "@tools";
+import { TOOL_CONTRACT_META_KEY } from "@tool";
 import assert from "node:assert/strict";
 import { describe, expect, it, vi } from "vitest";
 import { createMemoryDurableStorage } from "@persistence";
@@ -137,7 +137,7 @@ describe("session recovery", () => {
       expect(backends).toBe(2);
       expect(invoked).toEqual(["codec", "mock", "driver", "driver", "mock"]);
     } finally {
-      await Promise.allSettled(clients.map((peer) => peer.client.shutdown()));
+      await Promise.allSettled(clients.map((peer) => peer.connection.shutdown()));
       await one.stop();
       await two.stop();
     }

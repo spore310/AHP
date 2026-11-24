@@ -7,8 +7,8 @@ import { CREATION_INPUT_BYTES } from "@sessions/helpers/creation/constants";
 import { ACTION_TYPE_SESSION_CREATION_FAILED } from "@sessions/constants";
 import { mockProvider } from "@sessions/mock";
 import type { SessionCreationApproval, SessionCreationContext, SessionCreationFacts, SessionTypePolicyRegistration } from "@sessions/helpers/creation/types";
-import { createToolPolicyFactory } from "@toolPolicy";
-import { SESSION_TYPE_SELECTOR_KEY, type ToolCatalogue } from "@tools";
+import { createPolicyFactory } from "@authorization/policies";
+import { SESSION_TYPE_SELECTOR_KEY, type ToolCatalogue } from "@tool";
 import { observableStorage } from "./durableFixture";
 
 const factories: SessionsFactory[] = [];
@@ -36,7 +36,7 @@ const compiler = (namespace = false, resolve = () => [creator, reader], mandator
     { ...reader, operations: { invoke: { actor: { mode: "roles" as const, actors: { user: { anyOf: ["junior"] } } } } }, challenge: { required: false } },
   ];
   if (mandatory) definitions.push({ ...constraint, operations: { invoke: { actor: { mode: "roles", actors: { user: { anyOf: ["must"] } } } } }, challenge: { required: false } });
-  return createToolPolicyFactory({ ...(namespace ? { namespaces: [{ name: "review.namespace", revision: 1, policies: definitions, resolve }] } : { policies: definitions }),
+  return createPolicyFactory({ ...(namespace ? { namespaces: [{ name: "review.namespace", revision: 1, policies: definitions, resolve }] } : { policies: definitions }),
     bindings: [{ sessionType: type, providerId: "finite", ...(namespace ? namespaceRules : rules), mandatory: mandatory ? [constraint] : [] }],
   });
 };
@@ -292,7 +292,7 @@ describe("P05 protected creation", () => {
     expect(before.decision.effect).toBe("allow");
     const allocate = vi.fn(createInMemorySessionRegistry);
     const admissions = vi.spyOn(f.registry, "installAdmission");
-    const other = createToolPolicyFactory({ policies: [creator, reader].map((policy) => ({ ...policy,
+    const other = createPolicyFactory({ policies: [creator, reader].map((policy) => ({ ...policy,
       operations: { invoke: { actor: { mode: "direct-grant" as const, actors: ["agent" as const] } } }, challenge: { required: false },
     })), bindings: [{ sessionType: type, providerId: "finite", ...rules }] });
     for (const policies of [compiler(), other]) expect(() => createSessionsFactory({ providers: [f.provider], registryFactory: allocate,
@@ -927,7 +927,7 @@ describe("P05 correction atomic constructor admissions", () => {
   for (const remaining of ["review", "second"] as const) {
     it(`P2 cap1/two types leaves the valid old stamp and slot for ${remaining} intact`, async () => {
       const entries = [type, { key: "second", version: 1 }];
-      const policies = createToolPolicyFactory({ policies: [creator, reader].map((ref) => ({ ...ref,
+      const policies = createPolicyFactory({ policies: [creator, reader].map((ref) => ({ ...ref,
         operations: { invoke: { actor: { mode: "roles" as const, actors: { user: { anyOf: ["senior"] } } } } }, challenge: { required: false },
       })), bindings: entries.map((sessionType) => ({ sessionType, providerId: "finite", ...rules })) });
       const registry = createReferenceAuthorizer({ policies, now: Date.now, caps: { maxAdmissions: 1 } });

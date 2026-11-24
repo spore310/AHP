@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createReferenceAuthorizer } from "@authorization";
-import { createToolPolicyFactory } from "@toolPolicy";
+import { createPolicyFactory } from "@authorization/policies";
 
 const start = 1_700_000_000_000;
 const scope = { domainId: "domain", kind: "session", id: "session", instanceId: "instance" };
@@ -52,7 +52,7 @@ describe("P03 freshness slice", () => {
   it("keeps the captured hook deadline after the options object changes", async () => {
     vi.useFakeTimers();
     const options = {
-      policies: createToolPolicyFactory({ policies: [direct("needs", { requiredPermissions: ["blocked"] })] }),
+      policies: createPolicyFactory({ policies: [direct("needs", { requiredPermissions: ["blocked"] })] }),
       now: () => start,
       hookDeadlineMs: 60_000,
       permissionEvaluators: { blocked: () => new Promise<"allow">(() => undefined) },
@@ -81,7 +81,7 @@ describe("P03 freshness slice", () => {
     const original = () => "allow" as const;
     const replacement = () => "deny" as const;
     const host = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [direct("extended", { extension: { lane: "chat" } })] }),
+      policies: createPolicyFactory({ policies: [direct("extended", { extension: { lane: "chat" } })] }),
       now: () => start,
       caps: { maxExtensionEvaluators: 1 },
     });
@@ -107,7 +107,7 @@ describe("P03 freshness slice", () => {
     });
     const original = () => "allow" as const;
     const host = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [direct("needs", { requiredPermissions: ["check"], extension: { lane: "chat" } })] }),
+      policies: createPolicyFactory({ policies: [direct("needs", { requiredPermissions: ["check"], extension: { lane: "chat" } })] }),
       now: () => start,
       permissionEvaluators: { check: () => gate.then(() => "allow" as const) },
     });
@@ -135,7 +135,7 @@ describe("P03 freshness slice", () => {
       release = resolve;
     });
     const host = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [
+      policies: createPolicyFactory({ policies: [
         direct("allow", { requiredPermissions: ["check"] }),
         direct("restricted", { requiredPermissions: ["check"] }),
       ] }),
@@ -169,7 +169,7 @@ describe("P03 freshness slice", () => {
   it("allows before a positive binding deadline and denies after it expires in a callback", async () => {
     let now = start;
     const host = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [direct("allow", { requiredPermissions: ["check"] })] }),
+      policies: createPolicyFactory({ policies: [direct("allow", { requiredPermissions: ["check"] })] }),
       now: () => now,
       permissionEvaluators: { check: () => "allow" },
     });
@@ -182,7 +182,7 @@ describe("P03 freshness slice", () => {
       actor, operation: "invoke", bindingId: "grant", policyRef: ref("allow"), scope, route,
     })).decision.effect).toBe("allow");
     const deferred = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [direct("allow", { requiredPermissions: ["check"] })] }),
+      policies: createPolicyFactory({ policies: [direct("allow", { requiredPermissions: ["check"] })] }),
       now: () => now,
       permissionEvaluators: {
         check: () => {

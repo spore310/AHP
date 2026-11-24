@@ -9,7 +9,7 @@ import {
   SESSION_URI_PREFIX,
 } from "@sessions";
 import { createMockProvider } from "@sessions/mock";
-import type { ToolCatalogue, ToolContractDefinition } from "@tools";
+import type { ToolCatalogue, ToolContractDefinition } from "@tool";
 
 const schema: SessionConfigSchema = {
   type: "object",

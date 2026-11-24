@@ -14,24 +14,14 @@ import {
   type ResourceRef,
   type SecuritySubjectRef,
 } from "@authorization";
-import {
-  policyDecisionSchema,
-  toolActorPolicySchema,
-  toolActorRuleSchema,
-  toolExecutionBindingSchema,
-  toolExecutionPolicyManifestSchema,
-  toolPolicyNamespaceManifestSchema,
-  type ToolActorPolicy,
-  type ToolExecutionBinding,
-  type ToolExecutionPolicy,
-  type ToolExecutionPolicyBase,
-} from "@toolPolicy";
+import { policyDecisionSchema, actorPolicySchema, actorRuleSchema, policyDefinitionManifestSchema, policyNamespaceManifestSchema, type ActorPolicy, type PolicyDefinition, type PolicyDefinitionBase } from "@authorization/policies";
+import { toolExecutionBindingSchema, type ToolExecutionBinding } from "@tool/policy/binding";
 import {
   ToolAction,
   challengePresentationSchema,
   type ToolActionContext,
   type ValidationResult,
-} from "@toolExecution";
+} from "@tool/execution";
 
 type ReviewRole = "reviewer" | "editor";
 type TerminalRole = "operator" | "observer";
@@ -58,7 +48,7 @@ const reviewPolicy = {
   },
   challenge: { required: false },
   extension: { lane: "chat" },
-} satisfies ToolExecutionPolicy<ReviewRole, ChatExtension>;
+} satisfies PolicyDefinition<ReviewRole, ChatExtension>;
 
 const terminalPolicy = {
   id: "terminal.input",
@@ -70,10 +60,10 @@ const terminalPolicy = {
   },
   challenge: { required: true },
   extension: { lane: "pty" },
-} satisfies ToolExecutionPolicy<TerminalRole, TerminalExtension>;
+} satisfies PolicyDefinition<TerminalRole, TerminalExtension>;
 
-const policies: readonly ToolExecutionPolicy[] = [reviewPolicy, terminalPolicy];
-const bases: readonly ToolExecutionPolicyBase[] = policies;
+const policies: readonly PolicyDefinition[] = [reviewPolicy, terminalPolicy];
+const bases: readonly PolicyDefinitionBase[] = policies;
 
 const subject = (value: string): SecuritySubjectRef => ({
   domainId: "local",
@@ -99,7 +89,7 @@ const roleBranchAdmits = (
 ): boolean => branch !== undefined && branch.anyOf.some((role) => held.includes(role));
 
 const actorPolicyAdmits = (
-  policy: ToolActorPolicy,
+  policy: ActorPolicy,
   kind: "user" | "agent",
   held: readonly string[],
 ): boolean => roleBranchAdmits(kind === "user" ? policy.user : policy.agent, held);
@@ -110,8 +100,8 @@ describe("authorization contracts", () => {
     expect(policies[0]).toBe(reviewPolicy);
     expect(policies[1]).toBe(terminalPolicy);
 
-    const missing = toolActorPolicySchema.parse({});
-    const emptied = toolActorPolicySchema.parse({ user: {}, agent: { anyOf: [] } });
+    const missing = actorPolicySchema.parse({});
+    const emptied = actorPolicySchema.parse({ user: {}, agent: { anyOf: [] } });
     expect(actorPolicyAdmits(missing, "user", ["admin", "anonymous"])).toBe(false);
     expect(actorPolicyAdmits(missing, "agent", ["admin"])).toBe(false);
     expect(actorPolicyAdmits(emptied, "user", ["reviewer"])).toBe(false);
@@ -119,12 +109,12 @@ describe("authorization contracts", () => {
     expect(emptied.user?.anyOf).toEqual([]);
     expect(emptied.agent?.anyOf).toEqual([]);
 
-    expect(toolActorRuleSchema.safeParse({ actors: ["user"] }).success).toBe(false);
-    expect(toolActorRuleSchema.safeParse({
+    expect(actorRuleSchema.safeParse({ actors: ["user"] }).success).toBe(false);
+    expect(actorRuleSchema.safeParse({
       mode: "direct-grant",
       actors: [],
     }).success).toBe(true);
-    expect(toolActorRuleSchema.safeParse({
+    expect(actorRuleSchema.safeParse({
       mode: "roles",
       actors: { anyOf: ["admin"] },
     }).success).toBe(false);
@@ -232,7 +222,7 @@ describe("authorization contracts", () => {
     }).success).toBe(true);
 
     for (const revision of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
-      expect(toolExecutionPolicyManifestSchema.safeParse({
+      expect(policyDefinitionManifestSchema.safeParse({
         id: "chat.review",
         revision,
         operations: {},
@@ -243,7 +233,7 @@ describe("authorization contracts", () => {
     const polluted = parseUnknownJson(
       "{\"id\":\"chat.review\",\"revision\":1,\"operations\":{},\"challenge\":{\"required\":false},\"__proto__\":{\"admin\":true},\"constructor\":{\"prototype\":{\"admin\":true}}}",
     );
-    expect(toolExecutionPolicyManifestSchema.safeParse(polluted).success).toBe(false);
+    expect(policyDefinitionManifestSchema.safeParse(polluted).success).toBe(false);
 
     const nested: Record<string, unknown> = { leaf: true };
     let cursor = nested;
@@ -251,7 +241,7 @@ describe("authorization contracts", () => {
       const next: Record<string, unknown> = { child: cursor };
       cursor = next;
     }
-    expect(toolExecutionPolicyManifestSchema.safeParse({
+    expect(policyDefinitionManifestSchema.safeParse({
       id: "chat.review",
       revision: 1,
       operations: {},
@@ -278,7 +268,7 @@ describe("authorization contracts", () => {
       implementationId: "host-1",
     }).success).toBe(false);
 
-    expect(toolPolicyNamespaceManifestSchema.safeParse({
+    expect(policyNamespaceManifestSchema.safeParse({
       name: "workspace",
       revision: 1,
       policies: [{ id: "chat.review", revision: 1 }],

@@ -229,7 +229,7 @@ describe("AHP connection lifetime", () => {
     ]);
     send(subscriber.socket, { jsonrpc: "2.0", id: 4, method: "x-ahp/tools/call",
       params: { channel, key: "read_file", version: 1, input: {} } });
-    expect(await subscriber.frames.waitFor(responseWithId(4))).toMatchObject({ error: { code: JsonRpcErrorCodes.InvalidParams } });
+    expect(await subscriber.frames.waitFor(responseWithId(4))).toMatchObject({ error: { code: JsonRpcErrorCodes.MethodNotFound } });
     expect(subscriber.frames.frames.filter(methodFrame("x-ahp/tools/invoke"))).toEqual([]);
     expect(outsider.frames.frames.slice(beforeOutsider).filter(methodFrame("action"))).toEqual([]);
   });

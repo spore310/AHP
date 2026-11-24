@@ -1,5 +1,6 @@
-import type { ToolContractDefinition } from "@tools";
-import type { ToolExecutionBinding, ToolOperation, ToolPolicyFactory } from "@toolPolicy";
+import type { ToolContractDefinition } from "@tool";
+import type { ToolExecutionBinding } from "@tool/policy/binding";
+import type { PolicyOperation, PolicyFactory } from "@authorization/policies";
 
 import type {
   ExecutorRevision,
@@ -81,7 +82,7 @@ export interface MandatoryBindingSelector {
 
 export interface EvaluateSelector {
   readonly actor: TrustedRequestContext;
-  readonly operation: ToolOperation;
+  readonly operation: PolicyOperation;
   readonly bindingId: string;
   readonly policyRef: PolicyRef;
   readonly scope: ResourceRef;
@@ -99,7 +100,7 @@ export interface ToolAssignmentRecord {
   readonly route: ResourceRoute;
   readonly recipient: PolicyActorRef;
   readonly contract: { readonly id: string; readonly key: string; readonly version: number };
-  readonly operation: ToolOperation;
+  readonly operation: PolicyOperation;
   readonly bindingId: string;
   readonly policyRef: PolicyRef;
   readonly executor?: ExecutorRevision;
@@ -110,12 +111,12 @@ export interface AssignmentItem {
   readonly contractId: string;
   readonly policyRef: PolicyRef;
   readonly bindingId: string;
-  readonly operation?: ToolOperation;
+  readonly operation?: PolicyOperation;
 }
 
 export interface ProjectAssignmentsInput {
   readonly actor: TrustedRequestContext;
-  readonly purpose: ToolOperation;
+  readonly purpose: PolicyOperation;
   readonly recipient: "caller" | "executor";
   readonly executor?: ExecutorRevision;
   readonly scope: ResourceRef;
@@ -144,7 +145,7 @@ export interface AssignmentAuthorization {
 }
 
 export interface ReferenceAuthorizerOptions {
-  readonly policies: ToolPolicyFactory;
+  readonly policies: PolicyFactory;
   readonly now: () => number;
   readonly permissionEvaluators?: Readonly<Record<string, PermissionEvaluator>>;
   readonly decisionTtlMs?: number;
@@ -170,7 +171,7 @@ export interface ReferenceAuthorizer {
   createGrantService(options: import("../grants/types").GrantServiceOptions): import("../grants/types").GrantService;
   readBindings(query: { readonly actor: PolicyActorRef; readonly scope: ResourceRef }): ScopedBindingSnapshot;
   isBindingSnapshotCurrent(snapshot: ScopedBindingSnapshot): boolean;
-  usesPolicyFactory(factory: ToolPolicyFactory): boolean;
+  usesPolicyFactory(factory: PolicyFactory): boolean;
   removeBinding(expected: { readonly bindingId: string; readonly scope: ResourceRef; readonly revision: number }): boolean;
   installAdmission(input: { readonly sessionType: { readonly key: string; readonly version: number }; readonly providerId: string }): void;
   installAdmissions(inputs: readonly { readonly sessionType: { readonly key: string; readonly version: number }; readonly providerId: string }[]): void;

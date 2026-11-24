@@ -13,7 +13,7 @@ import {
   ToolAccessLevel,
 } from "@sessions";
 import { mockProvider } from "@sessions/mock";
-import { createToolCatalogue, defineToolContract, toAhpToolDefinition, TOOL_CONTRACT_META_KEY } from "@tools";
+import { createToolCatalogue, defineToolContract, toAhpToolDefinition, TOOL_CONTRACT_META_KEY } from "@tool";
 import { z } from "zod";
 
 async function readySession(type = "code-review", application = createBaselineSessionApplication()) {

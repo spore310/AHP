@@ -9,7 +9,7 @@ import { ToolAccessLevel } from "@sessions/helpers/application";
 import { defineApplicationSession } from "@sessions/helpers/application/define";
 import { createSessionTypeToolMap } from "@sessions/helpers/application";
 import { createMockProvider } from "@sessions/mock";
-import type { ToolCatalogue, ToolContractDefinition } from "@tools";
+import type { ToolCatalogue, ToolContractDefinition } from "@tool";
 import { createAHPServer, type AHPServerHandle } from "@websocket";
 
 import { FrameLog, responseWithId } from "./helpers";

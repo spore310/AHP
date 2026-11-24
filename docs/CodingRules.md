@@ -266,9 +266,10 @@ Prefer:
 - DRY without becoming magical
 - clear module boundaries
 - configured aliases such as `@env/*`, `@env`, `@jsonrpc/*`, `@jsonrpc`,
-  `@sessions/*`, `@sessions`, `@application`, `@application/*`, `@tools/*`, `@tools`,
-  `@toolClient`, `@toolClient/*`, `@authorization`, `@authorization/*`,
-  `@toolPolicy`, `@toolPolicy/*`, `@toolExecution`, `@toolExecution/*`,
+  `@sessions`, `@sessions/*`, `@sessions/views`, `@application`, `@application/*`,
+  `@client`, `@client/transport`, `@tool`, `@tool/contracts`, `@tool/protocol`, `@tool/client`,
+  `@tool/server`, `@tool/execution`, `@tool/policy`, `@tool/policy/binding`, `@tool/*`,
+  `@authorization`, `@authorization/*`, `@authorization/policies`, `@jsonrpc/value`,
   `@websocket/*`, and `@websocket`, declared in
   `tsconfig.json`
 

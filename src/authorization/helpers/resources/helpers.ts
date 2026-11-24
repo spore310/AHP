@@ -1,4 +1,4 @@
-import { TOOL_OPERATIONS } from "@toolPolicy/constants";
+import { POLICY_OPERATIONS } from "@authorization/helpers/policies/constants";
 import { capturePlainJson, identifierSchema, policyRefSchema, resourceRefSchema, trustedRequestContextSchema } from "../validation";
 import type { PresentedExternalProof } from "../evaluate/types";
 import type { ResourceKindAdapter, ResourceTypeRegistration, ResourceRegistration, ResourceOperationsOptions, ResourceOperations, ResourceOperationRequest, ResourceOperationAuthority, ResourceOperationTicket, ResourceOperation, ResourceOperationHandle } from "./types";
@@ -103,7 +103,7 @@ export function createResourceOperations(options: ResourceOperationsOptions): Re
     const names = new Set<string>();
     const operations = type.operations.map((operation) => {
       const name = identifierSchema.parse(operation.name);
-      if (names.has(name) || !TOOL_OPERATIONS.includes(operation.purpose) || operation.policies.length < 1 || operation.policies.length > 128) throw new TypeError("Invalid resource operation.");
+      if (names.has(name) || !POLICY_OPERATIONS.includes(operation.purpose) || operation.policies.length < 1 || operation.policies.length > 128) throw new TypeError("Invalid resource operation.");
       names.add(name);
       const refs = operationCopy(operation.policies.map((ref) => policyRefSchema.parse(ref)));
       if (refs.some((ref) => policies.getPolicy(ref) === undefined)) throw new TypeError("Unknown operation policy.");

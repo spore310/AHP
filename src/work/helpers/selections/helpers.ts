@@ -2,7 +2,7 @@ import { z } from "zod";
 import { resourceRefSchema, type ResourceRef } from "@authorization";
 import { sameResource } from "@authorization/helpers/context";
 import { resourceKey } from "@authorization/helpers/resources";
-import { captureValue } from "@jsonrpc/helpers/value/helpers";
+import { captureValue } from "@jsonrpc/value";
 import { captureRef } from "@persistence/helpers/durability/helpers";
 import type { ResourceRecord, StoredSession } from "@persistence/helpers/durability/types";
 import { WorkError } from "../errors";

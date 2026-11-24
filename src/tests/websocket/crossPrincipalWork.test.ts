@@ -6,7 +6,7 @@ import { WebSocketTransport } from "@microsoft/agent-host-protocol/ws";
 import { createMemoryDurableStorage, type DurableHost, type DurableStorage } from "@persistence";
 import type { StoredWork } from "@persistence/helpers/durability/workTypes";
 import { mockProvider } from "@sessions/mock";
-import { connectToolClient, type ToolInvocationContext } from "@toolExecution/client";
+import { connectToolClient, type ToolInvocationContext } from "@tool/client";
 import { actorFor, channel, clientTool, createReviewHost, demoProof, reviewWorkerKey, selector } from "../../../examples/advanced/host";
 import { createExamplePersistence, createExampleRegistrationState } from "../../../examples/advanced/persistence";
 import { claimedLease, execution, openWorkClient } from "../../../examples/advanced/work";
@@ -46,7 +46,7 @@ it.each(["grant revocation", "disconnect", "registration disable", "provider wri
     } } }, { clientId: "senior-executor", protocolVersions: ["1.0.0"] });
     peers.push(senior);
     const junior = await openWorkClient(url, "junior", "registered-junior");
-    peers.push(junior.client);
+    peers.push(junior.connection);
     await expect(junior.request("x-ahp/agents/register", { agentKey: "review-agent" })).rejects.toThrow();
     const registration = z.object({ agentId: z.uuid() }).parse(await junior.request("x-ahp/agents/register", { agentKey: reviewWorkerKey }));
     expect(directory.registrations.get(registration.agentId)?.agentKey).toBe(reviewWorkerKey);
@@ -58,12 +58,12 @@ it.each(["grant revocation", "disconnect", "registration disable", "provider wri
       return { value: "review finished" };
     });
     await senior.joinSession(channel, [{ definition: clientTool, execute }]);
-    await junior.request("x-ahp/tools/capabilities", { version: 2 });
-    await junior.client.subscribe(channel);
+    await junior.request("x-ahp/tools/capabilities", { version: 1 });
+    await junior.connection.protocol.subscribe(channel);
     const service = demo.host.work;
     assert.ok(service);
     const subject = loss === "provider write revocation" ? "pm" : "senior";
-    if (subject === "pm") peers.push((await openWorkClient(url, "pm", "work-submitter")).client);
+    if (subject === "pm") peers.push((await openWorkClient(url, "pm", "work-submitter")).connection);
     const { context } = demo.connection(subject);
     const { id } = await service.submit({ context, signal: new AbortController().signal, isCurrent: () => demo.connection(subject).context === context },
       { requestKey: "review", kind: "code.review", input: { subject: "senior review" }, targetAgentId: registration.agentId,
@@ -97,10 +97,10 @@ it.each(["grant revocation", "disconnect", "registration disable", "provider wri
       expect(await store.resources.get(target)).toMatchObject({ dataRevision: "2", data: change.data });
       return;
     }
-    const dispatch = () => junior.request("x-ahp/tools/dispatch", { version: 2, channel, contract: selector(clientTool), input: {}, work });
+    const dispatch = () => junior.request("x-ahp/tools/dispatch", { version: 1, channel, contract: selector(clientTool), input: {}, work });
     const challenge = z.object({ status: z.literal("challenge-required"), continuationId: z.string(), callId: z.string() });
     const first = challenge.parse(await dispatch());
-    await expect(junior.request("x-ahp/tools/resume", { version: 2, continuationId: first.continuationId, proofRef: demoProof })).resolves.toMatchObject({ status: "accepted" });
+    await expect(junior.request("x-ahp/tools/resume", { version: 1, continuationId: first.continuationId, proofRef: demoProof })).resolves.toMatchObject({ status: "accepted" });
     await vi.waitFor(() => {
       expect(execute).toHaveBeenCalledTimes(1);
     });
@@ -108,14 +108,14 @@ it.each(["grant revocation", "disconnect", "registration disable", "provider wri
     expect(incoming.join("")).not.toContain(work.leaseToken);
     expect(JSON.stringify(execute.mock.calls)).not.toContain(work.leaseToken);
     await vi.waitFor(async () => {
-      expect(await junior.request("x-ahp/tools/status", { version: 2, callId: first.callId })).toMatchObject({ status: "completed" });
+      expect(await junior.request("x-ahp/tools/status", { version: 1, callId: first.callId })).toMatchObject({ status: "completed" });
     });
     const next = challenge.parse(await dispatch());
     if (loss === "grant revocation") {
       expect(demo.revokeJuniorWork()).toBe(true);
       await senior.joinSession(channel, [{ definition: clientTool, execute }]);
       await expect(dispatch()).resolves.toMatchObject({ status: "denied" });
-      expect(await junior.request("x-ahp/tools/dispatch", { version: 2, channel, contract: selector(clientTool), input: {} })).toMatchObject({ status: "challenge-required" });
+      expect(await junior.request("x-ahp/tools/dispatch", { version: 1, channel, contract: selector(clientTool), input: {} })).toMatchObject({ status: "challenge-required" });
     } else if (loss === "registration disable") {
       const enabled = demo.host.setAgentEnabled;
       assert.ok(enabled);
@@ -127,15 +127,15 @@ it.each(["grant revocation", "disconnect", "registration disable", "provider wri
       await expect(junior.request("x-ahp/work/complete", { ...work, result: {} })).rejects.toThrow();
       expect(rows.get(id)?.status).toBe("leased");
     } else {
-      await junior.client.shutdown();
+      await junior.connection.shutdown();
       const reconnect = await openWorkClient(url, "junior", "registered-junior");
-      peers.push(reconnect.client);
-      await reconnect.request("x-ahp/tools/capabilities", { version: 2 });
+      peers.push(reconnect.connection);
+      await reconnect.request("x-ahp/tools/capabilities", { version: 1 });
       await reconnect.request("x-ahp/agents/register", { agentKey: reviewWorkerKey });
       await expect(reconnect.request("x-ahp/work/renew", work)).rejects.toThrow();
-      await reconnect.client.subscribe(channel);
-      expect(await reconnect.request("x-ahp/tools/resume", { version: 2, continuationId: next.continuationId, proofRef: demoProof })).toMatchObject({ status: "denied" });
-      expect(await reconnect.request("x-ahp/tools/dispatch", { version: 2, channel, contract: selector(clientTool), input: {}, work })).toMatchObject({ status: "denied" });
+      await reconnect.connection.protocol.subscribe(channel);
+      expect(await reconnect.request("x-ahp/tools/resume", { version: 1, continuationId: next.continuationId, proofRef: demoProof })).toMatchObject({ status: "denied" });
+      expect(await reconnect.request("x-ahp/tools/dispatch", { version: 1, channel, contract: selector(clientTool), input: {}, work })).toMatchObject({ status: "denied" });
     }
     expect(execute).toHaveBeenCalledTimes(1);
   } finally {

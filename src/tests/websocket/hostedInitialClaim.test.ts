@@ -71,7 +71,7 @@ it.each([["signal", "claim"], ["registry", "claim"], ["callback-only", "claim"],
       expect(rows.get(workId)).toEqual(before);
     } finally {
       resume.resolve(undefined);
-      await Promise.allSettled(peers.map(({ client }) => client.shutdown()));
+      await Promise.allSettled(peers.map(({ connection }) => connection.shutdown()));
       await demo.stop();
     }
   });

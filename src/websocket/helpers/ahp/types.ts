@@ -1,12 +1,12 @@
-import type { ServerToolBrokerOptions } from "@toolExecution/server";
+import type { ServerToolBrokerOptions } from "@tool/server";
 import type { Snapshot } from "@microsoft/agent-host-protocol";
 import { z } from "zod";
 import type { ResourceRef, TrustedRequestContext } from "@authorization";
 import type { ParsedClientSessionAction } from "@sessions/helpers/actions";
 
 import type { AgentDirectory } from "@agents";
-import type { ClientToolBrokerOptions } from "@toolExecution/helpers/client/helpers/broker";
-import type { ResourceViewOptions } from "@toolExecution/helpers/views";
+import type { ClientToolBrokerOptions } from "@tool/helpers/execution/helpers/remote";
+import type { ResourceViewOptions } from "@sessions/views";
 import type { JsonRpcMessage } from "@jsonrpc";
 import type { SessionOwnerRegistry, WorkReadPort } from "@work";
 import type { WebSocketConnectionContext } from "../../types";
@@ -86,8 +86,8 @@ export interface AHPBindingOptions {
   readonly protectedViews?: ResourceViewOptions;
   readonly toolExecution?: ClientToolBrokerOptions;
   readonly serverToolExecution?: ServerToolBrokerOptions;
-  readonly prepareToolWork?: (context: WebSocketConnectionContext, ...args: Parameters<import("@toolExecution").ToolWorkPreparation>)
-  => ReturnType<import("@toolExecution").ToolWorkPreparation>;
+  readonly prepareToolWork?: (context: WebSocketConnectionContext, ...args: Parameters<import("@tool/execution").ToolWorkPreparation>)
+  => ReturnType<import("@tool/execution").ToolWorkPreparation>;
   readonly maxInitialSubscriptions?: number;
   readonly agents?: AgentDirectory;
   readonly work?: WorkReadPort;

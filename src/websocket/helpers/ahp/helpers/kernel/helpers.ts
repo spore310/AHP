@@ -32,14 +32,13 @@ import {
   PENDING_DELIVERY_LIMIT,
   ROOT_SCHEME,
   SESSION_SCHEME,
-  TOOL_CALL_METHOD,
   TOOL_COMPLETE_METHOD,
 } from "@websocket/helpers/ahp/constants";
 import { createAgentWorkExtension, mapWorkError } from "@websocket/helpers/ahp/agentWork";
 import { createToolInvocationBroker } from "@websocket/helpers/ahp/toolInvocation";
 import { createProtectedViewDelivery } from "@websocket/helpers/ahp/helpers/views/helpers";
 import { createWorkViewHandlers } from "@websocket/helpers/ahp/helpers/views/work";
-import type { ResourceViewProof } from "@toolExecution/helpers/views";
+import type { ResourceViewProof } from "@sessions/views";
 import { isSettlingSession } from "@websocket/helpers/settling";
 import {
   channelParamsSchema,
@@ -87,7 +86,6 @@ const assertBaselinePayload = (action: Record<string, unknown>): void => {
 
 export interface AHPBinding {
   readonly handlers: JsonRpcHandlers;
-  isToolCompletion(params: unknown, context: WebSocketConnectionContext): boolean;
   onConnection(context: WebSocketConnectionContext): void;
   beforeDispatch(dispatch: WebSocketDispatchContext): void;
   dispose(): void;
@@ -477,8 +475,6 @@ export const createAHPKernel = (
       return factory.listSessions(params);
     },
 
-    [TOOL_CALL_METHOD]: (params: unknown, context: WebSocketConnectionContext, invocation: JsonRpcInvocation): Promise<unknown> => toolInvocations.call(params, context, invocation),
-
     [TOOL_COMPLETE_METHOD]: (params: unknown, context: WebSocketConnectionContext): null => toolInvocations.complete(params, context),
 
     dispatchAction: async (params: unknown, context: WebSocketConnectionContext): Promise<null> => {
@@ -494,24 +490,9 @@ export const createAHPKernel = (
       if (peer.clientId === undefined) {
         throw new RpcError(JsonRpcErrorCodes.InvalidRequest, "Connection not initialized");
       }
-      const advertisement = await toolInvocations.prepareAdvertisement(peer, parsed.channel, parsed.action);
-      try {
-        const envelope = await factory.dispatchAction({
-          channel: parsed.channel,
-          clientSeq: parsed.clientSeq,
-          action: parsed.action,
-          clientId: peer.clientId,
-          ...(advertisement === undefined ? {} : { admission: advertisement.current.bind(advertisement) }),
-        });
-        if (envelope.rejectionReason !== undefined) {
-          sendToPeer(peer, actionNotification(envelope));
-        } else {
-          advertisement?.activate(envelope.serverSeq);
-        }
-        return null;
-      } finally {
-        advertisement?.release();
-      }
+      const envelope = await factory.dispatchAction({ channel: parsed.channel, clientSeq: parsed.clientSeq, action: parsed.action, clientId: peer.clientId });
+      if (envelope.rejectionReason !== undefined) sendToPeer(peer, actionNotification(envelope));
+      return null;
     },
   };
 
@@ -603,9 +584,6 @@ export const createAHPKernel = (
     },
     drainTools: toolInvocations.drain,
     toolStats: toolInvocations.stats,
-    isToolCompletion: (params: unknown, context: WebSocketConnectionContext): boolean => (
-      toolInvocations.isCompletion(params, context)
-    ),
     onConnection: (context: WebSocketConnectionContext): void => {
       if (disposed) {
         context.close();

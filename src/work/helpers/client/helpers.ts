@@ -1,3 +1,5 @@
+import type { Client } from "@client";
+import { createWorkPort } from "./port";
 import type { WorkListSummary } from "../commands/types";
 import { workSubscribeSchema } from "../views/schemas";
 import { capturePage, hintSchema, pageSchema, resetSchema, subscribedSchema } from "./schemas";
@@ -20,7 +22,7 @@ function notify(callback: () => unknown): void {
   } catch { /* Independent observers cannot change transport ownership. */ }
 }
 
-export function createWorkClient(initial: WorkExtensionPort, options: WorkClientOptions = {}): WorkClient {
+export function createWorkClient(initial: WorkExtensionPort | Client, options: WorkClientOptions = {}): WorkClient {
   const maxItems = bound(options.maxTrackedItems ?? 500, 1, 5000);
   const maxPages = bound(options.maxPages ?? 20, 1, 20);
   const timeout = bound(options.refreshTimeoutMs ?? 10000, 1, 10000);
@@ -285,7 +287,7 @@ export function createWorkClient(initial: WorkExtensionPort, options: WorkClient
     for (const release of detach.splice(0)) notify(release);
     invalidate();
   }
-  attach(initial);
+  attach("rpc" in initial ? createWorkPort(initial) : initial);
   return {
     snapshot, refresh,
     subscribe(input) {
@@ -299,7 +301,7 @@ export function createWorkClient(initial: WorkExtensionPort, options: WorkClient
       if (status === "disposed") throw new Error("Work client disposed.");
       void unsubscribe(port, subscriptionId);
       disconnect();
-      attach(next);
+      attach("rpc" in next ? createWorkPort(next) : next);
       status = target ? "loading" : "idle";
       emit();
       return refresh();

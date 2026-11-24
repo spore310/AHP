@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vitest";
 import { createReferenceAuthorizer, type PolicyActorRef } from "@authorization";
 import { captureWorkIntent } from "@persistence/helpers/durability/workIntent";
-import { createToolPolicyFactory } from "@toolPolicy";
+import { createPolicyFactory } from "@authorization/policies";
 import { captureCreationPolicy, captureCreationSecurity, validateCreationRegistrations } from "@sessions/helpers/creation";
 import { createWorkAuthorizer, type SessionWorkPolicyRegistration, type WorkPolicyFacts, type WorkPolicyRestriction } from "@work/helpers/authorization";
 import { workFixture } from "./commandsFixture";
@@ -76,7 +76,7 @@ async function setup(work: SessionWorkPolicyRegistration = { operations }, dynam
       discover: { ...purpose, reveal: !(conceal && ref === extra) }, execute: purpose },
     challenge: { required: ref === challenge },
   }));
-  const policies = createToolPolicyFactory({ policies: compiled,
+  const policies = createPolicyFactory({ policies: compiled,
     ...(namespace && { namespaces: [{ name: "work.ceiling", revision: 1, policies: compiled, resolve: namespace }] }),
     bindings: [{ sessionType: f.session.type, providerId: f.session.providerId, ...rules }] });
   const registry = createReferenceAuthorizer({ policies, now: Date.now });
@@ -258,7 +258,7 @@ it("fails registration before installing admissions when a work or mandatory ref
   expect(() => createWorkAuthorizer({ ...f.options, ceiling: { ...rules, mandatory: [challenge] } })).toThrow();
   for (const mandatory of [[], [challenge]]) {
     const admitted = { policies: [permit, challenge], namespaces: [] };
-    const policies = createToolPolicyFactory({ policies: [permit, challenge].map((ref) => ({ ...ref,
+    const policies = createPolicyFactory({ policies: [permit, challenge].map((ref) => ({ ...ref,
       operations: { invoke: purpose }, challenge: { required: ref === challenge } })),
     bindings: [{ sessionType: f.type.definition, providerId: f.type.definition.providerId, admitted, mandatory }] });
     const registry = createReferenceAuthorizer({ policies, now: Date.now });

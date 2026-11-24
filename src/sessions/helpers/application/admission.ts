@@ -11,7 +11,7 @@ import {
   canonicalJsonEqual,
   toAhpToolDefinition,
   type ToolContractDefinition,
-} from "@tools";
+} from "@tool";
 
 import type { SessionApplicationOptions } from "./types";
 

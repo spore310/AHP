@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { identifierSchema } from "@authorization";
-import { captureValue } from "@jsonrpc/helpers/value/helpers";
+import { captureValue } from "@jsonrpc/value";
 import type { AgentWorkConfig, AgentWorkConfiguration } from "../../types";
 
 const limit = z.number().int().min(0).max(1024);

@@ -2,7 +2,7 @@ import type { SessionConfigSchema } from "@microsoft/agent-host-protocol";
 
 import type { SessionConfigContract } from "@sessions/types";
 import type { SessionTypePolicyRegistration } from "@sessions/helpers/creation/types";
-import type { ToolContractDefinition, ToolContractRef } from "@tools";
+import type { ToolContractDefinition, ToolContractRef } from "@tool";
 import type { WorkKindDescriptor, WorkKindRegistration } from "@work/helpers/definitions/types";
 
 /** Exact session-type revision. There is no latest resolver. */

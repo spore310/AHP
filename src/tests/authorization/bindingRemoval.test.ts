@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { POLICY_LIMIT_DEFAULTS, createReferenceAuthorizer, type ResourceRef, type ScopedPolicyBinding } from "@authorization";
-import { createToolPolicyFactory, projectAssignedDescriptors } from "@toolPolicy";
+import { createPolicyFactory } from "@authorization/policies";
+import { projectAssignedDescriptors } from "@tool/policy";
 import type { ReferenceAuthorizerOptions } from "@authorization/helpers/evaluate/types";
 
 const policy = { id: "creator", revision: 1 };
@@ -9,7 +10,7 @@ const scope: ResourceRef = { domainId: "local", kind: "session", id: "ahp-sessio
 const actor = { kind: "user" as const, principal: { domainId: "local", subject: "alice" } };
 const caller = { actor, connectionId: "connection", authRevision: "auth" };
 const route = { origin: scope, targets: [scope] };
-const compiler = () => createToolPolicyFactory({ policies: [{ ...policy, operations: {
+const compiler = () => createPolicyFactory({ policies: [{ ...policy, operations: {
   invoke: { actor: { mode: "direct-grant", actors: ["user"] }, reveal: true },
   execute: { actor: { mode: "direct-grant", actors: ["user"] }, reveal: true },
   discover: { actor: { mode: "direct-grant", actors: ["user"] }, reveal: true },
@@ -101,7 +102,7 @@ describe("P05 exact binding removal and compiler coherence", () => {
 
   it("a removed mandatory contribution invalidates its real positive without erasing admission or owner", async () => {
     const mandatory = { id: "required", revision: 1 };
-    const policies = createToolPolicyFactory({ policies: [policy, mandatory].map((ref) => ({ ...ref, operations: { invoke: { actor: { mode: "direct-grant" as const, actors: ["user" as const] } } }, challenge: { required: false } })),
+    const policies = createPolicyFactory({ policies: [policy, mandatory].map((ref) => ({ ...ref, operations: { invoke: { actor: { mode: "direct-grant" as const, actors: ["user" as const] } } }, challenge: { required: false } })),
       bindings: [{ sessionType: { key: "required", version: 1 }, providerId: "test", admitted: { policies: [policy], namespaces: [] }, mandatory: [mandatory] }],
     });
     const registry = createReferenceAuthorizer({ policies, now: () => 1000 });
@@ -148,7 +149,7 @@ describe("P05 exact binding removal and compiler coherence", () => {
 
 const admission = (key: string) => ({ sessionType: { key, version: 1 }, providerId: "test" });
 const batchFixture = (capacity = 2, inputLimit = 128) => {
-  const policies = createToolPolicyFactory({ policies: [{ ...policy, operations: { invoke: { actor: { mode: "direct-grant", actors: ["user"] } } }, challenge: { required: false } }],
+  const policies = createPolicyFactory({ policies: [{ ...policy, operations: { invoke: { actor: { mode: "direct-grant", actors: ["user"] } } }, challenge: { required: false } }],
     bindings: ["a", "b", "c"].map((key) => ({ ...admission(key), admitted: { policies: [policy], namespaces: [] }, mandatory: [] })),
   });
   const inputLimits = { maxAdmissionInstalls: inputLimit };
@@ -291,7 +292,7 @@ describe("P05 correction atomic admission cohorts", () => {
   it("P2 single and batch preserve canonical selectors validated by a higher captured compiler budget", () => {
     const key = "k".repeat(200);
     const providerId = "p".repeat(200);
-    const policies = createToolPolicyFactory({ limits: { ...POLICY_LIMIT_DEFAULTS, maxIdentifierLength: 256 },
+    const policies = createPolicyFactory({ limits: { ...POLICY_LIMIT_DEFAULTS, maxIdentifierLength: 256 },
       policies: [{ ...policy, operations: {}, challenge: { required: false } }],
       bindings: [key, `${key}b`].map((typeKey) => ({ sessionType: { key: typeKey, version: 1 }, providerId, admitted: { policies: [policy], namespaces: [] }, mandatory: [] })),
     });

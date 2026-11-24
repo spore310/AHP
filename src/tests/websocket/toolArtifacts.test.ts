@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
-import { createApprovedArtifactSource, type ChallengeAdapter } from "@toolExecution";
+import { createApprovedArtifactSource, type ChallengeAdapter } from "@tool/execution";
 import { channel, createCodingHarness, createPolicyIntegrationFixture } from "./policyIntegrationFixture";
 
 const fixtures: Array<Awaited<ReturnType<typeof createPolicyIntegrationFixture>>> = [];
@@ -33,9 +33,9 @@ async function start(sourceReader?: () => Promise<Uint8Array>) {
 it("F02/F03/F04 delivers only to the assigned executor and uses the normal challenge and execution path", async () => {
   const f = await start();
   const observer = await f.connect("observer"), executor = await f.connect(f.executor), caller = await f.connect(f.caller);
-  await observer.request("x-ahp/tools/extensions", { version: 2 });
+  await observer.request("x-ahp/tools/extensions", { version: 1 });
   const view = await observer.assigned();
-  expect(await observer.request("x-ahp/tools/artifact", { version: 2, channel, viewRevision: view.viewRevision, contract: f.contract })).toMatchObject({ result: { status: "unavailable" } });
+  expect(await observer.request("x-ahp/tools/artifact", { version: 1, channel, viewRevision: view.viewRevision, contract: f.contract })).toMatchObject({ result: { status: "unavailable" } });
   expect(f.read).not.toHaveBeenCalled();
   const assigned = await executor.assigned();
   await expect(executor.advertise(assigned.viewRevision, [f.contract])).rejects.toThrow();
@@ -54,7 +54,7 @@ it("F02/F03/F04 delivers only to the assigned executor and uses the normal chall
   });
   expect(f.implementation.execute).toHaveBeenCalledOnce();
   for (const peer of [observer, caller]) {
-    await peer.client.client.ping();
+    await peer.client.connection.protocol.ping();
     expect(JSON.stringify(peer.received)).not.toMatch(/ARTIFACT-REFERENCE-CANARY|ARTIFACT-PUBLISHER-CANARY/);
     expect(JSON.stringify(peer.received)).not.toContain(Buffer.from(f.bytes).toString("base64"));
   }
@@ -76,4 +76,44 @@ it("F02 rechecks the exact recipient after a parked read and drops bytes after r
   expect(await loading).toBe("denied");
   expect(f.load).not.toHaveBeenCalled();
   expect(JSON.stringify(executor.received)).not.toContain(Buffer.from(f.bytes).toString("base64"));
+});
+
+it.each([["verify", "shutdown"], ["load", "EOF"]] as const)("rejects active and queued joins while %s is parked during %s", async (step, ending) => {
+  const f = await start();
+  const executor = await f.connect(f.executor);
+  const entered = Promise.withResolvers<undefined>(), release = Promise.withResolvers<undefined>();
+  const loader = { ...f.loader, async verify() {
+    if (step === "verify") {
+      entered.resolve(undefined);
+      await release.promise;
+    }
+    return true;
+  }, load: vi.fn(async () => {
+    if (step === "load") {
+      entered.resolve(undefined);
+      await release.promise;
+    }
+    return f.implementation;
+  }) };
+  const states: string[] = [];
+  const observe = (job: Promise<void>) => job.then(() => states.push("fulfilled"), () => states.push("rejected"));
+  const active = observe(executor.client.loadApprovedTool(channel, f.contract, loader));
+  await entered.promise;
+  const queued = observe(executor.client.joinSession(channel, []));
+  try {
+    if (ending === "shutdown") await executor.client.shutdown();
+    else {
+      await executor.transport.close();
+      await executor.closed;
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(states).toEqual(["rejected", "rejected"]);
+  } finally {
+    release.resolve(undefined);
+    await Promise.all([active, queued]);
+  }
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(loader.load).toHaveBeenCalledTimes(step === "load" ? 1 : 0);
+  expect(executor.sent).not.toContainEqual(expect.objectContaining({ method: "x-ahp/tools/advertise" }));
+  expect(f.implementation.execute).not.toHaveBeenCalled();
 });

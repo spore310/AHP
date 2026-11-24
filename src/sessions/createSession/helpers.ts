@@ -9,7 +9,7 @@ import {
   SESSION_START_FAILURE_INFO,
 } from "@sessions/constants";
 import { prepareSessionCreation } from "@sessions/helpers/application";
-import { APPLICATION_META_KEY } from "@tools";
+import { APPLICATION_META_KEY } from "@tool";
 import {
   SessionConfigError,
   SessionStartError,

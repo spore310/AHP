@@ -8,13 +8,13 @@ import {
   scopedPolicyBindingSchema,
   type GrantIssuer,
 } from "@authorization";
-import { challengePresentationSchema, createChallengePresentationSchema } from "@toolExecution";
+import { challengePresentationSchema, createChallengePresentationSchema } from "@tool/execution";
 import {
   boundedExtensionSchema,
-  createToolPolicySchemas,
-  toolExecutionPolicyManifestSchema,
-  toolPolicyNamespaceManifestSchema,
-} from "@toolPolicy";
+  createPolicySchemas,
+  policyDefinitionManifestSchema,
+  policyNamespaceManifestSchema,
+} from "@authorization/policies";
 
 const policy = {
   id: "review",
@@ -36,8 +36,8 @@ describe("P01 contract review regressions", () => {
   it("rejects reserved identity selectors consistently in definitions and references", () => {
     for (const id of ["__proto__", "constructor", "prototype"]) {
       expect(policyRefSchema.safeParse({ id, revision: 1 }).success).toBe(false);
-      expect(toolExecutionPolicyManifestSchema.safeParse({ ...policy, id }).success).toBe(false);
-      expect(toolPolicyNamespaceManifestSchema.safeParse({ name: id, revision: 1, policies: [] }).success).toBe(false);
+      expect(policyDefinitionManifestSchema.safeParse({ ...policy, id }).success).toBe(false);
+      expect(policyNamespaceManifestSchema.safeParse({ name: id, revision: 1, policies: [] }).success).toBe(false);
     }
   });
 
@@ -52,7 +52,7 @@ describe("P01 contract review regressions", () => {
       authority: { kind: "host-policy", policy: { id: "review", revision: 1 } },
       revision: 1,
     }).success).toBe(true);
-    expect(toolExecutionPolicyManifestSchema.safeParse({
+    expect(policyDefinitionManifestSchema.safeParse({
       ...policy,
       operations: { invoke: { actor: { mode: "roles", actors: { user: { anyOf: roles } } } } },
     }).success).toBe(true);
@@ -83,35 +83,35 @@ describe("P01 contract review regressions", () => {
     const limits = policyLimitsSchema.parse({ extensionBytes: 32 });
     const value = { text: "\u0000".repeat(10) };
     expect(JSON.stringify(value).length).toBeGreaterThan(limits.extensionBytes);
-    expect(createToolPolicySchemas(limits).boundedExtensionSchema.safeParse(value).success).toBe(false);
+    expect(createPolicySchemas(limits).boundedExtensionSchema.safeParse(value).success).toBe(false);
     const exact = { text: "\u0000" };
     const exactBytes = new TextEncoder().encode(JSON.stringify(exact)).length;
-    expect(createToolPolicySchemas(policyLimitsSchema.parse({ extensionBytes: exactBytes }))
+    expect(createPolicySchemas(policyLimitsSchema.parse({ extensionBytes: exactBytes }))
       .boundedExtensionSchema.safeParse(exact).success).toBe(true);
-    expect(createToolPolicySchemas(policyLimitsSchema.parse({ extensionBytes: exactBytes - 1 }))
+    expect(createPolicySchemas(policyLimitsSchema.parse({ extensionBytes: exactBytes - 1 }))
       .boundedExtensionSchema.safeParse(exact).success).toBe(false);
     const quoted = { q: "\"\\" };
     const quotedBytes = new TextEncoder().encode(JSON.stringify(quoted)).length;
-    expect(createToolPolicySchemas(policyLimitsSchema.parse({ extensionBytes: quotedBytes }))
+    expect(createPolicySchemas(policyLimitsSchema.parse({ extensionBytes: quotedBytes }))
       .boundedExtensionSchema.safeParse(quoted).success).toBe(true);
-    expect(createToolPolicySchemas(policyLimitsSchema.parse({ extensionBytes: quotedBytes - 1 }))
+    expect(createPolicySchemas(policyLimitsSchema.parse({ extensionBytes: quotedBytes - 1 }))
       .boundedExtensionSchema.safeParse(quoted).success).toBe(false);
     const accented = { t: "é😀" };
     const accentedBytes = new TextEncoder().encode(JSON.stringify(accented)).length;
     expect(accentedBytes).toBeGreaterThan(JSON.stringify(accented).length);
-    expect(createToolPolicySchemas(policyLimitsSchema.parse({ extensionBytes: accentedBytes }))
+    expect(createPolicySchemas(policyLimitsSchema.parse({ extensionBytes: accentedBytes }))
       .boundedExtensionSchema.safeParse(accented).success).toBe(true);
-    expect(createToolPolicySchemas(policyLimitsSchema.parse({ extensionBytes: accentedBytes - 1 }))
+    expect(createPolicySchemas(policyLimitsSchema.parse({ extensionBytes: accentedBytes - 1 }))
       .boundedExtensionSchema.safeParse(accented).success).toBe(false);
     const nested = { a: [1, "\""] };
     const nestedBytes = new TextEncoder().encode(JSON.stringify(nested)).length;
-    expect(createToolPolicySchemas(policyLimitsSchema.parse({ extensionBytes: nestedBytes }))
+    expect(createPolicySchemas(policyLimitsSchema.parse({ extensionBytes: nestedBytes }))
       .boundedExtensionSchema.safeParse(nested).success).toBe(true);
-    expect(createToolPolicySchemas(policyLimitsSchema.parse({ extensionBytes: nestedBytes - 1 }))
+    expect(createPolicySchemas(policyLimitsSchema.parse({ extensionBytes: nestedBytes - 1 }))
       .boundedExtensionSchema.safeParse(nested).success).toBe(false);
     const cycle: { self?: unknown } = {};
     cycle.self = cycle;
-    expect(createToolPolicySchemas(policyLimitsSchema.parse({ extensionBytes: 64 }))
+    expect(createPolicySchemas(policyLimitsSchema.parse({ extensionBytes: 64 }))
       .boundedExtensionSchema.safeParse(cycle).success).toBe(false);
   });
 
@@ -178,19 +178,19 @@ describe("P01 contract review regressions", () => {
       namespaceIncludeDepth: 1,
       maxMetadataStringLength: 4_000,
     });
-    const lowSchemas = createToolPolicySchemas(low);
-    const highSchemas = createToolPolicySchemas(high);
+    const lowSchemas = createPolicySchemas(low);
+    const highSchemas = createPolicySchemas(high);
     const nested = { child: { child: { leaf: true } } };
     expect(lowSchemas.boundedExtensionSchema.safeParse(nested).success).toBe(false);
     expect(highSchemas.boundedExtensionSchema.safeParse(nested).success).toBe(true);
     const includes = [1, 2, 3, 4].map((revision) => ({ name: `ns-${String(revision)}`, revision }));
-    expect(lowSchemas.toolPolicyNamespaceManifestSchema.safeParse({
+    expect(lowSchemas.policyNamespaceManifestSchema.safeParse({
       name: "workspace",
       revision: 1,
       policies: [],
       includes,
     }).success).toBe(false);
-    expect(highSchemas.toolPolicyNamespaceManifestSchema.safeParse({
+    expect(highSchemas.policyNamespaceManifestSchema.safeParse({
       name: "workspace",
       revision: 1,
       policies: [],

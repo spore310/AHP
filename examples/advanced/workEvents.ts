@@ -51,9 +51,9 @@ export async function runWorkEventsExample() {
     const senior = await connect("senior", "work-events-senior");
     const observer = await connect("observer", "work-events-observer");
     let dropped = 0;
-    const fault: WorkExtensionPort = { request: senior.transport.request.bind(senior.transport),
-      onClose: senior.transport.onClose.bind(senior.transport),
-      onNotification: (method, receive) => senior.transport.onNotification(method, (params) => {
+    const fault: WorkExtensionPort = { request: senior.workPort.request.bind(senior.workPort),
+      onClose: senior.workPort.onClose.bind(senior.workPort),
+      onNotification: (method, receive) => senior.workPort.onNotification(method, (params) => {
         if (method.endsWith("/changed") && z.object({ change: z.literal("cancelled") }).safeParse(params).success) {
           dropped++;
           return;
@@ -65,10 +65,10 @@ export async function runWorkEventsExample() {
       projections.push(projection);
       return projection;
     };
-    const visible = project(fault), hidden = project(observer.transport), excepted = project(senior.transport);
+    const visible = project(fault), hidden = project(observer.workPort), excepted = project(senior.workPort);
     const [initial, denied, privateChat, native] = await Promise.all([
       visible.subscribe({ resource: locate(included) }), hidden.subscribe({ resource: locate(included) }),
-      excepted.subscribe({ resource: locate(excluded) }), senior.client.subscribe(channel),
+      excepted.subscribe({ resource: locate(excluded) }), senior.connection.protocol.subscribe(channel),
     ]);
     assert.ok(native.result.snapshot);
     for (const view of [initial, denied, privateChat]) assert.equal(view.status, "ready");
@@ -76,8 +76,8 @@ export async function runWorkEventsExample() {
     const captureHint = (id: string | undefined) => (params: unknown) => {
       if (z.object({ subscriptionId: z.literal(id) }).safeParse(params).success) concealed.push(params);
     };
-    const stopHidden = observer.transport.onNotification("x-ahp/work/changed", captureHint(denied.subscriptionId));
-    const stopExcluded = senior.transport.onNotification("x-ahp/work/changed", captureHint(privateChat.subscriptionId));
+    const stopHidden = observer.workPort.onNotification("x-ahp/work/changed", captureHint(denied.subscriptionId));
+    const stopExcluded = senior.workPort.onNotification("x-ahp/work/changed", captureHint(privateChat.subscriptionId));
     const session = locate(demo.origin());
     const submitted = await senior.request("x-ahp/work/submit", { session, requestKey: "announced-review", kind: "code.review",
       scope: [{ resource: session, include: true }], announce: [
@@ -99,16 +99,16 @@ export async function runWorkEventsExample() {
     assert.ok(nativeActions.every((action) => !action.startsWith("chat/")));
     assert.ok(delivered.some((entry) => entry.text.includes("cancelled")));
     assert.ok(delivered.every((entry) => entry.subject === "senior" && entry.chat === included.id));
-    await senior.client.shutdown();
+    await senior.connection.shutdown();
     assert.equal(visible.snapshot().status, "disconnected");
     const next = await connect("senior", "work-events-reconnected");
-    const restored = await visible.reconnect(next.transport);
+    const restored = await visible.reconnect(next.connection);
     assert.equal(restored.items.find((item) => item.id === workId)?.status, "cancelled");
     return { dropped, restored: restored.status, presented: delivered.length, excluded: excludedCount, observer: observerCount };
   } finally {
     stopNative();
     await Promise.allSettled(projections.map((client) => client.dispose()));
-    await Promise.allSettled(peers.map(({ client }) => client.shutdown()));
+    await Promise.allSettled(peers.map(({ connection }) => connection.shutdown()));
     await demo.stop();
   }
 }

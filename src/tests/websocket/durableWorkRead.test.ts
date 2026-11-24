@@ -88,7 +88,7 @@ it("reads the ready incarnation's authorized detail and denies mutations from an
     expect(await delayed).toEqual({ version: 1, work: null });
   } finally {
     deliver.resolve(undefined);
-    await Promise.allSettled(clients.map((peer) => peer.client.shutdown()));
+    await Promise.allSettled(clients.map((peer) => peer.connection.shutdown()));
     await demo.stop();
   }
 });

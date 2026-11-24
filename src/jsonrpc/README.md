@@ -16,6 +16,7 @@ silently accepting a different wire shape. See
 | File | Responsibility |
 | ---- | -------------- |
 | `helpers/value/types.ts` | Structural and encoded-size bounds for detached JSON values. |
+| `helpers/value/index.ts` | Portable bounded JSON capture entry point. |
 | `helpers/value/helpers.ts` | Descriptor-safe capture with optional PostgreSQL text validation. |
 | `types.ts` | Zod schemas and inferred types for requests, notifications, and responses, plus compile-time conformance with the protocol package. |
 | `helpers.ts` | `RpcError`, the `isRpcError` narrowing, `parseUnknownJson`, and `JSONRPC_PUBLIC_ERROR_CODES`. |

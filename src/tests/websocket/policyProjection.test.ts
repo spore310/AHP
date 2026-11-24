@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { sessionReducer, rootReducer, type SessionAction, type SessionState } from "@microsoft/agent-host-protocol";
 import { ACTION_TYPE_ROOT_ACTIVE_SESSIONS_CHANGED, SESSION_LIFECYCLE_CREATING, SESSION_STATUS_IDLE } from "@sessions/constants";
 import { createReferenceAuthorizer, type ResourceRef } from "@authorization";
-import { createToolPolicyFactory } from "@toolPolicy";
-import { createResourceViews, projectSessionView, projectSessionViewAction, type ResourceViewRecipient, type ResourceViewOptions } from "@toolExecution/helpers/views";
+import { createPolicyFactory } from "@authorization/policies";
+import { createResourceViews, projectSessionView, projectSessionViewAction, type ResourceViewRecipient, type ResourceViewOptions } from "@sessions/views";
 
 const fixture = (options: { reveal?: boolean; challenge?: boolean; admitted?: boolean; mandatory?: boolean; permission?: () => Promise<"allow" | "deny">; resolve?: ResourceViewOptions["resolve"] } = {}) => {
   const policy = { id: "resource-read", revision: 1 };
@@ -12,7 +12,7 @@ const fixture = (options: { reveal?: boolean; challenge?: boolean; admitted?: bo
   const sessionType = { key: "view-session", version: 1 };
   const actor = { kind: "user" as const, principal: { domainId: "local", subject: "reader" } };
   const context = { actor, connectionId: "reader", authRevision: "one" };
-  const policies = createToolPolicyFactory({ policies: [{ ...policy, operations: {
+  const policies = createPolicyFactory({ policies: [{ ...policy, operations: {
     discover: { actor: { mode: "direct-grant", actors: ["user"] }, reveal: options.reveal ?? true,
       ...(options.permission === undefined ? {} : { requiredPermissions: ["view"] }) },
   }, challenge: { required: options.challenge ?? false } }, { ...mandatory, operations: { discover: { actor: { mode: "direct-grant", actors: ["user"] }, reveal: true } }, challenge: { required: false } }],

@@ -33,7 +33,7 @@ export interface RegisteredResource {
 /** A registered owner must validate payloads and invoke admission immediately before mutation. */
 export interface ResourceOperation {
   readonly name: string;
-  readonly purpose: import("@toolPolicy").ToolOperation;
+  readonly purpose: import("@authorization/policies").PolicyOperation;
   readonly policies: readonly PolicyRef[];
   validate?(payload: unknown): boolean;
   commit?(payload: unknown, context: ResourceOperationRequest, admission: () => boolean): boolean;
@@ -83,7 +83,7 @@ export interface ResourceOperationHandle {
 export interface ResourceOperationsOptions {
   readonly prepareWork?: PrepareWorkOperation;
   readonly registry: import("../evaluate/types").ReferenceAuthorizer;
-  readonly policies: import("@toolPolicy").ToolPolicyFactory;
+  readonly policies: import("@authorization/policies").PolicyFactory;
   readonly kinds: readonly ResourceKindAdapter[];
   readonly types: readonly ResourceTypeRegistration[];
   readonly maxPending?: number;

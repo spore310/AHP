@@ -15,12 +15,10 @@ Start here, then read the README of the capability you are changing.
 | `jsonrpc/` | [`jsonrpc/README.md`](jsonrpc/README.md) | JSON-RPC 2.0 message schemas, the owned `RpcError`, and the allowlisted error codes. No transport, no I/O. |
 | `sessions/` | [`sessions/README.md`](sessions/README.md) | The session engine: provider registry, session store, state reducer, sequencing, and lifecycle. AHP-aware but transport-agnostic. |
 | `websocket/` | [`websocket/README.md`](websocket/README.md) | Raw transport, AHP subscriptions/publication, handshake authentication, and the composed host. |
-| `tools/` | [`tools/README.md`](tools/README.md) | Immutable exact-revision contracts, schema validation and descriptor projection. |
+| `tool/` | [`tool/README.md`](tool/README.md) | Immutable exact-revision contracts, schema validation and descriptor projection. |
 | `application/` | [`application/README.md`](application/README.md) | Baseline session types, scoped namespaces and policy examples. |
 | `authorization/` | [`authorization/README.md`](authorization/README.md) | Trusted actors, connection grants, resource policy and authorization proofs. |
-| `toolPolicy/` | [`toolPolicy/README.md`](toolPolicy/README.md) | Exact-revision assignment, scoped policy and proposal publication. |
-| `toolExecution/` | [`toolExecution/README.md`](toolExecution/README.md) | Private tool invocation, authorization checks and executor routing. |
-| `toolClient/` | [`toolClient/README.md`](toolClient/README.md) | SDK client for assignments, local implementations and private calls. |
+| `client/` | [Client](client/README.md) | Native AHP connection, private RPC and shared endpoint lifetime. |
 | `agents/` | [`agents/README.md`](agents/README.md) | Static bearer authentication, durable agent registration, and in-memory generation-fenced presence. |
 | `persistence/` | [`persistence/README.md`](persistence/README.md) | Database-neutral durable ports/facades, lazy allowlisted provider selection, and a PostgreSQL adapter. No SQL in the live session engine. |
 | `work/` | [`work/README.md`](work/README.md) | Principal/session authorization, bounded work validation, and the work-lease application service. |

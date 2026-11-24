@@ -424,3 +424,38 @@ returned canonical envelopes and do not reduce state.
   — session lifecycle and disposal semantics.
 - [`docs/plans/ProvidersPlan.md`](../../docs/plans/work/ProvidersPlan.md) — the
   intended backend/AHP wiring (target state).
+
+## Protected resource views
+
+`createResourceViews` is the policy-aware embedding service. `ResourceViewOptions`
+requires the canonical registry/compiler, explicit admitted resource-read policy
+refs and trusted full-route resolution. Selected discover/reveal with an actual
+binding authorizes resource content, including authored text.
+Tool assignments alone do not authorize this seam. Mandatory route constraints
+remain canonical. All native metadata requires separate global-sequence consent
+from the transport recipient adapter.
+
+`ResourceViewSource` supplies canonical records, snapshots and catalogue rows.
+Its captured resource/catalogue fences and the recipient's final fence are pure
+owned-state checks: no clocks, resolvers or user hooks may run inside them. Ordinary
+source and setup callbacks run before the final aggregate canonical clock check.
+Proofs retain issued stamps, exact incarnation and local mutation fences.
+
+Shared application metadata is empty; active-client/server tool arrays and
+customizations are empty. Supported native action projections match the pinned
+SDK reducer; unsupported transitions close the transport view. This is structured
+metadata privacy, not text redaction. Root agents are empty without independent
+provider-catalogue authority. Lists filter before paging, retain at most 128 opaque
+30-second cursors, and reject foreign/stale cursors. Views cap 128 catalogue rows,
+64 active preparations, 2 MiB captured values, and a 5-second caller deadline;
+unsettled preparations keep their admission slot. Dispose/forget release retained
+cursor ownership; already transmitted data cannot be recalled.
+List publication rechecks liveness and proof freshness after awaits; disposed or
+timed-out work cannot recreate cursor ownership when its resolver settles later.
+
+
+| File | Responsibility |
+| --- | --- |
+| `helpers/views/index.ts` | Neutral resource-view exports. |
+| `helpers/views/types.ts` | Explicit resource-read policy consent, trusted source and recipient fences, issued view proofs. |
+| `helpers/views/helpers.ts` | Canonical read decisions, structured metadata projection, aggregate freshness and bounded opaque pagination. |

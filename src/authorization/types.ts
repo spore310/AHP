@@ -1,3 +1,5 @@
+import type { MandatoryBindingSelector, PresentedExternalProof } from "./helpers/evaluate/types";
+
 /** Canonical subject inside one security domain. Display names are not subjects. */
 export interface SecuritySubjectRef {
   readonly domainId: string;
@@ -25,6 +27,13 @@ export interface ResourceRef<TKind extends string = string> {
 export interface ResourceRoute {
   readonly origin: ResourceRef;
   readonly targets: readonly ResourceRef[];
+}
+
+/** Canonical route and the authority evidence required to traverse it. */
+export interface ResourceAuthorizationRoute {
+  readonly route: ResourceRoute;
+  readonly externalProofs?: readonly PresentedExternalProof[];
+  readonly mandatoryBindings?: readonly MandatoryBindingSelector[];
 }
 
 /** Chosen executor fence. A connection string alone is not this identity. */

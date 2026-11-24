@@ -1,14 +1,14 @@
 import { vi } from "vitest";
 import { createReferenceAuthorizer, createResourceOperations } from "@authorization";
 import type { ResourceKindAdapter, ResourceOperation, ResourceOperationAuthority, ResourceOperationRequest, ResourceRef, ResourceRoute, ScopedPolicyBinding, TrustedRequestContext } from "@authorization";
-import { createToolPolicyFactory } from "@toolPolicy";
+import { createPolicyFactory } from "@authorization/policies";
 import { resourceKey } from "@authorization/helpers/resources";
 
 export const operationNames = ["read", "write", "input", "terminate", "mutate"] as const;
 export const operationRef = (name: string) => ({ id: "resource." + name, revision: 1 });
 export const operationActor: TrustedRequestContext = { actor: { kind: "user", principal: { domainId: "local", subject: "caller" } }, connectionId: "connection-caller", authRevision: "auth-1" };
 export const operationResource = (kind: string, id: string): ResourceRef => ({ domainId: "local", kind, id, instanceId: id + "-instance" });
-export function resourceFixture(options: { prepareWork?: import("@toolExecution").ToolWorkPreparation; targetKind?: string; challengeOperation?: string; mandatory?: boolean; evaluator?: boolean; external?: boolean; timeoutMs?: number; maxPending?: number; ttl?: number; commit?: ResourceOperation["commit"]; commitDurable?: ResourceOperation["commitDurable"] } = {}) {
+export function resourceFixture(options: { prepareWork?: import("@tool/execution").ToolWorkPreparation; targetKind?: string; challengeOperation?: string; mandatory?: boolean; evaluator?: boolean; external?: boolean; timeoutMs?: number; maxPending?: number; ttl?: number; commit?: ResourceOperation["commit"]; commitDurable?: ResourceOperation["commitDurable"] } = {}) {
   let time = 0;
   let providerAllowed = true;
   let currentHook = () => {};
@@ -25,7 +25,7 @@ export function resourceFixture(options: { prepareWork?: import("@toolExecution"
   const otherRoute: ResourceRoute = { origin: second, targets: [otherChat, ...(targetKind === "session" ? [] : [target])] };
   const refs = [...new Map([first, second, chat, otherChat, target].map((ref) => [resourceKey(ref), ref])).values()];
   const instances = new Map(refs.map((ref) => [ref.id, ref.instanceId]));
-  const policies = createToolPolicyFactory({ policies: [...operationNames.map((name) => ({ ...operationRef(name), operations: { invoke: { actor: { mode: "direct-grant" as const, actors: ["user" as const] } } }, challenge: { required: options.challengeOperation === name } })),
+  const policies = createPolicyFactory({ policies: [...operationNames.map((name) => ({ ...operationRef(name), operations: { invoke: { actor: { mode: "direct-grant" as const, actors: ["user" as const] } } }, challenge: { required: options.challengeOperation === name } })),
     { ...operationRef("provider"), operations: { invoke: { actor: { mode: "direct-grant" as const, actors: ["user" as const] }, requiredPermissions: ["provider.allowed"] } }, challenge: { required: false } }],
   bindings: [...new Set(refs.map((ref) => ref.kind))].map((kind) => ({ sessionType: { key: "test." + kind, version: 1 }, providerId: "provider", admitted: { policies: operationNames.map(operationRef), namespaces: [] }, mandatory: options.mandatory === true ? [operationRef("provider")] : [] })) });
   const registry = createReferenceAuthorizer({ policies, now: () => time, decisionTtlMs: options.ttl ?? 100,

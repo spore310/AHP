@@ -5,8 +5,8 @@ import WebSocket from "ws";
 import type { AHPServerHandle, WebSocketConnectionContext } from "@websocket";
 import { createToolPolicyHost, connectPolicyTransport, toolPolicyChannel as channel } from "./toolPolicyFixture";
 import { FrameLog, responseWithId } from "./helpers";
-import { contract } from "../toolExecution/fixtures";
-import { toAhpToolDefinition } from "@tools";
+import { contract } from "../tool/execution/fixtures";
+import { toAhpToolDefinition } from "@tool";
 
 // Observe the real supported binding; do not substitute the private kernel.
 const contexts = vi.hoisted(() => new Map<string, WebSocketConnectionContext>());

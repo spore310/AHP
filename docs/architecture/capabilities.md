@@ -7,14 +7,14 @@ How Agent Hosting Protocol composes. Module READMEs contain the public contracts
 | Capability | Location | README | Owns |
 | ---------- | -------- | ------ | ---- |
 | JSON-RPC | `src/jsonrpc/` | [README](../../src/jsonrpc/README.md) | Message schemas, owned wire errors, JSON decoding boundary. |
-| Tools | `src/tools/` | [README](../../src/tools/README.md) | Immutable exact tool contracts, trusted-schema validation, detached descriptor projection. |
+| Tools | `src/tool/` | [README](../../src/tool/README.md) | Immutable exact tool contracts, trusted-schema validation, detached descriptor projection. |
 | Sessions | `src/sessions/` | [README](../../src/sessions/README.md) | Provider registry, in-memory sessions, type/visible-tool policy, manifests, advertisement admission, reducer and sequence. |
 | WebSocket | `src/websocket/` | [README](../../src/websocket/README.md) | Raw transport, connection-bound AHP state, subscriptions, private invocation routing and composed host lifecycle. |
 | Application | `src/application/` | [README](../../src/application/README.md) | Baseline session types, scoped policy examples and an inert host action registration. |
 | Authorization | `src/authorization/` | [README](../../src/authorization/README.md) | Trusted actor context, scoped bindings, resource operations, proof, and invalidation. |
-| Tool policy | `src/toolPolicy/` | [README](../../src/toolPolicy/README.md) | Direct policy, namespace admission, and bounded proposal and publication lifecycle. |
-| Tool execution | `src/toolExecution/` | [README](../../src/toolExecution/README.md) | Scoped client/server lifecycle, private results, challenge handling, and approved artifact delivery. |
-| Tool client | `src/toolClient/` | [README](../../src/toolClient/README.md) | Compatibility entry for the tool execution client. |
+| Policy compiler | `src/authorization/helpers/policies/` | [README](../../src/authorization/helpers/policies/README.md) | Direct policies, namespaces and admission selection. |
+| Tool execution | `src/tool/helpers/execution/` | [README](../../src/tool/helpers/execution/README.md) | Scoped client/server lifecycle, private results, challenge handling, and approved artifact delivery. |
+| General client | `src/client/` | [README](../../src/client/README.md) | Native AHP, private RPC and shared endpoint lifetime. |
 | Agents | `src/agents/` | [README](../../src/agents/README.md) | Static bearer authentication, durable registration, and in-memory generation-fenced presence. |
 | Persistence | `src/persistence/` | [README](../../src/persistence/README.md) | Neutral durable ports/facades, lazy allowlisted provider selection, and the PostgreSQL adapter. No SQL in the session engine. |
 | Work | `src/work/` | [README](../../src/work/README.md) | Session-owner authorization, bounded validation, and work-lease coordination. |
@@ -33,9 +33,10 @@ websocket host -> sessions + AHP binding + raw transport
 AHP binding -> sessions + tools + JSON-RPC + optional agents/work
 work -> agents + persistence ports
 persistence contract/facades -> plain repository ports; selected PostgreSQL adapter -> pg
-live sessions stay in memory; persisted session data is a work-linked projection
+session recovery -> exact durable session and resource incarnations
 sessions -> tools + JSON decoding; never sockets
-client adapter -> public AHP SDK + tools
+general client -> public AHP SDK + bounded extension RPC
+tool client -> general client + private V1 tool protocol
 ```
 
 The raw WebSocket server owns framing and connection lifecycle. The AHP binding
@@ -90,25 +91,25 @@ Inputs and results travel through owned private routes. Optional proposal and
 artifact ports enter the same protected session and assignment boundaries.
 The trusted security configuration is independent of durable work. Resource view
 authorization and tool grants use the same canonical registry with distinct
-purposes. See the [tool client contract](../../src/toolClient/README.md).
+purposes. See the [tool client contract](../../src/tool/helpers/client/README.md).
 
 ## Agent/work boundary
 
-`x-ahp/agents/*` and `x-ahp/work/get` are namespaced, versioned requests, separate
-from `x-ahp/tools/*`. Remote work mutations stay closed through P2.
-Tool calls are short-lived client-to-client invocation.
-Work is a durable coordination record with an execution lease; the host never
-executes the stored task. Presence is memory-only and must be renewed on the
-authenticated connection. Work and registration rows survive a restart; sockets,
-subscriptions, and client tool advertisements do not.
+The protected host exposes V1 `x-ahp/agents/*` and `x-ahp/work/*`
+requests. A registered worker claims a durable item, renews its lease and
+settles its own attempt. Work-tagged tool calls check the lease and its scope
+alongside the caller's and executor's tool authority. Work and registration
+records survive host restart. A reconnecting worker establishes fresh presence
+on its authenticated connection, and clients re-establish their subscriptions
+and private advertisements.
 
 See [`agent-task-lifecycle.md`](agent-task-lifecycle.md) for the sequence, state
 machine, and failure cases.
 
 ## Deferred
 
-- Production identity/OIDC and cross-principal durable work.
-- Reconnect/replay and durable session hydration.
+- Production identity and OIDC.
+- Durable event replay across reconnects.
 - Filesystem executors, model inference and Pi runtime.
 - Chat/prompt streaming; `SessionBackend` still exposes disposal only.
 - Redis or a second coordination service.

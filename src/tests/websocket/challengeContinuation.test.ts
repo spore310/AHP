@@ -1,10 +1,10 @@
 import { createPrivateToolProtocol } from "@websocket/helpers/ahp/helpers/toolProtocol";
 import type { JsonRpcInvocation, ReplySettlement, WebSocketConnectionContext } from "@websocket/types";
-import { createToolDispatcher } from "@toolExecution";
-import type { ToolDispatchHandle } from "@toolExecution";
-import { EchoAction, contract, ports, registration } from "../toolExecution/fixtures";
+import { createToolDispatcher } from "@tool/execution";
+import type { ToolDispatchHandle } from "@tool/execution";
+import { EchoAction, contract, ports, registration } from "../tool/execution/fixtures";
 import { afterEach, expect, it, vi } from "vitest";
-import type { ChallengeAdapter } from "@toolExecution";
+import type { ChallengeAdapter } from "@tool/execution";
 import { createPolicyIntegrationFixture, createCodingHarness, channel } from "./policyIntegrationFixture";
 
 const fixtures: Array<Awaited<ReturnType<typeof createPolicyIntegrationFixture>>> = [];
@@ -33,7 +33,7 @@ it("C02 public same-socket dispatch/status/resume executes the original cross-cl
   expect(await caller.client.statusTool(receipt.callId)).toMatchObject({ status: "waiting", callId: receipt.callId });
   expect(await observer.client.resumeTool(receipt.continuationId, "foreign-proof")).toMatchObject({ status: "denied" });
   expect(verifier.verify).not.toHaveBeenCalled();
-  expect(await caller.client.resumeTool(receipt.continuationId, "approved-proof")).toEqual({ version: 2, status: "accepted", callId: receipt.callId });
+  expect(await caller.client.resumeTool(receipt.continuationId, "approved-proof")).toEqual({ version: 1, status: "accepted", callId: receipt.callId });
   let status = await caller.client.statusTool(receipt.callId);
   for (let count = 0; count < 20 && status.status !== "completed"; count += 1) status = await caller.client.statusTool(receipt.callId);
   expect(status).toMatchObject({ status: "completed", output: { value: "P12-HANDLER-RESULT:coding.read:P13-INPUT-CANARY:7" } });
@@ -62,7 +62,7 @@ it("C01 false proof is terminal and cannot execute or disclose parked input", as
   const { caller, executor, read, receipt } = await start(verifier);
   expect(await caller.client.resumeTool(receipt.continuationId, "mfaPassed")).toMatchObject({ status: "denied" });
   expect(await caller.client.resumeTool(receipt.continuationId, "other-proof")).toMatchObject({ status: "denied" });
-  await executor.client.client.ping();
+  await executor.client.connection.protocol.ping();
   expect(read.execute).not.toHaveBeenCalled();
   expect(verifier.verify).toHaveBeenCalledOnce();
   expect(JSON.stringify(executor.received)).not.toContain("P13-PARKED-CANARY");
@@ -71,10 +71,10 @@ it("C01 false proof is terminal and cannot execute or disclose parked input", as
 
 it.each(["input", "mfaPassed", "actor", "resource", "executor", "policyRevision"])("C03 strict resume rejects replacement %s before verifier", async (field) => {
   const verifier = adapter(), { caller, executor, read, receipt } = await start(verifier);
-  const response = await caller.request("x-ahp/tools/resume", { version: 2, continuationId: receipt.continuationId, proofRef: "proof", [field]: "SUBSTITUTION-CANARY" });
+  const response = await caller.request("x-ahp/tools/resume", { version: 1, continuationId: receipt.continuationId, proofRef: "proof", [field]: "SUBSTITUTION-CANARY" });
   expect(response).toHaveProperty("error");
   expect(verifier.verify).not.toHaveBeenCalled();
-  await executor.client.client.ping();
+  await executor.client.connection.protocol.ping();
   expect(read.execute).not.toHaveBeenCalled();
   expect(JSON.stringify(executor.received)).not.toMatch(/P13-PARKED-CANARY|SUBSTITUTION-CANARY/);
   expect(await caller.client.resumeTool(receipt.continuationId, "proof")).toMatchObject({ status: "accepted" });
@@ -123,7 +123,7 @@ it("C05 revoking a parent grant during verification prevents late execution", as
     release.resolve(undefined);
     await finished.promise;
     expect(await resumed).not.toBe("accepted");
-    await executor.client.client.ping();
+    await executor.client.connection.protocol.ping();
     expect(read.execute).not.toHaveBeenCalled();
     expect(JSON.stringify(executor.received)).not.toContain("P13-PARKED-CANARY");
   } finally {
@@ -145,7 +145,7 @@ it("C06 verified identity step-up preserves agent identity and cannot satisfy se
   expect(bound?.caller.delegationRef).toBe("verified-delegation-" + f.caller);
   expect(await caller.client.resumeTool(receipt.continuationId, "identity-only")).toMatchObject({ status: "denied" });
   expect(verifier.verify).toHaveBeenCalledOnce();
-  await executor.client.client.ping();
+  await executor.client.connection.protocol.ping();
   expect(read.execute).not.toHaveBeenCalled();
   expect(JSON.stringify(executor.received)).not.toContain("P13-PARKED-CANARY");
   consent = true;
@@ -240,8 +240,8 @@ it.each(["expiry", "cancel"])("C07 initial challenge reply rejects final-callbac
     } };
   };
   try {
-    expect((await call("capabilities", { version: 2 })).finish()).toBe(true);
-    const pending = await call("dispatch", { version: 2, channel, contract: { id: contract.id, key: contract.key, version: contract.version }, input: { path: "expired" } });
+    expect((await call("capabilities", { version: 1 })).finish()).toBe(true);
+    const pending = await call("dispatch", { version: 1, channel, contract: { id: contract.id, key: contract.key, version: contract.version }, input: { path: "expired" } });
     expect(pending.reply).toMatchObject({ status: "challenge-required" });
     armed = true;
     expect(pending.finish()).toBe(false);

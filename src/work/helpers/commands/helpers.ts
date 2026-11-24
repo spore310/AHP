@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
-import { captureValue } from "@jsonrpc/helpers/value/helpers";
+import { captureValue } from "@jsonrpc/value";
 import { RepositoryError, type ReplaceData, type StoredSession } from "@persistence";
 import type { DurableWorkRepository, StoredWork, WorkFence, WorkIntent } from "@persistence/helpers/durability/workTypes";
 import { sameResource } from "@authorization/helpers/context";

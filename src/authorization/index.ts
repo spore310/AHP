@@ -11,6 +11,7 @@ export type {
   ActorResolver,
   AuthorityRevisionStamp,
   ExecutorRevision,
+  ResourceAuthorizationRoute,
   ResourceRoute,
   BindingQuery,
   BindingResolver,

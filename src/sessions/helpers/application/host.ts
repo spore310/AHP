@@ -1,6 +1,6 @@
 import type { SessionsFactory } from "@sessions/types";
 import type { SessionCreationContext } from "@sessions/helpers/creation/types";
-import { SESSION_TYPE_SELECTOR_KEY } from "@tools";
+import { SESSION_TYPE_SELECTOR_KEY } from "@tool";
 
 /**
  * Creates a session through the existing factory using a session-type header enum.

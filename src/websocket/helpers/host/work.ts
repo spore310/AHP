@@ -157,7 +157,7 @@ export function createHostedWork(options: AHPServerOptions, sessions: SessionsFa
     if (!isDeepStrictEqual(agent.context, context)) return unavailable();
     return service.prepareExecutionGuard({ ...agent, signal: AbortSignal.any([signal, agent.signal]) }, execution, route, input);
   };
-  const prepareResourceWork: import("@toolExecution").ToolWorkPreparation = (caller, execution, route, input, signal) => {
+  const prepareResourceWork: import("@tool/execution").ToolWorkPreparation = (caller, execution, route, input, signal) => {
     const connection = connections.get(caller.connectionId) ?? unavailable();
     return prepareToolWork(connection, caller, execution, route, input, signal);
   };

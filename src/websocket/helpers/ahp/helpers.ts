@@ -6,9 +6,8 @@ import { parseClientSessionAction } from "@sessions/helpers/actions";
 import { ACTION_TYPE_SESSION_IS_ARCHIVED_CHANGED, ACTION_TYPE_SESSION_IS_READ_CHANGED, ACTION_TYPE_SESSION_TITLE_CHANGED } from "@sessions/constants";
 import { sameResource } from "@authorization/helpers/context";
 import type { JsonRpcHandlers, WebSocketConnectionContext } from "@websocket/types";
-import { parseToolWire, toolCompleteSchema } from "@toolExecution/helpers/client/helpers/protocol";
 
-import { AGENT_WORK_REQUEST_METHODS, TOOL_PRIVATE_REQUEST_METHODS, TOOL_CALL_METHOD, TOOL_COMPLETE_METHOD } from "./constants";
+import { AGENT_WORK_REQUEST_METHODS, TOOL_PRIVATE_REQUEST_METHODS, TOOL_COMPLETE_METHOD } from "./constants";
 import { createAHPKernel, type AHPBinding } from "./helpers/kernel/helpers";
 import { channelParamsSchema, dispatchActionParamsSchema, initializeParamsSchema, type AHPBindingOptions, type AHPDiagnostic, type NativeSessionWrites } from "./types";
 
@@ -53,13 +52,6 @@ export const createAHPBinding = (
     throw new Error("Invalid initial subscription limit.");
   }
   const kernel = createAHPKernel(factory, reportDiagnostic, options);
-  const isPrivateCompletion = (params: unknown, context: WebSocketConnectionContext): boolean => {
-    try {
-      return kernel.isToolCompletion(parseToolWire(toolCompleteSchema, params), context);
-    } catch {
-      return false;
-    }
-  };
   const handlers: Record<string, JsonRpcHandlers[string]> = {};
   for (const [method, handler] of Object.entries(kernel.handlers)) {
     handlers[method] = (params, context, invocation) => {
@@ -70,10 +62,9 @@ export const createAHPBinding = (
         });
       }
       if (method === TOOL_COMPLETE_METHOD) {
-        if (!isPrivateCompletion(params, context)) return null;
+        kernel.beforeDispatch({ method, params, context, invocation, kind: invocation.kind });
         return handler(params, context, invocation);
       }
-      if (method === TOOL_CALL_METHOD) throw new RpcError(JsonRpcErrorCodes.InvalidRequest, "Tool protocol extension required");
       if (admitWrite !== undefined && authorization !== undefined && (method === "dispatchAction" || method === "disposeSession")) {
         kernel.beforeDispatch({ method, params, context, invocation, kind: invocation.kind });
         const clientId = kernel.initializedClientId(context);
@@ -163,7 +154,6 @@ export const createAHPBinding = (
       kernel.onConnection(context);
     },
     beforeDispatch: kernel.beforeDispatch.bind(kernel),
-    isToolCompletion: isPrivateCompletion,
     dispose: () => {
       for (const lifetime of lifetimes.values()) lifetime.abort();
       lifetimes.clear();

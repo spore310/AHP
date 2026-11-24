@@ -7,9 +7,11 @@ import { createReferenceAuthorizer, createResourceOperations, type ExecutorRevis
 import { createPersistence, type ReplaceData } from "@persistence";
 import { createSessionConfig, createSessionTypeCatalogue, defineApplicationSession, ToolAccessLevel, type ProviderSessionInput, type SessionBackend, type SessionResourceLifecycle } from "@sessions";
 import { mockProvider } from "@sessions/mock";
-import { createApprovedArtifactSource, createToolResultProjection, type ChallengeAdapter } from "@toolExecution";
-import { createToolAdmission, createToolPolicyFactory, type ToolExecutionBinding, type ToolExecutionPolicyBase, type ToolOperation } from "@toolPolicy";
-import { createToolCatalogue, defineToolContract, type ToolContractDefinition } from "@tools";
+import { createApprovedArtifactSource, createToolResultProjection, type ChallengeAdapter } from "@tool/execution";
+import { createToolAdmission } from "@tool/policy";
+import { createPolicyFactory, type PolicyDefinitionBase, type PolicyOperation } from "@authorization/policies";
+import { type ToolExecutionBinding } from "@tool/policy/binding";
+import { createToolCatalogue, defineToolContract, type ToolContractDefinition } from "@tool";
 import { createAHPServer, type AHPServerHandle, type ConnectionFence } from "@websocket";
 import { replacementSchema } from "@work/helpers/protocol/schemas";
 import type { WorkExecutionRef } from "@work";
@@ -57,12 +59,12 @@ const definitions = [
   { ...challengePolicy, challenge: { required: true }, operations: { invoke: rule("invoke") } },
   { ...activationPolicy, challenge: { required: false }, operations: { publish: rule("activate") } },
   { ...projectionPolicy, challenge: { required: false }, operations: { invoke: rule("project") } },
-] satisfies readonly ToolExecutionPolicyBase[];
+] satisfies readonly PolicyDefinitionBase[];
 
 const provider = { ...providerPolicy, challenge: { required: false }, operations: Object.fromEntries(operations.map((name) => [name,
   { actor: { mode: "direct-grant", actors: ["user", "agent"] },
     ...(name === "discover" ? { reveal: true } : {}), ...(name === "invoke" ? { requiredPermissions: ["review-provider-consent"] } : {}) }])),
-} satisfies ToolExecutionPolicyBase;
+} satisfies PolicyDefinitionBase;
 
 export const clientTool = defineToolContract({ id: "10000000-0000-4000-8000-000000000001", key: "review.inspect", version: 1,
   name: "inspect", schemaDialect: "draft-07", inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -96,7 +98,7 @@ export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
 }) {
   const { admitted, namespaces } = createExamplePolicyAdmission(mode, definitions);
   const rules = { admitted, mandatory: [providerPolicy] };
-  const policies = createToolPolicyFactory({ policies: [...definitions, provider], namespaces,
+  const policies = createPolicyFactory({ policies: [...definitions, provider], namespaces,
     bindings: [{ sessionType, providerId: mockProvider.providerId, ...rules }] });
   let providerAllowsInvoke = true;
   const registry = createReferenceAuthorizer({ policies, now: Date.now,
@@ -224,7 +226,7 @@ export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
 
   const assignment = (subject: keyof typeof roles, definition: ToolContractDefinition) => ({ resource: origin, route: routeFor(origin).route,
     recipient: actorFor(subject), contract: selector(definition), bindingId: "demo-" + subject });
-  const allowTool = (subject: keyof typeof roles, definition: ToolContractDefinition, purposes: readonly ToolOperation[], needsChallenge = false): void => {
+  const allowTool = (subject: keyof typeof roles, definition: ToolContractDefinition, purposes: readonly PolicyOperation[], needsChallenge = false): void => {
     for (const purpose of purposes) registry.installToolAssignment({ ...assignment(subject, definition), operation: purpose,
       policyRef: purpose === "invoke" && needsChallenge ? challengePolicy : policy });
   };

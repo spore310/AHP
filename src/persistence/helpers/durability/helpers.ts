@@ -1,4 +1,4 @@
-import { captureValue } from "@jsonrpc/helpers/value/helpers";
+import { captureValue } from "@jsonrpc/value";
 import { resourceRefSchema, type ResourceRef } from "@authorization";
 import type { JsonObject, ResourceRecord } from "./types";
 

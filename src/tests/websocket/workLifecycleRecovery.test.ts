@@ -28,9 +28,9 @@ it("recovers the same connected SDK view on a periodic tick after a rejected dup
     const job = z.object({ workId: z.uuid() }).parse(await peer.request("x-ahp/work/submit", { requestKey: "existing", kind: "code.review",
       input: {}, scope: [{ resource, include: true }], announce: [{ resource, include: true }] }));
     const reset = vi.fn();
-    const stopListening = peer.transport.onNotification("x-ahp/work/reset", reset);
+    const stopListening = peer.workPort.onNotification("x-ahp/work/reset", reset);
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    const projection = createWorkClient(peer.transport, { reconcileIntervalMs: 5000 });
+    const projection = createWorkClient(peer.connection, { reconcileIntervalMs: 5000 });
     view = projection;
     const initial = await projection.subscribe({ resource });
     const summaries = [{ id: job.workId, revision: "1" }];
@@ -60,7 +60,7 @@ it("recovers the same connected SDK view on a periodic tick after a rejected dup
     stopListening();
   } finally {
     await view?.dispose();
-    await peer?.client.shutdown();
+    await peer?.connection.shutdown();
     await demo.stop();
     vi.useRealTimers();
   }

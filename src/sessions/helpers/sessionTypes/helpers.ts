@@ -9,7 +9,7 @@ import {
   type ToolCatalogue,
   type ToolContractDefinition,
   type ToolContractRef,
-} from "@tools";
+} from "@tool";
 
 import type {
   ApplicationSessionType,

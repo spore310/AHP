@@ -1,5 +1,5 @@
 import type { SessionTypeCatalogue, SessionTypeRef } from "@sessions/helpers/sessionTypes";
-import type { ToolContractRef } from "@tools";
+import type { ToolContractRef } from "@tool";
 
 import type { ClientAccessRole, ToolAccessLevel } from "./constants";
 

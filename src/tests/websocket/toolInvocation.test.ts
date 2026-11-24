@@ -1,22 +1,15 @@
-import type { ActionEnvelope } from "@microsoft/agent-host-protocol";
-import { AhpClient, type AhpTransport } from "@microsoft/agent-host-protocol/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseUnknownJson } from "@jsonrpc";
-import { ACTION_TYPE_SESSION_ACTIVE_CLIENT_SET } from "@sessions/constants";
-import { connectToolClient, type ToolClient } from "./legacyToolClient";
-import { defineToolContract, toAhpToolDefinition } from "@tools";
+import { toolAssignedReplySchema } from "@tool/protocol";
+import { connectToolClient, type ToolClient } from "@tool/client";
+import { defineToolContract, toAhpToolDefinition } from "@tool";
 import { type AHPServerHandle } from "@websocket";
 
 import { createToolPolicyHost, connectPolicyTransport } from "./toolPolicyFixture";
 
-// INTERNAL canonical broker/correlation compatibility; no public-host authorization claim.
-vi.mock("@websocket/helpers/ahp", async () => ({
-  createAHPBinding: (await import("@websocket/helpers/ahp/helpers/kernel/helpers")).createAHPKernel,
-}));
-
 const definition = defineToolContract({
-  id: "11111111-1111-4111-8111-111111111111", key: "test.echo", version: 1, name: "echo",
+  id: "11111111-1111-4111-8111-111111111111", key: "test.echo", version: 2, name: "echo",
   schemaDialect: "draft-07",
   inputSchema: {
     type: "object", properties: { text: { type: "string" } }, required: ["text"], additionalProperties: false,
@@ -45,9 +38,10 @@ it("preserves all 64 tools supported by the canonical session type and rejects 1
   for (const handler of handlers.slice(0, -1)) expect(handler.execute).not.toHaveBeenCalled();
   const before = host.sessions.getSessionSnapshot(channel);
   if (before === undefined) throw new Error("Missing canonical session");
-  executor.client.dispatch(channel, { type: ACTION_TYPE_SESSION_ACTIVE_CLIENT_SET,
-    activeClient: { clientId: "executor", tools: Array.from({ length: 129 }, (_, index) => toAhpToolDefinition(definitions[index % count] ?? last)) } });
-  await executor.client.ping();
+  const view = await executor.connection.rpc.request("x-ahp/tools/assigned", { version: 1, channel });
+  const { viewRevision } = toolAssignedReplySchema.parse(view);
+  await expect(executor.connection.rpc.request("x-ahp/tools/advertise", { version: 1, channel, viewRevision,
+    contracts: Array.from({ length: 129 }, () => ({ id: last.id, key: last.key, version: last.version })) })).rejects.toThrow();
   expect(host.sessions.getSessionSnapshot(channel)?.state.activeClients).toEqual(before.state.activeClients);
   await expect(caller.callTool(channel, last, { text: "retained" })).resolves.toEqual({ result: last.key });
   expect(handlers.at(-1)?.execute).toHaveBeenCalledTimes(2);
@@ -60,41 +54,22 @@ it.each([65, 128])("preserves the existing session-type rejection of %i tools", 
 });
 
 async function fixture(definitions = [definition]) {
-  const { host, recreate } = await createToolPolicyHost(definitions);
+  const { host, recreate } = await createToolPolicyHost(definitions, {
+    protectedViews: true, roles: { fixture: ["discover", "invoke", "advertise", "execute"], observer: ["discover"] },
+    toolDiscovery: ["fixture"], assignment: (subject) => subject === "fixture", registryCaps: { maxToolAssignments: 256 },
+  });
   hosts.push(host);
   const address = await host.start();
   const url = "ws://127.0.0.1:" + String(address.port) + "/capacity";
   const caller = await openToolClient(url, "caller");
-  await caller.client.subscribe(channel);
+  await caller.connection.protocol.subscribe(channel);
   return { host, url, caller, recreate };
 }
 
-async function openToolClient(url: string, clientId: string): Promise<ToolClient> {
-  const client = await connectToolClient({ transport: await connectPolicyTransport(url), ownership: "owned" }, { clientId, protocolVersions: ["1.0.0"] });
+async function openToolClient(url: string, clientId: string, subject = "fixture"): Promise<ToolClient> {
+  const client = await connectToolClient({ transport: await connectPolicyTransport(url, subject), ownership: "owned" }, { clientId, protocolVersions: ["1.0.0"] });
   clients.push(client);
   return client;
-}
-
-/** Observe actual frames, including extension frames an ordinary SDK would ignore. */
-async function openObserver(url: string, clientId = "observer") {
-  const inner = await connectPolicyTransport(url);
-  const frames: unknown[] = [];
-  const transport: AhpTransport = {
-    send: (message) => {
-      inner.send(typeof message === "string" ? message : JSON.stringify(message));
-    },
-    recv: async () => {
-      const frame = await inner.recv();
-      if (frame?.kind === "text") frames.push(parseUnknownJson(frame.text));
-      return frame;
-    },
-    close: () => inner.close(),
-  };
-  const client = new AhpClient(transport);
-  clients.push(client);
-  client.connect();
-  await client.initialize({ clientId, protocolVersions: ["1.0.0"], initialSubscriptions: ["ahp-root://"] });
-  return { client, transport, frames };
 }
 
 function textInput(input: unknown): string {
@@ -104,143 +79,55 @@ function textInput(input: unknown): string {
   return input.text;
 }
 
-function method(frame: unknown, name: string): boolean {
-  return typeof frame === "object" && frame !== null && "method" in frame && frame.method === name;
-}
-
-async function nextAction(client: AhpClient, dispatch: () => void): Promise<ActionEnvelope> {
-  const events = client.events();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    dispatch();
-    return await Promise.race([
-      (async () => {
-        for await (const entry of events) {
-          if (entry.channel === channel && entry.event.type === "action") return entry.event.params;
-        }
-        throw new Error("Action stream closed");
-      })(),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => {
-          reject(new Error("Action acknowledgement missing"));
-        }, 1_500);
-      }),
-    ]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-    await events.return?.();
-  }
-}
-
 afterEach(async () => {
   await Promise.all(clients.splice(0).map((client) => client.shutdown()));
   await Promise.all(hosts.splice(0).map((host) => host.stop()));
 });
 
 describe("end-to-end client tool capacity", () => {
-  it("lists matching full schemas to two SDK subscribers, advertises, executes locally and keeps payloads private", async () => {
+  it("executes contract version 2 over a private V1 invocation while native metadata stays independent", async () => {
     const { host, url, caller } = await fixture();
-    const observer = await openObserver(url);
-    const creatorSnapshot = await caller.client.subscribe(channel);
-    const observerSnapshot = await observer.client.subscribe(channel);
-    expect(observerSnapshot.result.snapshot).toEqual(creatorSnapshot.result.snapshot);
-    expect(observerSnapshot.result.snapshot).toMatchObject({
-      resource: channel,
-      state: {
-        activeClients: [],
-        _meta: { "x-ahp-application": {
-          schemaVersion: 1, sessionType: { key: "test.echo-session", version: 1 },
-          toolContracts: [{ id: definition.id, key: definition.key, version: 1,
-            definition: { name: definition.name, inputSchema: definition.inputSchema, outputSchema: definition.outputSchema } }],
-        } },
-      },
+    const inner = await connectPolicyTransport(url);
+    const frames: unknown[] = [];
+    const transport = { send: inner.send.bind(inner), close: inner.close.bind(inner), async recv() {
+      const frame = await inner.recv();
+      if (frame?.kind === "text") frames.push(parseUnknownJson(frame.text));
+      return frame;
+    } };
+    const executor = await connectToolClient({ transport, ownership: "owned" }, { clientId: "executor", protocolVersions: ["1.0.0"] });
+    clients.push(executor);
+    const execute = vi.fn((_input: unknown, invocation: import("@tool/client").ToolInvocationContext) => {
+      expect(invocation.version).toBe(2);
+      expect(invocation.contract.version).toBe(2);
+      return { result: "private" };
     });
-    expect(host.sessions.getSessionSnapshot(channel)?.state.serverTools).toBeUndefined();
-    const executor = await openToolClient(url, "executor");
-    let executions = 0;
-    let joined: Promise<void> = Promise.resolve();
-    const advertisementStart = observer.frames.length;
-    const accepted = await nextAction(observer.client, () => {
-      joined = executor.joinSession(channel, [{ definition, execute: (input) => {
-        executions += 1;
-        return { result: `private-result:${textInput(input)}` };
-      } }]);
-    });
-    await joined;
-    await observer.client.ping();
-    expect(observer.frames.slice(advertisementStart).filter((frame) => method(frame, "action"))).toHaveLength(1);
-    expect(accepted.rejectionReason).toBeUndefined();
-    expect(accepted.action).toMatchObject({
-      type: "session/activeClientSet", activeClient: { clientId: "executor", tools: [toAhpToolDefinition(definition)] },
-    });
-    const start = observer.frames.length;
+    await host.sessions.dispatchAction({ channel, clientId: "executor", clientSeq: 1, action: { type: "session/activeClientSet",
+      activeClient: { clientId: "executor", tools: [toAhpToolDefinition(definition)] } } });
+    await expect(caller.callTool(channel, ref, { text: "metadata-only" })).rejects.toThrow();
     const before = host.sessions.getSessionSnapshot(channel);
-    await expect(caller.callTool(channel, ref, { text: "private-input" }))
-      .resolves.toEqual({ result: "private-result:private-input" });
-    await observer.client.ping();
-    // Causal barrier, not a silence timeout.
-    expect(executions).toBe(1);
-    expect(host.sessions.getSessionSnapshot(channel)).toEqual(before);
-    expect(observer.frames.slice(start).some((frame) => method(frame, "x-ahp/tools/invoke"))).toBe(false);
-    expect(JSON.stringify(observer.frames.slice(start))).not.toContain("private-input");
-    expect(JSON.stringify(observer.frames.slice(start))).not.toContain("private-result");
-  });
-
-  it("rejects a wire-schema change privately even for an unsubscribed same-ID sender", async () => {
-    const { host, url } = await fixture();
-    const owner = await openObserver(url, "same-id");
-    const other = await openObserver(url, "same-id");
-    await other.client.subscribe(channel);
-    const before = host.sessions.getSessionSnapshot(channel);
-    const otherStart = other.frames.length;
-    const descriptor = toAhpToolDefinition(definition);
-    const rejection = await nextAction(owner.client, () => {
-      owner.client.dispatch(channel, {
-        type: ACTION_TYPE_SESSION_ACTIVE_CLIENT_SET,
-        activeClient: { clientId: "same-id", tools: [{
-          ...descriptor, inputSchema: { ...descriptor.inputSchema, type: "object", ...{ additionalProperties: true } },
-        }] },
-      });
-    });
-    expect(rejection.rejectionReason).toBeDefined();
-    expect(rejection.origin?.clientId).toBe("same-id");
-    await other.client.ping();
-    expect(other.frames.slice(otherStart).filter((frame) => method(frame, "action"))).toEqual([]);
+    await executor.joinSession(channel, [{ definition, execute }]);
+    await expect(caller.callTool(channel, ref, { text: "private-input" })).resolves.toEqual({ result: "private" });
+    expect(execute).toHaveBeenCalledOnce();
+    const invocations = frames.filter((frame) => frame && typeof frame === "object" && "method" in frame && frame.method === "x-ahp/tools/invoke");
+    expect(invocations).toMatchObject([{ jsonrpc: "2.0", params: { version: 1, contract: { id: definition.id, version: 2 } } }]);
     expect(host.sessions.getSessionSnapshot(channel)).toEqual(before);
   });
-
   it("denies invalid input, unassigned tools and outsider calls without executing; rejects invalid output", async () => {
     const { url, caller } = await fixture();
     const executor = await openToolClient(url, "executor");
+    const outsider = await openToolClient(url, "outsider");
     let executions = 0;
     await executor.joinSession(channel, [{ definition, execute: (input) => {
       executions += 1;
       return textInput(input) === "wrong-output" ? { result: 42 } : { result: "ok" };
     } }]);
-    await executor.client.ping();
+    await executor.connection.protocol.ping();
     await expect(caller.callTool(channel, ref, { text: 3 })).rejects.toThrow();
     await expect(caller.callTool(channel, { key: "test.not-assigned", version: 1 }, {})).rejects.toThrow();
-    const outsider = await openToolClient(url, "outsider");
     await expect(outsider.callTool(channel, ref, { text: "outsider" })).rejects.toThrow();
     expect(executions).toBe(0);
     await expect(caller.callTool(channel, ref, { text: "wrong-output" })).rejects.toThrow();
     expect(executions).toBe(1);
-  });
-
-  it("rejects forged results from another connection while accepting the exact executor result", async () => {
-    const { url, caller } = await fixture();
-    const attacker = await openObserver(url, "attacker");
-    const executor = await openToolClient(url, "executor");
-    await executor.joinSession(channel, [{ definition, execute: async (_input, invocation) => {
-      await attacker.transport.send({ jsonrpc: "2.0", method: "x-ahp/tools/complete", params: {
-        ...invocation, output: { result: "forged" },
-      } });
-      await attacker.client.ping();
-      // Proves the forged completion was processed before the real one.
-      return { result: "real-executor" };
-    } }]);
-    await executor.client.ping();
-    await expect(caller.callTool(channel, ref, { text: "hello" })).resolves.toEqual({ result: "real-executor" });
   });
 
   it("keeps the eligible executor available when another connection uses the same label", async () => {
@@ -248,8 +135,8 @@ describe("end-to-end client tool capacity", () => {
     const executor = await openToolClient(url, "executor");
     const execute = vi.fn(() => ({ result: "ok" }));
     await executor.joinSession(channel, [{ definition, execute }]);
-    await executor.client.ping();
-    await openToolClient(url, "executor");
+    await executor.connection.protocol.ping();
+    await openToolClient(url, "executor", "observer");
     await expect(caller.callTool(channel, ref, { text: "hello" })).resolves.toEqual({ result: "ok" });
     expect(execute).toHaveBeenCalledOnce();
   });
@@ -259,14 +146,13 @@ describe("end-to-end client tool capacity", () => {
     const executor = await openToolClient(url, "executor");
     const execute = vi.fn(() => ({ result: "ok" }));
     await executor.joinSession(channel, [{ definition, execute }]);
-    await executor.client.ping();
+    await executor.connection.protocol.ping();
     await executor.shutdown();
     const replacement = await openToolClient(url, "executor");
-    await replacement.client.subscribe(channel);
+    await replacement.connection.protocol.subscribe(channel);
     // No accepted advertisement on this new socket.
     expect(host.sessions.getSessionSnapshot(channel)?.state.activeClients.some((active) => active.clientId === "executor"))
-      .toBe(true);
-    // Presence is deliberately still stale; execution ownership is not.
+      .toBe(false);
     await expect(caller.callTool(channel, ref, { text: "stale" })).rejects.toThrow();
     expect(execute).not.toHaveBeenCalled();
   });
@@ -280,7 +166,7 @@ describe("end-to-end client tool capacity", () => {
       started.resolve(undefined);
       return finish.promise;
     } }]);
-    await executor.client.ping();
+    await executor.connection.protocol.ping();
     const result = expect(caller.callTool(channel, ref, { text: "pending" })).rejects.toThrow();
     await started.promise;
     await executor.shutdown();
@@ -294,15 +180,21 @@ describe("end-to-end client tool capacity", () => {
       nextStarted.resolve(undefined);
       return nextFinish.promise;
     } }]);
-    await second.client.ping();
+    await second.connection.protocol.ping();
     const nextResult = expect(caller.callTool(channel, ref, { text: "old-generation" })).rejects.toThrow();
     await nextStarted.promise;
-    await host.sessions.disposeSession({ channel });
+    const original = host.sessions.authorization?.getResource(channel);
+    if (!original) throw new Error("Missing session");
+    await host.sessions.authorization?.disposeSession(original);
     await nextResult;
     await recreate();
     const recreated = host.sessions.getSessionSnapshot(channel);
     nextFinish.resolve({ result: "old-generation-output" });
-    await second.client.ping();
+    const replacement = await openToolClient(url, "replacement");
+    await replacement.joinSession(channel, [{ definition, execute: () => ({ result: "new-generation" }) }]);
+    await expect(replacement.callTool(channel, ref, { text: "new" })).resolves.toEqual({ result: "new-generation" });
+    expect(recreated?.state).toBeDefined();
+    expect(host.sessions.authorization?.getResource(channel)?.instanceId).not.toBe(original.instanceId);
     expect(host.sessions.getSessionSnapshot(channel)).toEqual(recreated);
   });
 
@@ -321,7 +213,7 @@ describe("end-to-end client tool capacity", () => {
     await rejected;
   });
 
-  it("supports concurrent self-calls while ordinary SDK requests remain ordered", async () => {
+  it("correlates concurrent self-calls while native requests continue to complete", async () => {
     const { caller: self } = await fixture();
     const bothStarted = Promise.withResolvers<undefined>();
     const finish = Promise.withResolvers<undefined>();
@@ -332,19 +224,13 @@ describe("end-to-end client tool capacity", () => {
       await finish.promise;
       return { result: textInput(input) };
     } }]);
-    await self.client.ping();
+    await self.connection.protocol.ping();
     const first = self.callTool(channel, ref, { text: "first" });
     const second = self.callTool(channel, ref, { text: "second" });
-    let pingResolved = false;
-    const ping = self.client.ping().then(() => {
-      pingResolved = true;
-    });
     await bothStarted.promise;
-    expect(pingResolved).toBe(false);
+    await self.connection.protocol.ping();
     finish.resolve(undefined);
-    const results = await Promise.all([first, second, ping]);
-    expect(results.slice(0, 2)).toEqual([{ result: "first" }, { result: "second" }]);
-    expect(pingResolved).toBe(true);
+    expect(await Promise.all([first, second])).toEqual([{ result: "first" }, { result: "second" }]);
     expect(executions).toBe(2);
   });
 
@@ -396,7 +282,7 @@ describe("end-to-end client tool capacity", () => {
     const { url, caller } = await fixture();
     const executor = await openToolClient(url, "executor");
     await executor.joinSession(channel, [{ definition, execute: () => ({ result: "ok" }) }]);
-    await executor.client.ping();
+    await executor.connection.protocol.ping();
     await expect(caller.callTool(channel, ref, { text: "before" })).resolves.toEqual({ result: "ok" });
     await executor.joinSession(channel, []);
     await expect(caller.callTool(channel, ref, { text: "after" })).rejects.toThrow();

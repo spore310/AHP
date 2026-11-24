@@ -1,11 +1,11 @@
-import type { ServerToolBrokerOptions } from "@toolExecution/server";
+import type { ServerToolBrokerOptions } from "@tool/server";
 import type { AddressInfo } from "node:net";
 
 import type { AgentDirectoryRegistrationLimits, ConnectionAuthenticator } from "@agents";
 import type { AgentRegistrationRepository, WorkRepository } from "@persistence/types";
 import type { SessionsFactory, SessionsFactoryOptions } from "@sessions/types";
-import type { ClientToolBrokerOptions } from "@toolExecution/helpers/client/helpers/broker";
-import type { ResourceViewOptions } from "@toolExecution/helpers/views";
+import type { ClientToolBrokerOptions } from "@tool/helpers/execution/helpers/remote";
+import type { ResourceViewOptions } from "@sessions/views";
 import type { AHPServerSecurityOptions } from "../security/types";
 import type { WebSocketTransportLimits } from "../../types";
 
@@ -72,7 +72,7 @@ export interface AHPServerHandle {
   /** Trusted in-process commands sharing the host's canonical session policy and durable store. */
   readonly work?: import("@work").WorkService;
   /** Restricts an owning resource operation to the current protected connection's exact work lease. */
-  readonly prepareResourceWork?: import("@toolExecution").ToolWorkPreparation;
+  readonly prepareResourceWork?: import("@tool/execution").ToolWorkPreparation;
   /** Includes unresolved remote work after bounded shutdown; not a termination guarantee. */
   toolExecutionStats(): { readonly active: number; readonly draining: number; readonly retainedOutputBytes: number };
   start(): Promise<AddressInfo>;

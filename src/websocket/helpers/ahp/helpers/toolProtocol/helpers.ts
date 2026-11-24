@@ -1,20 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { JsonRpcErrorCodes } from "@microsoft/agent-host-protocol";
 import { RpcError, JSONRPC_VERSION, jsonRpcParamsSchema } from "@jsonrpc";
-import { createPrivateToolCalls } from "@toolExecution/helpers/calls";
-import type { PrivateToolCallHandle } from "@toolExecution/helpers/calls";
+import { createPrivateToolCalls } from "@tool/helpers/execution/helpers/calls";
+import type { PrivateToolCallHandle } from "@tool/helpers/execution/helpers/calls";
 import {
   parseToolWire, toolCapabilitiesRequestSchema, toolAssignedRequestSchema, toolAssignedReplySchema,
   toolAdvertiseRequestSchema, toolAdvertiseReplySchema, toolDispatchRequestSchema, toolCallSelectorSchema,
   toolResumeRequestSchema, toolManagementRequestSchema, toolArtifactRequestSchema, toolArtifactReplySchema,
-} from "@toolExecution/helpers/client/helpers/protocol";
+} from "@tool/protocol";
 import type { JsonRpcInvocation, WebSocketConnectionContext } from "@websocket/types";
 import type { PrivateProtocolCall, PrivateProtocolView, PrivateToolProtocol, PrivateToolProtocolPorts } from "./types";
 
 const unavailable = (): never => {
   throw new RpcError(JsonRpcErrorCodes.InvalidRequest, "Tool operation unavailable");
 };
-const absent = Object.freeze({ version: 2, status: "unavailable" });
+const absent = Object.freeze({ version: 1, status: "unavailable" });
 
 /** Socket-only protocol state. Policy and all execution remain in the sole broker. */
 export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): PrivateToolProtocol {
@@ -74,7 +74,7 @@ export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): Priv
       drop(view);
       if (!live(view.context)) continue;
       view.context.send({ jsonrpc: JSONRPC_VERSION, method: "x-ahp/tools/assignmentsChanged",
-        params: { version: 2, channel: view.channel, viewRevision: randomUUID() } }, () => owned(view.context));
+        params: { version: 1, channel: view.channel, viewRevision: randomUUID() } }, () => owned(view.context));
     }
   };
   const unsubscribe = ports.onInvalidate(() => {
@@ -89,7 +89,7 @@ export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): Priv
         invocation.onReplySettled((settlement) => {
           if (settlement.outcome === "success" && settlement.responseSent && owned(context)) extensions.add(context);
         });
-        return { version: 2, management: ports.manage !== undefined, artifacts: ports.artifacts === true };
+        return { version: 1, management: ports.manage !== undefined, artifacts: ports.artifacts === true };
       },
       "x-ahp/tools/manage": async (params, context, invocation) => {
         requireLive(context, invocation);
@@ -98,7 +98,7 @@ export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): Priv
         const result = await bounded(async (signal) => ports.manage?.(context, request, signal));
         if (result === undefined || !result.current() || !owned(context)) return absent;
         invocation.guardReply?.(() => result.current() && owned(context));
-        return { version: 2, ...result.receipt };
+        return { version: 1, ...result.receipt };
       },
       "x-ahp/tools/artifact": async (params, context, invocation) => {
         requireLive(context, invocation);
@@ -113,7 +113,7 @@ export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): Priv
         invocation.onReplySettled((settlement) => {
           if (settlement.outcome === "success" && settlement.responseSent && current()) result.recordDelivery();
         });
-        return parseToolWire(toolArtifactReplySchema, { version: 2, status: "available", artifact: result.artifact, encoded: result.encoded });
+        return parseToolWire(toolArtifactReplySchema, { version: 1, status: "available", artifact: result.artifact, encoded: result.encoded });
       },
       "x-ahp/tools/capabilities": (params, context, invocation) => {
         parseToolWire(toolCapabilitiesRequestSchema, params);
@@ -129,7 +129,7 @@ export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): Priv
             else context.close();
           }
         });
-        return { version: 2, assignments: true, dispatch: true, continuation: ports.continuation === true };
+        return { version: 1, assignments: true, dispatch: true, continuation: ports.continuation === true };
       },
       "x-ahp/tools/assigned": async (params, context, invocation) => {
         requireLive(context, invocation);
@@ -168,7 +168,7 @@ export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): Priv
           }
           const revision = randomUUID();
           const view: PrivateProtocolView = { context, channel: request.channel, revision, controller, ticket };
-          const reply = parseToolWire(toolAssignedReplySchema, { version: 2, channel: request.channel, viewRevision: revision, ...ticket.value });
+          const reply = parseToolWire(toolAssignedReplySchema, { version: 1, channel: request.channel, viewRevision: revision, ...ticket.value });
           const capacity = (): boolean => views.get(context)?.has(request.channel) === true
             || ((views.get(context)?.size ?? 0) < 128 && viewCount < 1024);
           invocation.guardReply?.(() => live(context) && ticket.current() && owned(context) && capacity() && ticket.fence());
@@ -203,7 +203,7 @@ export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): Priv
         const current = (): boolean => live(context) && views.get(context)?.get(request.channel) === view && ticket.current()
           && owned(context) && view.ticket.fence();
         try {
-          const reply = parseToolWire(toolAdvertiseReplySchema, { version: 2, channel: request.channel, viewRevision: view.revision,
+          const reply = parseToolWire(toolAdvertiseReplySchema, { version: 1, channel: request.channel, viewRevision: view.revision,
             ...view.ticket.value, advertisementId, tools: ticket.tools });
           invocation.guardReply?.(current);
           invocation.onReplySettled((settlement) => {
@@ -231,9 +231,9 @@ export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): Priv
           return handle;
         });
         const initial = await receipt?.admitted;
-        if (receipt === undefined || initial === undefined || initial.status === "denied") return { version: 2, status: "denied", code: "unavailable" };
+        if (receipt === undefined || initial === undefined || initial.status === "denied") return { version: 1, status: "denied", code: "unavailable" };
         const record = calls.read(receipt.callId, context);
-        if (record === undefined) return { version: 2, status: "denied", code: "unavailable" };
+        if (record === undefined) return { version: 1, status: "denied", code: "unavailable" };
         const admitted = access.get(record.handle);
         invocation.guardReply?.(() => {
           const current = calls.read(receipt.callId, context);
@@ -242,8 +242,8 @@ export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): Priv
             && (initial.status !== "challenge-required" || record.handle.continuationCurrent());
         });
         return initial.status === "challenge-required"
-          ? { version: 2, ...initial, callId: receipt.callId }
-          : { version: 2, status: "accepted", callId: receipt.callId };
+          ? { version: 1, ...initial, callId: receipt.callId }
+          : { version: 1, status: "accepted", callId: receipt.callId };
       },
       "x-ahp/tools/status": async (params, context, invocation) => {
         requireLive(context, invocation);
@@ -274,7 +274,7 @@ export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): Priv
       "x-ahp/tools/resume": async (params, context, invocation) => {
         requireLive(context, invocation);
         const request = parseToolWire(toolResumeRequestSchema, params);
-        const denied = { version: 2, status: "denied", code: "unavailable" };
+        const denied = { version: 1, status: "denied", code: "unavailable" };
         const callId = calls.findContinuation(request.continuationId, context);
         const record = callId === undefined ? undefined : calls.read(callId, context);
         if (callId === undefined || record === undefined) return denied;
@@ -301,7 +301,7 @@ export function createPrivateToolProtocol(ports: PrivateToolProtocolPorts): Priv
         });
         if (resumed !== true || !current()) return denied;
         invocation.guardReply?.(current);
-        return { version: 2, status: "accepted", callId };
+        return { version: 1, status: "accepted", callId };
       },
     },
     negotiated: (context) => owned(context),

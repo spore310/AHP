@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createReferenceAuthorizer } from "@authorization";
-import { createToolPolicyFactory } from "@toolPolicy";
+import { createPolicyFactory } from "@authorization/policies";
 
 const fixture = () => {
   let time = 0;
@@ -10,7 +10,7 @@ const fixture = () => {
   const context = { actor, connectionId: "reader", authRevision: "one" };
   const scope = { domainId: "local", kind: "session", id: "one", instanceId: "one" };
   const route = { origin: scope, targets: [scope] };
-  const policies = createToolPolicyFactory({ policies: [{ ...policy, operations: {
+  const policies = createPolicyFactory({ policies: [{ ...policy, operations: {
     discover: { actor: { mode: "direct-grant", actors: ["user"] }, reveal: true },
   }, challenge: { required: false } }] });
   const registry = createReferenceAuthorizer({ policies, decisionTtlMs: 10, now: () => {

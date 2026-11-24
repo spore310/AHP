@@ -71,7 +71,7 @@ export async function verifyWorkClock(connectionString: string, db: Pool) {
       assert.equal(await worker.request("x-ahp/work/complete", { ...execution(replacement), result: {} }), null);
     } finally {
       try {
-        await Promise.allSettled(peers.map((peer) => peer.client.shutdown()));
+        await Promise.allSettled(peers.map((peer) => peer.connection.shutdown()));
         await demo?.stop();
       } finally { Date.now = wall; }
     }

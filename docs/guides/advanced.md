@@ -143,7 +143,7 @@ Existing callback-only initial authority continues to support native operations.
 3. Supply exact caller and executor assignments for each tool. Use a host
    registration for trusted local code and an SDK advertisement for a client
    handler. The client API also exposes status, cancellation, and approved
-   artifact loading. [SDK tool client](../../src/toolClient/README.md)
+   artifact loading. [SDK tool client](../../src/tool/helpers/client/README.md)
 4. Configure the work repositories for durable execution epochs and exact
    session storage. Grant each work operation to its intended actors and set a
    trusted capacity override where needed. [Work service](../../src/work/README.md)

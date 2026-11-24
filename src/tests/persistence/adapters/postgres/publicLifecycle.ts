@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import type { Pool } from "pg";
 import { loseCommitAcknowledgement } from "./commitAcknowledgement";
-import { AhpClient } from "@microsoft/agent-host-protocol/client";
-import { ToolInvocationTransport } from "@toolExecution/client/transport";
+import type { AhpClient } from "@microsoft/agent-host-protocol/client";
+import { connectClient } from "@client";
 import { WebSocketTransport } from "@microsoft/agent-host-protocol/ws";
 import { createPostgresDurableStorage, createPostgresPersistenceProvider } from "@persistence/helpers/adapters/postgres";
 import { mockProvider } from "@sessions/mock";
@@ -67,15 +67,14 @@ export async function testPublicLifecycle(connectionString: string, db: Pool): P
       RETURNING work_id AS id`, [ref.instanceId, ref.domainId]);
     const workId = work.rows[0]?.id;
     assert.ok(workId);
-    const transport = new ToolInvocationTransport(await WebSocketTransport.connect("ws://127.0.0.1:" + String(address.port), { protocols: "demo-senior" }));
-    client = new AhpClient(transport);
-    client.connect();
-    await client.initialize({ clientId: "public-sql", protocolVersions: ["1.0.0"] });
-    const view: unknown = await transport.request("x-ahp/work/get", { version: 1, workId });
+    const socket = await WebSocketTransport.connect("ws://127.0.0.1:" + String(address.port), { protocols: "demo-senior" });
+    const { protocol, rpc } = await connectClient({ transport: socket, ownership: "owned" }, { clientId: "public-sql", protocolVersions: ["1.0.0"] });
+    client = protocol;
+    const view: unknown = await rpc.request("x-ahp/work/get", { version: 1, workId });
     assert.ok(view && typeof view === "object" && "work" in view && view.work && typeof view.work === "object" && "id" in view.work && view.work.id === workId);
     assert.equal("leaseToken" in view.work, false);
     assert.ok(await demo.host.sessions.authorization?.disposeSession(ref));
-    assert.deepEqual(await transport.request("x-ahp/work/get", { version: 1, workId }), { version: 1, work: null });
+    assert.deepEqual(await rpc.request("x-ahp/work/get", { version: 1, workId }), { version: 1, work: null });
     assert.ok(await demo.host.sessions.durability?.purge(ref, "2100-01-01"));
   } finally {
     await client?.shutdown();

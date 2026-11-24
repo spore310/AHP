@@ -10,7 +10,7 @@ import {
 } from "@sessions";
 import { createApplicationSession } from "@sessions/helpers/application/host";
 import { createMockProvider } from "@sessions/mock";
-import type { ToolCatalogue, ToolContractDefinition } from "@tools";
+import type { ToolCatalogue, ToolContractDefinition } from "@tool";
 
 const schema: SessionConfigSchema = {
   type: "object",

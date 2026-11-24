@@ -2,12 +2,12 @@ import type { PolicyRef, PolicyScopeRules, ReferenceAuthorizer, ResourceRef, Tru
 import type { JsonObject, ResourceRecord, StoredSession } from "@persistence";
 import type { WorkStatus } from "@persistence/types";
 import type { ResolvedSessionType } from "@sessions/helpers/sessionTypes/types";
-import type { ToolOperation, ToolPolicyFactory } from "@toolPolicy";
+import type { PolicyOperation, PolicyFactory } from "@authorization/policies";
 import type { WorkEntities } from "../commands/types";
 import type { WorkResourceSelection } from "../selections/types";
 
 export type WorkOperation = "submit" | "read" | "claim" | "renew" | "complete" | "fail" | "cancel" | "updateData" | "announce";
-export interface WorkOperationPolicy { readonly purpose: ToolOperation; readonly policies: readonly PolicyRef[] }
+export interface WorkOperationPolicy { readonly purpose: PolicyOperation; readonly policies: readonly PolicyRef[] }
 export interface WorkPolicyFacts {
   /** Present for a tagged tool or resource operation after the owner resolves its route and input. */
   readonly execution?: { readonly route: import("@authorization").ResourceRoute; readonly input: unknown };
@@ -33,7 +33,7 @@ export interface SessionWorkPolicyRegistration {
 }
 export interface WorkAuthorizerOptions {
   readonly registry: ReferenceAuthorizer;
-  readonly policies: ToolPolicyFactory;
+  readonly policies: PolicyFactory;
   readonly ceiling: PolicyScopeRules;
   readonly allowedKinds: readonly string[];
   readonly allowedOperations?: readonly WorkOperation[];

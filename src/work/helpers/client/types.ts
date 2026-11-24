@@ -1,3 +1,4 @@
+import type { Client } from "@client";
 import type { WorkListSummary } from "../commands/types";
 import type { WorkSubscribeRequest } from "../views/types";
 import type { ResourceLocator } from "../selections/types";
@@ -32,7 +33,7 @@ export interface WorkClientSnapshot {
 export interface WorkClient {
   subscribe(target: WorkViewSubscription): Promise<WorkClientSnapshot>;
   refresh(): Promise<WorkClientSnapshot>;
-  reconnect(port: WorkExtensionPort): Promise<WorkClientSnapshot>;
+  reconnect(port: WorkExtensionPort | Client): Promise<WorkClientSnapshot>;
   snapshot(): WorkClientSnapshot;
   onChange(receive: (snapshot: WorkClientSnapshot) => unknown): () => void;
   dispose(): Promise<void>;

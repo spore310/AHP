@@ -2,22 +2,23 @@ import { WebSocketTransport } from "@microsoft/agent-host-protocol/ws";
 import { z } from "zod";
 import { createReferenceAuthorizer, type SecurityComposition, type TrustedRequestContext, type ResourceRef, type ReferenceAuthorizer, type PolicyActorRef } from "@authorization";
 import type { ToolAssignmentRecord } from "@authorization/helpers/evaluate";
-import { createToolAdmission, createToolPolicyFactory, type ToolOperation } from "@toolPolicy";
+import { createToolAdmission } from "@tool/policy";
+import { createPolicyFactory, type PolicyOperation } from "@authorization/policies";
 import { createSessionConfig, createSessionTypeCatalogue, defineApplicationSession, ToolAccessLevel } from "@sessions";
 import { createMockProvider } from "@sessions/mock";
-import { createToolCatalogue, type ToolContractDefinition } from "@tools";
+import { createToolCatalogue, type ToolContractDefinition } from "@tool";
 import { createAHPServer, type ConnectionFence } from "@websocket";
-import type { ClientToolBrokerOptions, ClientToolRegistration, ClientToolRoute } from "@toolExecution/helpers/client/helpers/broker";
-import type { ToolPolicyRegistration, ToolPolicyResolutionRequest } from "@toolExecution/helpers/policy";
-import type { ServerToolBrokerOptions } from "@toolExecution/server";
-import type { CompiledToolPolicy } from "@toolPolicy/helpers/factory";
+import type { ClientToolBrokerOptions, ClientToolRegistration, ClientToolRoute } from "@tool/helpers/execution/helpers/remote";
+import type { ToolPolicyRegistration, ToolPolicyResolutionRequest } from "@tool/helpers/execution/helpers/policy";
+import type { ServerToolBrokerOptions } from "@tool/server";
+import type { CompiledPolicy } from "@authorization/helpers/policies/helpers/factory";
 import { createExamplePolicyAdmission } from "@application";
 import type { SessionsFactoryOptions } from "@sessions/types";
 
 export const toolPolicyChannel = "ahp-session:/capacity";
 export const connectPolicyTransport = (url: string, token = "fixture") => WebSocketTransport.connect(url, { protocols: "r5-" + token });
 
-/** Real credential validation, canonical sessions/assignments and SDK transport. Only historical suites explicitly substitute the internal kernel. */
+/** Real credential validation, canonical sessions/assignments and SDK transport. The hosted tool tests exercise the public binding. */
 export async function createToolPolicyHost(definitions: readonly ToolContractDefinition[], options: {
   readonly roles?: Readonly<Record<string, readonly string[]>>;
   readonly management?: { readonly allowSelfApproval?: boolean; readonly now?: () => number };
@@ -36,15 +37,16 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
   readonly securityNow?: () => number;
   readonly protectedViews?: boolean;
   readonly creatorView?: boolean;
+  readonly registryCaps?: Parameters<typeof createReferenceAuthorizer>[0]["caps"];
   readonly toolDiscovery?: readonly string[];
   /** Trusted fixture classification, independent of public clientId and request data. */
   readonly actors?: Readonly<Record<string, { readonly actor: PolicyActorRef; readonly agentGeneration?: number; readonly delegationRef?: string; readonly parentSubject?: string }>>;
   readonly registrations?: readonly ClientToolRegistration[];
   readonly server?: Pick<ServerToolBrokerOptions, "registrations" | "executor" | "dispatcher">;
   readonly clientExecution?: boolean;
-  readonly additionalPolicies?: readonly CompiledToolPolicy[];
+  readonly additionalPolicies?: readonly CompiledPolicy[];
   readonly permissionEvaluators?: Parameters<typeof createReferenceAuthorizer>[0]["permissionEvaluators"];
-  readonly assignment?: (subject: string, registration: ToolPolicyRegistration<"client"> | ToolPolicyRegistration<"server">, operation: ToolOperation) => boolean;
+  readonly assignment?: (subject: string, registration: ToolPolicyRegistration<"client"> | ToolPolicyRegistration<"server">, operation: PolicyOperation) => boolean;
   readonly route?: (origin: ResourceRef) => ClientToolRoute;
   readonly resolve?: (request: ToolPolicyResolutionRequest<"client"> | ToolPolicyResolutionRequest<"server">) => ClientToolRoute | Promise<ClientToolRoute>;
   readonly configureResources?: (registry: ReferenceAuthorizer, scope: ResourceRef, sessionType: { readonly key: string; readonly version: number }, parent?: ResourceRef) => void;
@@ -55,7 +57,7 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
   const activationPolicy = { id: "fixture.activate", revision: 1 };
   const admitted = [policy, ...(options.invokeChallenge === true ? [invokePolicy] : []), ...(options.management === undefined ? [] : [activationPolicy])];
   const sessionType = options.sessionType ?? { key: "test.echo-session", version: 1 };
-  const definitionsForAdmission: readonly CompiledToolPolicy[] = [{ ...policy, operations: Object.fromEntries(["discover", "invoke", "advertise", "execute", "propose", "approve", "publish"].map((operation) => [operation,
+  const definitionsForAdmission: readonly CompiledPolicy[] = [{ ...policy, operations: Object.fromEntries(["discover", "invoke", "advertise", "execute", "propose", "approve", "publish"].map((operation) => [operation,
     { actor: { mode: "roles", actors: { user: { anyOf: [operation] }, ...(options.actors === undefined ? {} : { agent: { anyOf: [operation] } }) } }, ...(operation === "discover" ? { reveal: true } : {}), ...(options.permission === undefined ? {} : { requiredPermissions: ["fixture-check"] }) }])),
   challenge: { required: options.challenge ?? false } }, ...(options.invokeChallenge === true
     ? [{ ...invokePolicy,
@@ -68,9 +70,9 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
   ];
   const { admitted: ceiling, namespaces } = createExamplePolicyAdmission(options.admissionMode ?? "direct", definitionsForAdmission);
   const rules = { admitted: ceiling, mandatory: [] };
-  const policies = createToolPolicyFactory({ policies: [...definitionsForAdmission, ...options.additionalPolicies ?? []], namespaces,
+  const policies = createPolicyFactory({ policies: [...definitionsForAdmission, ...options.additionalPolicies ?? []], namespaces,
     bindings: [{ sessionType, providerId: "mock", ...rules }] });
-  const registry = createReferenceAuthorizer({ policies, now: options.registryNow ?? Date.now,
+  const registry = createReferenceAuthorizer({ policies, caps: options.registryCaps, now: options.registryNow ?? Date.now,
     permissionEvaluators: { ...options.permissionEvaluators, ...(options.permission === undefined ? {} : { "fixture-check": options.permission }) } });
   const toolAdmission = options.management === undefined
     ? undefined
@@ -184,7 +186,7 @@ export async function createToolPolicyHost(definitions: readonly ToolContractDef
       const issuer = parent === undefined ? undefined : options.actors?.[parent]?.actor ?? { kind: "user" as const, principal: { domainId: "local", subject: parent } };
       registry.installBinding({ id: bindingId, actor, scope, roles: actorRoles, policies: admitted, revision: 1,
         authority: parent === undefined || issuer === undefined ? { kind: "host-policy", policy } : { kind: "delegation", issuer, parentGrantId: "fixture-grant-" + parent } });
-      const operations: readonly ToolOperation[] = options.toolDiscovery?.includes(subject) === true ? ["discover", "invoke", "advertise"] : ["invoke", "advertise"];
+      const operations: readonly PolicyOperation[] = options.toolDiscovery?.includes(subject) === true ? ["discover", "invoke", "advertise"] : ["invoke", "advertise"];
       for (const registration of [...registrations, ...options.server?.registrations ?? []]) for (const operation of operations) {
         if (registration.implementation.location === "server" && operation === "advertise") continue;
         if (options.assignment?.(subject, registration, operation) === false) continue;

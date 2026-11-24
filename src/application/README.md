@@ -56,7 +56,7 @@ An application selects a type with the server-authored `x-ahp-session-type`
 string. Protected factories use independently verified actors and resource
 bindings. In a protected SDK connection the tool manifest is projected through
 private assignment views. [Session composition](../sessions/README.md) ·
-[Authorization](../authorization/README.md) · [Tool client](../toolClient/README.md)
+[Authorization](../authorization/README.md) · [Tool client](../tool/helpers/client/README.md)
 
 ## Verification
 

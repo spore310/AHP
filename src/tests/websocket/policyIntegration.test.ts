@@ -1,11 +1,11 @@
 import { once } from "node:events";
 import { afterEach, expect, it, vi } from "vitest";
 import { sessionReducer, type SessionState, type SessionAction } from "@microsoft/agent-host-protocol";
-import type { ClientToolRoute } from "@toolExecution/helpers/client/helpers/broker";
+import type { ClientToolRoute } from "@tool/helpers/execution/helpers/remote";
 import WebSocket from "ws";
 import { FrameLog } from "./helpers";
 import { createPolicyIntegrationFixture, createCodingHarness, expectNoDeniedDispatchFrames, channel } from "./policyIntegrationFixture";
-import { parseToolWire, toolInvokeSchema, toolAssignedReplySchema, type ToolInvoke } from "@toolExecution/helpers/client/helpers/protocol";
+import { parseToolWire, toolInvokeSchema, toolAssignedReplySchema, type ToolInvoke } from "@tool/protocol";
 
 const fixtures: Array<Awaited<ReturnType<typeof createPolicyIntegrationFixture>>> = [];
 afterEach(async () => {
@@ -61,12 +61,12 @@ it("X01 grants issued after initialization give the agent only an explicit subse
     armed.value = false;
     release.resolve("allow");
     expect(await parked).toMatchObject({ status: "denied" });
-    await executor.client.client.ping();
+    await executor.client.connection.protocol.ping();
     expect(read.execute).toHaveBeenCalledOnce();
     expect(summary.execute).toHaveBeenCalledOnce();
     expect((await agent.assigned()).tools).toEqual([]);
     expect((await user.assigned()).tools).toEqual([]);
-    await agent.client.client.ping();
+    await agent.client.connection.protocol.ping();
     expect(JSON.stringify(executor.received)).not.toMatch(/P12-BEFORE-ISSUANCE|P12-UNDELEGATED-SUMMARY|P12-REVOKED-DELEGATION/);
     for (const tool of harness.slice(2)) expect(tool.execute).not.toHaveBeenCalled();
   } finally {
@@ -91,8 +91,8 @@ it.each(["self", "cross"] as const)("X05/X06 %s route denies an absent required 
   const before = await f.captureSessionState(caller.client, observer.client);
   const recipients = [...new Set([caller, executor, observer])].map((peer) => ({ peer, offset: peer.received.length }));
   const deniedPath = "P12-MISSING-EVALUATOR";
-  expect(await caller.client.dispatchTool(channel, selector, { path: deniedPath })).toEqual({ version: 2, status: "denied", code: "unavailable" });
-  await Promise.all(recipients.map(({ peer }) => peer.client.client.ping()));
+  expect(await caller.client.dispatchTool(channel, selector, { path: deniedPath })).toEqual({ version: 1, status: "denied", code: "unavailable" });
+  await Promise.all(recipients.map(({ peer }) => peer.client.connection.protocol.ping()));
   expect(await f.captureSessionState(caller.client, observer.client)).toEqual(before);
   for (const tool of harness) expect(tool.execute).not.toHaveBeenCalled();
   for (const { peer, offset } of recipients) expectNoDeniedDispatchFrames(peer.received.slice(offset), deniedPath);
@@ -122,7 +122,7 @@ it.each(["self", "cross"] as const)("X05/X06 %s route rejects local contract/sch
   await executor.client.joinSession(channel, [{ definition: chosen.definition, execute }]);
   const selector = { id: chosen.definition.id, key: chosen.definition.key, version: chosen.definition.version };
   await expect(caller.client.callTool(channel, selector, { path: "invalid-output" })).rejects.toThrow("unavailable");
-  await executor.client.client.ping();
+  await executor.client.connection.protocol.ping();
   expect(execute).toHaveBeenCalledOnce();
   expect(chosen.execute).not.toHaveBeenCalled();
   expect(JSON.stringify(caller.received)).not.toContain("P12-INVALID-OUTPUT");
@@ -131,7 +131,7 @@ it.each(["self", "cross"] as const)("X05/X06 %s route rejects local contract/sch
   expect(execute).toHaveBeenCalledTimes(2);
   expect(chosen.execute).toHaveBeenCalledOnce();
   for (const tool of harness.slice(1)) expect(tool.execute).not.toHaveBeenCalled();
-  await observer.client.client.ping();
+  await observer.client.connection.protocol.ping();
   expect(JSON.stringify(observer.received)).not.toMatch(/P12-INVALID-OUTPUT|P12-HANDLER-RESULT|P12-SUBSTITUTED-DESCRIPTOR|P12-SCHEMA/);
 });
 
@@ -167,7 +167,7 @@ it.each(["self", "cross"] as const)("X05/X06 %s route rejects a parked call afte
     await replacement.client.joinSession(channel, [next]);
     release.resolve(undefined);
     expect(await parked).toMatch(/denied|closed|unavailable/);
-    await replacement.client.client.ping();
+    await replacement.client.connection.protocol.ping();
     expect(chosen.execute).toHaveBeenCalledOnce();
     for (const tool of nextHarness) expect(tool.execute).not.toHaveBeenCalled();
     expect(JSON.stringify(replacement.received)).not.toContain("P12-OLD-INCARNATION");
@@ -189,8 +189,8 @@ it("X02 broader parent-session authority cannot replace triage-chat assignments 
   expect(new Set([parent.instanceId, origin.instanceId, f.chat.instanceId, f.workspace.instanceId]).size).toBe(4);
   expect(f.host.sessions.getSessionToolManifest(channel)?.sessionType.key).toBe("test.triage-session");
   expect((await pm.assigned()).tools.map((tool) => tool.contract.key)).toEqual(["coding.read", "coding.summary"]);
-  await pm.client.client.subscribe(f.parentChannel);
-  const frame = await pm.request("x-ahp/tools/assigned", { version: 2, channel: f.parentChannel });
+  await pm.client.connection.protocol.subscribe(f.parentChannel);
+  const frame = await pm.request("x-ahp/tools/assigned", { version: 1, channel: f.parentChannel });
   if (typeof frame !== "object" || frame === null || !("result" in frame)) throw new Error("Missing parent view");
   const view = parseToolWire(toolAssignedReplySchema, frame.result);
   expect(view.resource).toEqual(parent);
@@ -200,7 +200,7 @@ it("X02 broader parent-session authority cannot replace triage-chat assignments 
   for (const tool of harness.slice(2)) {
     const selector = { id: tool.definition.id, key: tool.definition.key, version: tool.definition.version };
     expect(await pm.client.dispatchTool(channel, selector, { path: "P12-PARENT-CANNOT-GRANT" })).toMatchObject({ status: "denied" });
-    expect(await pm.request("x-ahp/tools/dispatch", { version: 2, channel, contract: selector, input: {}, route: f.route(parent).route })).toHaveProperty("error");
+    expect(await pm.request("x-ahp/tools/dispatch", { version: 1, channel, contract: selector, input: {}, route: f.route(parent).route })).toHaveProperty("error");
   }
   const read = harness[0];
   if (read === undefined) throw new Error("Missing read tool");
@@ -211,7 +211,7 @@ it("X02 broader parent-session authority cannot replace triage-chat assignments 
   const outcome = await pm.client.dispatchTool(channel, selector, { path: "P12-PARENT-BYPASS" }).then((reply) => reply.status, (error: unknown) => String(error));
   expect(outcome).toMatch(/denied|closed|unavailable/);
   await pm.closed;
-  await executor.client.client.ping();
+  await executor.client.connection.protocol.ping();
   expect(read.execute).toHaveBeenCalledOnce();
   for (const tool of harness.slice(1)) expect(tool.execute).not.toHaveBeenCalled();
   expect(JSON.stringify(executor.received)).not.toMatch(/P12-PARENT-CANNOT-GRANT|P12-PARENT-BYPASS/);
@@ -250,7 +250,7 @@ it.each(["self", "cross"] as const)("X05/X06 %s route cannot reroute a parked ca
     await replacement.client.joinSession(channel, [next]);
     release.resolve(undefined);
     expect(await parked).toMatch(/denied|closed|unavailable/);
-    await replacement.client.client.ping();
+    await replacement.client.connection.protocol.ping();
     expect(chosen.execute).toHaveBeenCalledOnce();
     for (const tool of nextHarness) expect(tool.execute).not.toHaveBeenCalled();
     expect(JSON.stringify(replacement.received)).not.toContain("P12-OLD-CONNECTION");
@@ -286,7 +286,7 @@ it.each(["self", "cross"] as const)("X05/X06 %s route preserves exact in-flight 
     const scope = f.host.sessions.authorization?.getResource(channel);
     if (scope === undefined) throw new Error("Missing scope");
     expect(f.registry.removeBinding({ bindingId: "fixture-grant-observer", scope, revision: 1 })).toBe(true);
-    await executor.client.client.ping();
+    await executor.client.connection.protocol.ping();
     expect(await caller.client.statusTool(receipt.callId)).toMatchObject({ status: "running" });
     expect(await caller.client.cancelTool(receipt.callId)).toMatchObject({ status: "draining" });
     await aborted.promise;
@@ -334,7 +334,7 @@ it.each(["self", "cross"] as const)("X05/X06 %s route retires invalidated advert
     release.resolve(undefined);
     expect(await parked).toMatchObject({ status: "denied" });
     expect(await caller.client.dispatchTool(channel, selector, { path: "P12-AFTER-INVALIDATION" })).toMatchObject({ status: "denied" });
-    await executor.client.client.ping();
+    await executor.client.connection.protocol.ping();
     expect(chosen.execute).toHaveBeenCalledOnce();
     expect(JSON.stringify(executor.received)).not.toMatch(/P12-STALE-ADVERTISEMENT|P12-AFTER-INVALIDATION/);
     await executor.client.joinSession(channel, [chosen]);
@@ -351,7 +351,7 @@ it.each(["self", "cross"] as const)("X05/X06 %s client refuses substituted sourc
   fixtures.push(f);
   let mutation: ((invoke: ToolInvoke) => unknown) | undefined;
   let reached = Promise.withResolvers<undefined>();
-  const executor = await f.connect(f.executor, "executor", false, (frame) => {
+  const executor = await f.connect(f.executor, "executor", (frame) => {
     if (mutation === undefined) return frame;
     if (typeof frame !== "object" || frame === null || !("params" in frame)) throw new Error("Missing host invoke");
     const altered = { ...frame, params: mutation(parseToolWire(toolInvokeSchema, frame.params)) };
@@ -381,7 +381,7 @@ it.each(["self", "cross"] as const)("X05/X06 %s client refuses substituted sourc
     const receipt = await caller.client.dispatchTool(channel, selector, { path: "P12-ALTERED-" + label });
     if (receipt.status !== "accepted") throw new Error("Expected actual authorized host invocation: " + label);
     await reached.promise;
-    await executor.client.client.ping();
+    await executor.client.connection.protocol.ping();
     expect(chosen.execute, label).toHaveBeenCalledOnce();
     expect(await caller.client.statusTool(receipt.callId), label).toMatchObject({ status: "running" });
     await caller.client.cancelTool(receipt.callId);
@@ -393,7 +393,7 @@ it.each(["self", "cross"] as const)("X05/X06 %s client refuses substituted sourc
     const { input: _input, ...correlation } = parseToolWire(toolInvokeSchema, raw.params);
     expect(_input).toEqual({ path: "P12-ALTERED-" + label });
     await executor.transport.send(JSON.stringify({ jsonrpc: "2.0", method: "x-ahp/tools/complete", params: { ...correlation, error: "execution-failed" } }));
-    await executor.client.client.ping();
+    await executor.client.connection.protocol.ping();
     await vi.waitFor(async () => {
       expect(await caller.client.statusTool(receipt.callId)).toMatchObject({ status: "cancelled" });
     });
@@ -402,7 +402,7 @@ it.each(["self", "cross"] as const)("X05/X06 %s client refuses substituted sourc
   await expect(caller.client.callTool(channel, selector, { path: "tuple-restored" })).resolves.toEqual({ value: "P12-HANDLER-RESULT:coding.read:tuple-restored:7" });
   expect(chosen.execute).toHaveBeenCalledTimes(2);
   for (const competing of harness.slice(1)) expect(competing.execute).not.toHaveBeenCalled();
-  await observer.client.client.ping();
+  await observer.client.connection.protocol.ping();
   expect(JSON.stringify(observer.received)).not.toMatch(/P12-ALTERED|P12-HANDLER-RESULT|P12-DESCRIPTOR|P12-SCHEMA/);
 });
 
@@ -420,9 +420,9 @@ it("X01/X02/X03 one harness preserves distinct senior, junior and PM user/agent 
     const expected = subject === "observer" ? [] : subject.startsWith("senior") ? ["coding.read", "coding.summary", "coding.terminal", "coding.write"] : ["coding.read", "coding.summary"];
     expect((await peer.assigned()).tools.map((tool) => tool.contract.key), subject).toEqual(expected);
     expect(peer.actual.context.actor, subject).toEqual(f.actors[subject]?.actor);
-    const native = (await peer.client.client.subscribe(channel)).result.snapshot?.state as SessionState;
+    const native = (await peer.client.connection.protocol.subscribe(channel)).result.snapshot?.state as SessionState;
     expect(JSON.stringify(native), subject + " native snapshot contains no private descriptor").not.toMatch(/P12-SCHEMA|P12-DESCRIPTOR/);
-    const events = peer.client.client.events(), next = events.next();
+    const events = peer.client.connection.protocol.events(), next = events.next();
     const title = "P12-NATIVE-" + subject;
     const envelope = await f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title } });
     const delivered = await next;
@@ -432,7 +432,7 @@ it("X01/X02/X03 one harness preserves distinct senior, junior and PM user/agent 
     if (typeof actionFrame !== "object" || actionFrame === null || !("params" in actionFrame)) throw new Error("Missing SDK action");
     const params = actionFrame.params as { action: SessionAction; serverSeq: number };
     expect(params.serverSeq).toBe(envelope.serverSeq);
-    expect(sessionReducer(native, params.action)).toEqual((await peer.client.client.subscribe(channel)).result.snapshot?.state);
+    expect(sessionReducer(native, params.action)).toEqual((await peer.client.connection.protocol.subscribe(channel)).result.snapshot?.state);
   }
   const observer = peers.get("observer");
   if (observer === undefined) throw new Error("Missing observer");
@@ -444,8 +444,8 @@ it("X01/X02/X03 one harness preserves distinct senior, junior and PM user/agent 
       const before = await f.captureSessionState(peer.client, observer.client);
       const recipients = [...peers].map(([recipient, endpoint]) => ({ recipient, endpoint, offset: endpoint.received.length }));
       const deniedPath = "P12-RESTRICTED-" + subject + "-" + tool.definition.key;
-      expect(await peer.client.dispatchTool(channel, select(tool), { path: deniedPath })).toEqual({ version: 2, status: "denied", code: "unavailable" });
-      await Promise.all(recipients.map(({ endpoint }) => endpoint.client.client.ping()));
+      expect(await peer.client.dispatchTool(channel, select(tool), { path: deniedPath })).toEqual({ version: 1, status: "denied", code: "unavailable" });
+      await Promise.all(recipients.map(({ endpoint }) => endpoint.client.connection.protocol.ping()));
       expect(await f.captureSessionState(peer.client, observer.client)).toEqual(before);
       for (const { recipient, endpoint, offset } of recipients) {
         expectNoDeniedDispatchFrames(endpoint.received.slice(offset), deniedPath, recipient);
@@ -468,8 +468,8 @@ it("X01/X02/X03 one harness preserves distinct senior, junior and PM user/agent 
     expect(await senior.client.statusTool(receipt.callId)).toMatchObject({ status: "completed", output: { value: "P12-HANDLER-RESULT:coding.read:P12-SENIOR-PRIVATE-RESULT:7" } });
   });
   for (const [subject, peer] of peers) if (!subject.startsWith("senior")) {
-    expect(await peer.client.statusTool(receipt.callId), subject).toEqual({ version: 2, status: "unavailable" });
-    await peer.client.client.ping();
+    expect(await peer.client.statusTool(receipt.callId), subject).toEqual({ version: 1, status: "unavailable" });
+    await peer.client.connection.protocol.ping();
     expect(JSON.stringify(peer.received), subject).not.toContain("P12-SENIOR-PRIVATE-RESULT");
   }
   const juniorAgent = peers.get("junior-agent");
@@ -482,11 +482,11 @@ it("X01/X02/X03 one harness preserves distinct senior, junior and PM user/agent 
 
   await expect(juniorAgent.client.callTool(channel, select(read), { path: "P12-REVOKED-CHILD" })).rejects.toThrow();
 
-  await expect(juniorAgent.client.client.subscribe(channel)).rejects.toThrow();
+  await expect(juniorAgent.client.connection.protocol.subscribe(channel)).rejects.toThrow();
 
   await juniorAgent.closed;
 
-  await executor.client.client.ping();
+  await executor.client.connection.protocol.ping();
 
   expect(JSON.stringify(executor.received)).not.toContain("P12-REVOKED-CHILD");
 
@@ -521,14 +521,14 @@ it.each(["self", "cross"] as const)("X05/X06 %s route rejects altered trusted ro
     substitute = mutation;
     const input = { path: "P12-ROUTE-DENIED-" + label };
     expect(await caller.client.dispatchTool(channel, selector, input), label).toMatchObject({ status: "denied" });
-    await executor.client.client.ping();
+    await executor.client.connection.protocol.ping();
     expect(chosen.execute, label).toHaveBeenCalledOnce();
     expect(JSON.stringify(executor.received), label).not.toContain(input.path);
   }
   substitute = (route) => route;
   await expect(caller.client.callTool(channel, selector, { path: "route-restored" })).resolves.toEqual({ value: "P12-HANDLER-RESULT:coding.read:route-restored:7" });
   expect(chosen.execute).toHaveBeenCalledTimes(2);
-  await observer.client.client.ping();
+  await observer.client.connection.protocol.ping();
   expect(JSON.stringify(observer.received)).not.toMatch(/P12-ROUTE-DENIED|P12-HANDLER-RESULT|P12-SCHEMA|P12-DESCRIPTOR/);
   for (const competing of harness.slice(1)) expect(competing.execute).not.toHaveBeenCalled();
 });
@@ -536,7 +536,7 @@ it.each(["self", "cross"] as const)("X05/X06 %s route rejects altered trusted ro
 it.each(["self", "cross"] as const)("X05/X06 %s route executes the approved harness with actual identity, source and full mandatory route", async (mode) => {
   const f = await createPolicyIntegrationFixture({ mode });
   fixtures.push(f);
-  const executor = await f.connect(f.executor, "claimed-display-executor", true);
+  const executor = await f.connect(f.executor, "claimed-display-executor");
   const caller = mode === "self" ? executor : await f.connect(f.caller, "claimed-display-caller");
   const observer = await f.connect("observer", "claimed-display-senior");
   const harness = createCodingHarness();
@@ -566,12 +566,12 @@ it.each(["self", "cross"] as const)("X05/X06 %s route executes the approved harn
   expect(invoke.route).toEqual(f.route(f.host.sessions.authorization?.getResource(channel) ?? invoke.route.origin).route);
   expect(invoke.execution).toEqual({ binding: f.registrations[0]?.implementation, registrationRevision: 5, source: f.registrations[0]?.source });
   expect(invoke.execution.source.id).toContain(f.sourceEvidence.candidate);
-  expect(f.sourceEvidence).toMatchObject({ path: "src/tests/toolExecution/fixtures.ts", export: "createCodingHarness", revision: 7 });
+  expect(f.sourceEvidence).toMatchObject({ path: "src/tests/tool/execution/fixtures.ts", export: "createCodingHarness", revision: 7 });
   expect(executor.actual.context.actor).toEqual(f.actors[f.executor]?.actor);
   expect(caller.actual.context.actor).toEqual(f.actors[f.caller]?.actor);
   expect(caller.actual.context).toMatchObject({ agentGeneration: 2, delegationRef: "verified-delegation-" + f.caller });
   expect(mode === "self" ? caller.actual.context.connectionId === executor.actual.context.connectionId : caller.actual.context.connectionId !== executor.actual.context.connectionId).toBe(true);
-  await observer.client.client.ping();
+  await observer.client.connection.protocol.ping();
   for (const canary of ["P12-DESCRIPTOR", "P12-SCHEMA", "P12-PRIVATE-INPUT", "P12-HANDLER-RESULT", f.sourceEvidence.candidate]) expect(JSON.stringify(observer.received)).not.toContain(canary);
 });
 
@@ -585,7 +585,7 @@ it.each(["self", "cross"] as const)("X05/X06 %s route denies forged authority, c
   await executor.client.joinSession(channel, [chosen]);
   const contract = { id: chosen.definition.id, key: chosen.definition.key, version: chosen.definition.version };
   const input = { path: "P12-DENIED-INPUT" };
-  const base = { version: 2, channel, contract, input };
+  const base = { version: 1, channel, contract, input };
   const variants: ReadonlyArray<readonly [string, unknown]> = [
     ["caller actor", { ...base, actor: executor.actual.context.actor }],
     ["role", { ...base, roles: ["admin"] }], ["owner", { ...base, owner: "creator" }],
@@ -610,9 +610,9 @@ it.each(["self", "cross"] as const)("X05/X06 %s route denies forged authority, c
     expect(JSON.stringify(reply), label).toMatch(/"error"|"status":"denied"/);
   }
   const legacy = await caller.request("x-ahp/tools/call", { channel, key: contract.key, version: contract.version, input });
-  expect(legacy).toMatchObject({ error: { message: "Tool protocol extension required" } });
-  await executor.client.client.ping();
-  await observer.client.client.ping();
+  expect(legacy).toMatchObject({ error: { code: -32601 } });
+  await executor.client.connection.protocol.ping();
+  await observer.client.connection.protocol.ping();
   for (const tool of harness) expect(tool.execute).not.toHaveBeenCalled();
   for (const peer of [executor, observer]) expect(JSON.stringify(peer.received)).not.toContain("P12-DENIED-INPUT");
   await expect(caller.client.callTool(channel, contract, { path: "P12-POSITIVE-AFTER-DENIAL" })).resolves.toEqual({ value: "P12-HANDLER-RESULT:coding.read:P12-POSITIVE-AFTER-DENIAL:7" });
@@ -631,7 +631,7 @@ it.each(["self", "cross"] as const)("X05/X06 %s route independently requires cal
   if (tuple === undefined) throw new Error("Missing real executor assignment");
   expect(f.registry.removeExecutorAssignment(tuple)).toBe(true);
   expect(await caller.client.dispatchTool(channel, contract, { path: "P12-NO-EXECUTOR" })).toMatchObject({ status: "denied" });
-  await executor.client.client.ping();
+  await executor.client.connection.protocol.ping();
   expect(chosen.execute).not.toHaveBeenCalled();
   f.registry.installExecutorAssignment(tuple);
   await executor.client.joinSession(channel, [chosen]);
@@ -651,7 +651,7 @@ it.each(["self", "cross"] as const)("X05/X06 %s route independently requires cal
   }
   for (const tuple of caller.actual.tuples) f.registry.installExecutorAssignment(tuple);
   expect(await caller.client.dispatchTool(channel, contract, { path: "P12-NO-CALLER" })).toMatchObject({ status: "denied" });
-  await executor.client.client.ping();
+  await executor.client.connection.protocol.ping();
   expect(chosen.execute).not.toHaveBeenCalled();
   expect(JSON.stringify(executor.received)).not.toContain("P12-NO-CALLER");
 });
@@ -672,7 +672,7 @@ it.each(["self", "cross"] as const)("X05/X06 %s route obeys mandatory provider d
   const before = evaluations;
   denied = true;
   expect(await caller.client.dispatchTool(channel, selector, { path: "P12-PROVIDER-DENIED" })).toMatchObject({ status: "denied" });
-  await executor.client.client.ping();
+  await executor.client.connection.protocol.ping();
   expect(evaluations).toBeGreaterThan(before);
   expect(chosen.execute).toHaveBeenCalledOnce();
   expect(JSON.stringify(executor.received)).not.toContain("P12-PROVIDER-DENIED");
@@ -694,8 +694,8 @@ it.each(["self", "cross"] as const)("X05/X06 %s route exposes safe challenge con
   expect(view.tools.find((tool) => tool.contract.id === chosen.definition.id)?.conditions).toEqual(["challenge-required"]);
   const selector = { id: chosen.definition.id, key: chosen.definition.key, version: chosen.definition.version };
   expect(await caller.client.dispatchTool(channel, selector, { path: "P12-UNSATISFIED-CHALLENGE" })).toMatchObject({ status: "denied" });
-  await executor.client.client.ping();
-  await observer.client.client.ping();
+  await executor.client.connection.protocol.ping();
+  await observer.client.connection.protocol.ping();
   for (const tool of harness) expect(tool.execute).not.toHaveBeenCalled();
   expect(JSON.stringify(executor.received)).not.toContain("P12-UNSATISFIED-CHALLENGE");
   expect(JSON.stringify(observer.received)).not.toMatch(/P12-DESCRIPTOR|P12-SCHEMA|P12-HANDLER-RESULT|P12-UNSATISFIED-CHALLENGE/);
@@ -723,8 +723,8 @@ it.each(["self", "cross"] as const)("X05/X06 %s route reaches a required invoke 
   const before = invokeChecks;
   expect(await caller.client.dispatchTool(channel, selector, { path: "P12-UNSATISFIED-CHALLENGE" })).toMatchObject({ status: "denied" });
   expect(invokeChecks).toBeGreaterThan(before);
-  await executor.client.client.ping();
-  await observer.client.client.ping();
+  await executor.client.connection.protocol.ping();
+  await observer.client.connection.protocol.ping();
   for (const tool of harness) expect(tool.execute).not.toHaveBeenCalled();
   expect(JSON.stringify(executor.received)).toContain("P12-DESCRIPTOR-read");
   expect(JSON.stringify(executor.received)).not.toContain("P12-UNSATISFIED-CHALLENGE");
@@ -753,8 +753,8 @@ it.each(["self", "cross"] as const)("X05/X06 %s route denies when the caller los
   else expect(outcome[1], "fail-closed revocation").toMatch(/closed|unavailable|denied/);
   // The revoked peer cannot issue further traffic: its connection fails closed.
   await caller.actual.released;
-  await expect(caller.client.client.ping()).rejects.toThrow();
-  if (mode === "cross") await executor.client.client.ping();
+  await expect(caller.client.connection.protocol.ping()).rejects.toThrow();
+  if (mode === "cross") await executor.client.connection.protocol.ping();
   expect(chosen.execute).toHaveBeenCalledTimes(1);
   expect(JSON.stringify(executor.received)).not.toContain("P12-NO-MANDATORY");
 });
@@ -799,7 +799,7 @@ it.each(["self", "cross"] as const)("X05/X06 %s route revocation during an await
     const outcome = await parked;
     if (outcome[0] === "settled") expect(outcome[1], "quarantined denial").toBe("denied");
     else expect(outcome[1], "quarantine keeps the call un-delivered").toMatch(/closed|unavailable|denied/);
-    if (mode === "cross") await executor.client.client.ping();
+    if (mode === "cross") await executor.client.connection.protocol.ping();
     expect(chosen.execute).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(executor.received)).not.toContain("P12-PARKED");
   } finally {
@@ -825,7 +825,7 @@ it.each(["self", "cross"] as const)("X05/X06 %s route rejects missing and invali
       socket.terminate();
     }
   }
-  await executor.client.client.ping();
+  await executor.client.connection.protocol.ping();
   for (const tool of harness) expect(tool.execute).not.toHaveBeenCalled();
   expect(JSON.stringify(executor.received)).not.toContain("P12-UNAUTHENTICATED");
 });

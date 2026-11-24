@@ -1,5 +1,5 @@
-import { defineToolContract, type ToolContractDefinition } from "@tools";
-import { toolExecutionBindingSchema } from "@toolPolicy/helpers/validation";
+import { defineToolContract, type ToolContractDefinition } from "@tool/contracts";
+import { toolExecutionBindingSchema } from "@tool/policy/binding";
 
 import { MAX_POLICY_REVISION, POLICY_LIMIT_ABSOLUTE, POLICY_LIMIT_DEFAULTS } from "../../constants";
 import { executorRevisionSchema, identifierSchema, policyActorRefSchema, resourceRefSchema, scopedPolicyBindingSchema, securitySubjectRefSchema, trustedRequestContextSchema } from "../validation";

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createReferenceAuthorizer, type ReferenceAuthorizer, type ResourceRef } from "@authorization";
-import { createToolPolicyFactory } from "@toolPolicy";
+import { createPolicyFactory } from "@authorization/policies";
 
 const start = 1_700_000_000_000;
 const scope: ResourceRef = { domainId: "domain", kind: "session", id: "session", instanceId: "instance" };
@@ -33,7 +33,7 @@ const hostWith = (
   policies: readonly Record<string, unknown>[],
   options: Partial<Parameters<typeof createReferenceAuthorizer>[0]> = {},
 ): ReferenceAuthorizer => createReferenceAuthorizer({
-  policies: createToolPolicyFactory({ policies: policies as never }),
+  policies: createPolicyFactory({ policies: policies as never }),
   now: () => start,
   ...options,
 });
@@ -152,7 +152,7 @@ describe("P03 final review regressions", () => {
   });
 
   it("denies a positive policy outside the linked admission ceiling", async () => {
-    const policies = createToolPolicyFactory({
+    const policies = createPolicyFactory({
       policies: [direct("allowed"), direct("other")],
       bindings: [{
         sessionType: { key: "chat", version: 1 }, providerId: "host",

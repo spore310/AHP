@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { setTimeout } from "node:timers/promises";
 import { WebSocketTransport } from "@microsoft/agent-host-protocol/ws";
-import { connectToolClient, type ToolClient } from "@toolExecution/client";
+import { connectToolClient, type ToolClient } from "@tool/client";
 import { channel, clientTool, createReviewHost, demoProof, selector, type Subject } from "./host";
 import { showWorkBoundary } from "./work";
 import { createExamplePersistence } from "./persistence";
@@ -51,7 +51,7 @@ try {
   await showWorkBoundary(url, demo);
   const junior = await peer("junior"), observer = await peer("observer");
   demo.allowClientExecutor("junior", clientTool);
-  const projected = (await observer.client.subscribe(channel)).result.snapshot;
+  const projected = (await observer.connection.protocol.subscribe(channel)).result.snapshot;
   assert.ok(projected && "lifecycle" in projected.state);
   assert.equal(projected.state.lifecycle, "ready");
   assert.ok(!JSON.stringify(projected).includes("review.inspect"));
@@ -62,21 +62,21 @@ try {
     inspections += 1;
     return { value: "Review notes inspected" };
   } }]);
-  await senior.client.subscribe(channel);
-  await pm.client.subscribe(channel);
+  await senior.connection.protocol.subscribe(channel);
+  await pm.connection.protocol.subscribe(channel);
   await inspect(junior, () => inspections);
   await inspect(senior, () => inspections);
   process.stdout.write("The junior agent and senior caller both completed a challenged inspection on the assigned client executor.\n");
 
   const before = demo.host.sessions.getSessionSnapshot(channel);
-  const observerBefore = (await observer.client.subscribe(channel)).result.snapshot;
+  const observerBefore = (await observer.connection.protocol.subscribe(channel)).result.snapshot;
   demo.consent(false);
-  assert.deepEqual(await senior.dispatchTool(channel, selector(clientTool), {}), { version: 2, status: "denied", code: "unavailable" });
-  assert.deepEqual(await pm.dispatchTool(channel, selector(clientTool), {}), { version: 2, status: "denied", code: "unavailable" });
+  assert.deepEqual(await senior.dispatchTool(channel, selector(clientTool), {}), { version: 1, status: "denied", code: "unavailable" });
+  assert.deepEqual(await pm.dispatchTool(channel, selector(clientTool), {}), { version: 1, status: "denied", code: "unavailable" });
   assert.equal(inspections, 2);
   assert.deepEqual(demo.host.sessions.getSessionSnapshot(channel), before);
   demo.consent(true);
-  const observerAfter = (await observer.client.subscribe(channel)).result.snapshot;
+  const observerAfter = (await observer.connection.protocol.subscribe(channel)).result.snapshot;
   assert.deepEqual(observerAfter, observerBefore);
   process.stdout.write("A provider denial and the PM's missing invoke assignment left the host and observer snapshots unchanged.\n");
 

@@ -1,7 +1,7 @@
 import type { ResourceRef } from "@authorization";
 import type { WorkStatus } from "@persistence/types";
 import type { StoredWork, WorkIntent } from "@persistence/helpers/durability/workTypes";
-import type { ResourceViewRecord } from "@toolExecution/helpers/views";
+import type { ResourceViewRecord } from "@sessions/views";
 import type { WorkApproval, WorkCommandOptions, WorkListSummary, WorkRequestContext } from "../commands/types";
 import type { ResourceLocator } from "../selections/types";
 

@@ -13,7 +13,6 @@ import { createHostedWork } from "./work";
 import { createSessionOwnerRegistry, createWorkReadPort } from "@work";
 
 import { createAHPBinding } from "../ahp";
-import { TOOL_CALL_METHOD, TOOL_COMPLETE_METHOD } from "../ahp/constants";
 import { isSettlingSession } from "../settling";
 import { createWebSocketServer } from "../server";
 import { captureTransportLimits } from "../capacity";
@@ -167,10 +166,6 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     beforeDispatch: (dispatch) => {
       binding.beforeDispatch(dispatch);
     },
-    deferredRequestCompletionMethods: new Map([[TOOL_CALL_METHOD, {
-      method: TOOL_COMPLETE_METHOD,
-      matches: (params, context) => binding.isToolCompletion(params, context),
-    }]]),
   });
   const assertSessionsOpen = (): void => {
     if (stopped) {

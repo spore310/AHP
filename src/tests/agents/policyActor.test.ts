@@ -4,7 +4,7 @@ import { createAgentDirectory, createLegacyConnectionIdentityAdapter } from "@ag
 import { createRegistrationFixture } from "./fixtures";
 import type { SecurityComposition, TrustedRequestContext, ScopedPolicyBinding, ActorResolutionRequest } from "@authorization";
 import { createReferenceAuthorizer } from "@authorization";
-import { createToolPolicyFactory } from "@toolPolicy";
+import { createPolicyFactory } from "@authorization/policies";
 import { createConnectionSetupAdapter } from "@websocket/helpers/security";
 import type { AHPServerSecurityOptions, PreparedInitialScopes } from "@websocket";
 
@@ -23,7 +23,7 @@ const fixture = (agent = false) => {
     id: "binding", actor, scope, roles: [], policies: [{ id: "read", revision: 1 }], revision: 1,
     authority: { kind: "host-policy", policy: { id: "read", revision: 1 } },
   };
-  const host = createReferenceAuthorizer({ policies: createToolPolicyFactory({ policies: [{
+  const host = createReferenceAuthorizer({ policies: createPolicyFactory({ policies: [{
     id: "read", revision: 1, challenge: { required: false }, operations: { invoke: { actor: { mode: "direct-grant", actors: ["user", "agent"] } } },
   }] }), now });
   host.installResource({ resource: scope, owner: principal, route: { origin: scope, targets: [scope] }, externalAuthority: "none" });

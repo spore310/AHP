@@ -8,7 +8,7 @@ import { createAHPBinding, createAHPServer, createWebSocketServer, type WebSocke
 import { FrameLog, responseWithId } from "./helpers";
 import { createLegacyConnectionIdentityAdapter, createStaticTokenAuthenticator } from "@agents";
 import { createReferenceAuthorizer, type SecurityComposition, type ActorResolutionRequest } from "@authorization";
-import { createToolPolicyFactory } from "@toolPolicy";
+import { createPolicyFactory } from "@authorization/policies";
 import type { AHPServerSecurityOptions, ConnectionFence, PreparedInitialScopes, WebSocketConnectionContext } from "@websocket";
 import { createMemoryPersistenceFixture } from "../persistence/conformance/helpers";
 
@@ -74,7 +74,7 @@ const setupFixture = () => {
   const policy = { id: "read", revision: 1 };
   const actor = { kind: "user" as const, principal };
   const binding = { id: "existing", actor, scope, roles: [], policies: [policy], revision: 1, authority: { kind: "host-policy" as const, policy } };
-  const reference = createReferenceAuthorizer({ policies: createToolPolicyFactory({ policies: [{
+  const reference = createReferenceAuthorizer({ policies: createPolicyFactory({ policies: [{
     ...policy, operations: { invoke: { actor: { mode: "direct-grant", actors: ["user"] } } }, challenge: { required: false },
   }] }), now: Date.now });
   reference.installResource({ resource: scope, owner: principal, route: { origin: scope, targets: [scope] }, externalAuthority: "none" });
@@ -174,7 +174,7 @@ describe("P04 explicit global sequence permission", () => {
     });
     expect(await first.rpc("ping", { channel: "ahp-root://" })).toMatchObject({ result: null });
     expect(await first.rpc("subscribe", { channel: "ahp-root://" })).toMatchObject({ error: { code: -32600 } });
-    expect(await first.rpc("x-ahp/tools/call", {})).toMatchObject({ error: { code: -32600 } });
+    expect(await first.rpc("x-ahp/tools/call", {})).toMatchObject({ error: { code: -32601 } });
     await host.sessions.createSession({ channel: "ahp-session:/hidden-two" });
     const advanced = host.sessions.getCurrentServerSeq();
     expect(advanced).toBeGreaterThan(initial);
@@ -237,7 +237,7 @@ describe("P04 public initialization boundary", () => {
     const client = await connect(host);
     expect(await client.rpc("initialize", { ...initialize, allowGlobalSequence: true })).toMatchObject({ error: { code: -32600 } });
     expect(await client.rpc("ping", { channel: "ahp-root://" })).toMatchObject({ error: { code: -32600 } });
-    for (const method of ["subscribe", "subscribe", "listSessions", "createSession", "disposeSession", "x-ahp/tools/call"]) {
+    for (const method of ["subscribe", "subscribe", "listSessions", "createSession", "disposeSession"]) {
       expect(await client.rpc(method, { channel: "ahp-root://" })).toMatchObject({ error: { code: -32600 } });
     }
     expect(host.sessions.listSessionSnapshots()).toHaveLength(1);
@@ -281,7 +281,7 @@ describe("P04 public initialization boundary", () => {
     expect(r.read).toHaveBeenCalledExactlyOnceWith({ actor: r.binding.actor, scope: r.binding.scope, grantRevision: 8 });
     expect(r.grantPrepare).not.toHaveBeenCalled();
     expect(r.grantCommit).not.toHaveBeenCalled();
-    for (const method of ["subscribe", "subscribe", "listSessions", "createSession", "disposeSession", "x-ahp/tools/call"]) {
+    for (const method of ["subscribe", "subscribe", "listSessions", "createSession", "disposeSession"]) {
       expect(await client.rpc(method, { channel: "ahp-session:/secret" })).toMatchObject({ error: { code: -32600 } });
     }
     client.socket.send(JSON.stringify({ jsonrpc: "2.0", method: "dispatchAction", params: { channel: "ahp-session:/secret", clientSeq: 1, action: { type: "session/titleChanged", title: "forged" } } }));
@@ -580,7 +580,7 @@ const publicCreationFixture = (options: { cursor?: boolean | "missing"; deny?: b
   const creator = { id: "session.creator", revision: 1 };
   const reader = { id: "session.reader", revision: 1 };
   const rules = { admitted: { policies: [creator, reader], namespaces: [] }, mandatory: [] };
-  const policies = createToolPolicyFactory({ policies: [
+  const policies = createPolicyFactory({ policies: [
     { ...creator, operations: { invoke: { actor: { mode: "roles", actors: { user: { anyOf: ["senior"] } } } } }, challenge: { required: false } },
     { ...reader, operations: { invoke: { actor: { mode: "roles", actors: { user: { anyOf: ["junior"] } } } } }, challenge: { required: false } },
   ], bindings: [{ sessionType: { key: "review", version: 1 }, providerId: "mock", ...rules }] });
@@ -632,7 +632,7 @@ describe("P05 real public create-only boundary", () => {
     expect(f.registry.owner(ref)).toEqual({ domainId: "domain", subject: "ada" });
     expect(f.installed.mock.calls[0]?.[0]).toMatchObject({ actor: { kind: "user", principal: { subject: "ada" } }, roles: ["senior"], scope: ref });
     expect(f.start).toHaveBeenCalledOnce();
-    for (const method of ["subscribe", "listSessions", "disposeSession", "x-ahp/tools/call"]) expect(await client.rpc(method, { channel: ref.id })).toMatchObject({ error: { code: -32600 } });
+    for (const method of ["subscribe", "listSessions", "disposeSession"]) expect(await client.rpc(method, { channel: ref.id })).toMatchObject({ error: { code: -32600 } });
     expect(client.frames.frames.some((frame) => typeof frame === "object" && frame !== null && "method" in frame && frame.method === "action")).toBe(false);
   });
 

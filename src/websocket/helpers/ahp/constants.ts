@@ -28,7 +28,6 @@ export const AHP_REQUEST_METHODS: ReadonlySet<string> = new Set([
   "createSession",
   "disposeSession",
   "listSessions",
-  "x-ahp/tools/call",
   ...AGENT_WORK_REQUEST_METHODS,
   ...TOOL_PRIVATE_REQUEST_METHODS,
 ]);
@@ -71,7 +70,6 @@ export const BASELINE_SUPPORTED_ACTIONS: ReadonlySet<string> = new Set([
 
 /** Cap on events buffered while a snapshot reply is still unsettled. */
 export const PENDING_DELIVERY_LIMIT = 256;
-export const TOOL_CALL_METHOD = "x-ahp/tools/call";
 export const TOOL_COMPLETE_METHOD = "x-ahp/tools/complete";
 export const TOOL_INVOCATION_METHOD = "x-ahp/tools/invoke";
 export const MAX_TOOL_PAYLOAD_BYTES = 1_048_576;

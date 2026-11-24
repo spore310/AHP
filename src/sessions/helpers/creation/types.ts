@@ -1,5 +1,5 @@
 import type { BindingInstallationToken, ResourceInstallationToken, PolicyRef, PolicyScopeRules, ReferenceAuthorizer, ResourceRef, TrustedRequestContext } from "@authorization";
-import type { ToolPolicyFactory } from "@toolPolicy";
+import type { PolicyFactory } from "@authorization/policies";
 
 export interface SessionCreationCapabilityRef { readonly key: string; readonly revision: number }
 export interface CreatorBindingTemplate {
@@ -58,7 +58,7 @@ export type SessionCreationApproval = { readonly effect: "deny"; release(): void
 };
 export interface SessionCreationSecurityOptions {
   readonly registry: ReferenceAuthorizer;
-  readonly policies: ToolPolicyFactory;
+  readonly policies: PolicyFactory;
   readonly prepareDeadlineMs?: number;
   readonly maxPendingCreates?: number;
   readonly maxSettlingSessions?: number;

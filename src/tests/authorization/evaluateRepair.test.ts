@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createReferenceAuthorizer, DEFAULT_REFERENCE_CAPS } from "@authorization";
-import { createToolPolicyFactory } from "@toolPolicy";
+import { createPolicyFactory } from "@authorization/policies";
 
 const start = 1_700_000_000_000;
 const scope = { domainId: "domain", kind: "session", id: "session", instanceId: "instance" };
@@ -22,7 +22,7 @@ const policy = (id: string, operation: "invoke" | "discover" = "invoke") => ({
 describe("P03 repair boundaries", () => {
   it("does not let a second policy in the same binding become a grant", async () => {
     const host = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [policy("allow"), policy("other")] }),
+      policies: createPolicyFactory({ policies: [policy("allow"), policy("other")] }),
       now: () => start,
     });
     host.installResource({ resource: scope, owner: { domainId: "domain", subject: "owner" }, route: { origin: scope, targets: [scope] }, mandatory: [], externalAuthority: "none" });
@@ -37,7 +37,7 @@ describe("P03 repair boundaries", () => {
 
   it("denies a missing target and keeps the target mandatory rule", async () => {
     const host = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [policy("allow"), {
+      policies: createPolicyFactory({ policies: [policy("allow"), {
         id: "target.deny", revision: 1,
         operations: { invoke: { actor: { mode: "roles", actors: { user: { anyOf: [] } } } } },
         challenge: { required: false },
@@ -65,7 +65,7 @@ describe("P03 repair boundaries", () => {
   it("expires a short decision TTL before the binding and ignores proof mutation", async () => {
     let now = start;
     const host = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [policy("allow")] }),
+      policies: createPolicyFactory({ policies: [policy("allow")] }),
       now: () => now,
       decisionTtlMs: 10,
     });
@@ -85,7 +85,7 @@ describe("P03 repair boundaries", () => {
 
   it("uses a tool cap independent of maxPolicyRefs", () => {
     const host = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [policy("allow")], limits: { maxPolicyRefs: 1 } as never }),
+      policies: createPolicyFactory({ policies: [policy("allow")], limits: { maxPolicyRefs: 1 } as never }),
       now: () => start,
       caps: { maxTools: 1 },
     });
@@ -104,7 +104,7 @@ describe("P03 repair boundaries", () => {
 
   it("does not clear another domain when tearing down the same instance id", () => {
     const host = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [policy("allow")] }),
+      policies: createPolicyFactory({ policies: [policy("allow")] }),
       now: () => start,
     });
     const other = { ...scope, domainId: "other" };
@@ -117,7 +117,7 @@ describe("P03 repair boundaries", () => {
 
   it("denies an extension when its own evaluator is missing", async () => {
     const host = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [{
+      policies: createPolicyFactory({ policies: [{
         id: "allow", revision: 1, extension: { lane: "chat" },
         operations: { invoke: { actor: { mode: "direct-grant", actors: ["user"] } } },
         challenge: { required: false },
@@ -142,7 +142,7 @@ describe("P03 repair boundaries", () => {
       challenge: { required: false },
     };
     const timed = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [compiled] }),
+      policies: createPolicyFactory({ policies: [compiled] }),
       now: () => start,
       hookDeadlineMs: 5,
       permissionEvaluators: { blocked: () => new Promise(() => undefined) },

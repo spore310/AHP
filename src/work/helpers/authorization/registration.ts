@@ -1,13 +1,13 @@
 import { z } from "zod";
 import { POLICY_LIMIT_DEFAULTS, policyRefSchema, type PolicyRef, type PolicyScopeRules } from "@authorization";
-import { TOOL_OPERATIONS } from "@toolPolicy/constants";
-import type { ToolPolicyFactory } from "@toolPolicy";
+import { POLICY_OPERATIONS } from "@authorization/helpers/policies/constants";
+import type { PolicyFactory } from "@authorization/policies";
 import { captureData } from "@persistence/helpers/durability/helpers";
 import type { SessionWorkPolicyRegistration } from "./types";
 
 export const workOperations = ["submit", "read", "claim", "renew", "complete", "fail", "cancel", "updateData", "announce"] as const;
 const rules = z.partialRecord(z.enum(workOperations), z.strictObject({
-  purpose: z.enum(TOOL_OPERATIONS), policies: z.array(policyRefSchema).min(1).max(POLICY_LIMIT_DEFAULTS.maxPolicyRefs),
+  purpose: z.enum(POLICY_OPERATIONS), policies: z.array(policyRefSchema).min(1).max(POLICY_LIMIT_DEFAULTS.maxPolicyRefs),
 }));
 export const samePolicy = (a: PolicyRef, b: PolicyRef): boolean => a.id === b.id && a.revision === b.revision;
 export function captureWorkPolicy(policy: SessionWorkPolicyRegistration): SessionWorkPolicyRegistration {
@@ -16,7 +16,7 @@ export function captureWorkPolicy(policy: SessionWorkPolicyRegistration): Sessio
   return { operations: captured, ...(policy.prepare && { prepare: policy.prepare.bind(policy) }) };
 }
 
-export function validateWorkRegistration(work: SessionWorkPolicyRegistration, policies: ToolPolicyFactory, scope: PolicyScopeRules): void {
+export function validateWorkRegistration(work: SessionWorkPolicyRegistration, policies: PolicyFactory, scope: PolicyScopeRules): void {
   const available = [...scope.admitted.policies];
   const namespaces = policies.inspect().namespaces;
   for (const ref of scope.admitted.namespaces) {

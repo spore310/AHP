@@ -17,7 +17,7 @@ import type { SessionCreationSecurityOptions, SessionFactoryAuthorization } from
 import { SESSION_URI_PREFIX } from "./constants";
 import type { SessionApplicationBinding, SessionApplicationOptions } from "./helpers/application";
 import type { SessionToolManifest } from "./helpers/application/manifest";
-import type { PublishedTool, ToolAdmission, ToolAdmissionScope } from "@toolPolicy/helpers/admission";
+import type { PublishedTool, ToolAdmission, ToolAdmissionScope } from "@tool/helpers/policy/helpers/admission";
 import type { ActionSequence } from "./helpers/sequence";
 
 /**

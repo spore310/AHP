@@ -1,8 +1,8 @@
 import type { z } from "zod";
-import type { PrivateToolCallHandle } from "@toolExecution/helpers/calls";
-import type { ToolAssignedReply, toolAdvertiseRequestSchema, toolArtifactRequestSchema, toolDispatchRequestSchema, toolManagementRequestSchema } from "@toolExecution/helpers/client/helpers/protocol";
-import type { ApprovedArtifact } from "@toolExecution/helpers/artifacts";
-import type { ToolProposalReceipt } from "@toolPolicy";
+import type { PrivateToolCallHandle } from "@tool/helpers/execution/helpers/calls";
+import type { ToolAssignedReply, toolAdvertiseRequestSchema, toolArtifactRequestSchema, toolDispatchRequestSchema, toolManagementRequestSchema } from "@tool/protocol";
+import type { ApprovedArtifact } from "@tool/helpers/execution/helpers/artifacts";
+import type { ToolProposalReceipt } from "@tool/policy";
 import type { JsonRpcHandlers, WebSocketConnectionContext } from "@websocket/types";
 
 /** Trusted broker preparation; never supplied by a wire client. */

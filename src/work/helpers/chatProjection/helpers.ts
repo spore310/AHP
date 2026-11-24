@@ -1,7 +1,7 @@
 import { MessageKind } from "@microsoft/agent-host-protocol";
 import { z } from "zod";
 import { sameResource } from "@authorization/helpers/context";
-import { captureValue } from "@jsonrpc/helpers/value/helpers";
+import { captureValue } from "@jsonrpc/value";
 import type { WorkChatMessage, WorkChatPresentation, WorkChatProjectionInput, WorkChatProjectionOptions } from "./types";
 
 function printable(text: string): boolean {

@@ -54,7 +54,7 @@ try {
   assert.equal(await backup.request("x-ahp/work/complete", { ...execution(alternate), result: { reviewed: true } }), null);
 
   await junior.request("x-ahp/agents/unregister", {});
-  await junior.client.shutdown();
+  await junior.connection.shutdown();
   const reconnected = await connect("junior");
   assert.equal(await register(reconnected, reviewWorkerKey), primaryId);
   await assert.rejects(reconnected.request("x-ahp/work/renew", execution(first)));
@@ -68,6 +68,6 @@ try {
   assert.equal(await reconnected.request("x-ahp/work/complete", { ...execution(replacement), result: { reviewed: true } }), null);
   process.stdout.write("Two sessions shared the junior's three active claims. The backup used its one-claim override. The reconnected junior reclaimed the expired priority review and completed its new attempt.\n");
 } finally {
-  await Promise.allSettled(peers.map(({ client }) => client.shutdown()));
+  await Promise.allSettled(peers.map(({ connection }) => connection.shutdown()));
   await demo.stop();
 }

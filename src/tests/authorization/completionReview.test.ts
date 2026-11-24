@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { createReferenceAuthorizer, type ReferenceAuthorizer, type ResourceRef } from "@authorization";
-import { createToolPolicyFactory, projectAssignedDescriptors, type CompiledToolPolicy } from "@toolPolicy";
+import { createPolicyFactory, type CompiledPolicy } from "@authorization/policies";
+import { projectAssignedDescriptors } from "@tool/policy";
 
 const start = 1_700_000_000_000;
 const scope: ResourceRef = { domainId: "domain", kind: "session", id: "session", instanceId: "instance" };
@@ -14,7 +15,7 @@ const actor = {
   authRevision: "auth",
 };
 const ref = (id: string) => ({ id, revision: 1 });
-const invoke = (id: string): CompiledToolPolicy => ({
+const invoke = (id: string): CompiledPolicy => ({
   id, revision: 1,
   operations: {
     invoke: { actor: { mode: "direct-grant", actors: ["user"] } },
@@ -23,8 +24,8 @@ const invoke = (id: string): CompiledToolPolicy => ({
   challenge: { required: false },
 });
 
-const hostWith = (policies: readonly CompiledToolPolicy[], now: () => number = () => start): ReferenceAuthorizer => (
-  createReferenceAuthorizer({ policies: createToolPolicyFactory({ policies }), now })
+const hostWith = (policies: readonly CompiledPolicy[], now: () => number = () => start): ReferenceAuthorizer => (
+  createReferenceAuthorizer({ policies: createPolicyFactory({ policies }), now })
 );
 
 describe("P03 completion review", () => {
@@ -74,7 +75,7 @@ describe("P03 completion review", () => {
     });
     let expire = false;
     const host = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [{
+      policies: createPolicyFactory({ policies: [{
         id: "allow", revision: 1,
         operations: { invoke: { actor: { mode: "direct-grant" as const, actors: ["user" as const] }, requiredPermissions: ["check"] } },
         challenge: { required: false },
@@ -115,7 +116,7 @@ describe("P03 completion review", () => {
   it("sends a mandatory extension evaluator the target scope and ignores an unrelated allow", async () => {
     const seen: string[] = [];
     const host = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [
+      policies: createPolicyFactory({ policies: [
         invoke("allow"),
         { ...invoke("target.ext"), extension: { lane: "chat" } },
       ] }),
@@ -207,7 +208,7 @@ describe("P03 completion review", () => {
 
   it("keeps a revoked proof unusable after invalidation overflow", async () => {
     const host = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [invoke("allow")] }),
+      policies: createPolicyFactory({ policies: [invoke("allow")] }),
       now: () => start,
       caps: { maxExternalInvalidations: 1 },
     });
@@ -250,7 +251,7 @@ describe("P03 completion review", () => {
       entered = resolve;
     });
     const host = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [{ ...invoke("allow"), operations: {
+      policies: createPolicyFactory({ policies: [{ ...invoke("allow"), operations: {
         invoke: { actor: { mode: "direct-grant", actors: ["user"] }, requiredPermissions: ["check"] },
       } }] }), now: () => start,
       permissionEvaluators: { check: () => {
@@ -286,7 +287,7 @@ describe("P03 completion review", () => {
 
   it("keeps identical binding/tool/extension installs current at cap and rejects conflicts and one-over", async () => {
     const host = createReferenceAuthorizer({
-      policies: createToolPolicyFactory({ policies: [invoke("allow")] }), now: () => start,
+      policies: createPolicyFactory({ policies: [invoke("allow")] }), now: () => start,
       caps: { maxBindings: 1, maxTools: 1, maxExtensionEvaluators: 1, maxPermissionEvaluators: 1 },
       permissionEvaluators: { check: () => "allow" },
     });
@@ -326,13 +327,13 @@ describe("P03 completion review", () => {
     }).toThrow(/limit/i);
     expect(host.matches(decision.stamp, actor)).toBe(true);
     expect(host.getContract(tool.id)?.version).toBe(1);
-    expect(() => createReferenceAuthorizer({ policies: createToolPolicyFactory({ policies: [invoke("allow")] }), now: () => start,
+    expect(() => createReferenceAuthorizer({ policies: createPolicyFactory({ policies: [invoke("allow")] }), now: () => start,
       caps: { maxPermissionEvaluators: 1 }, permissionEvaluators: { a: callback, b: callback },
     })).toThrow(/limit/i);
   });
 
   it("keeps an identical resource registration current at capacity and rejects a conflicting owner atomically", async () => {
-    const host = createReferenceAuthorizer({ policies: createToolPolicyFactory({ policies: [invoke("allow")] }), now: () => start, caps: { maxResources: 1 } });
+    const host = createReferenceAuthorizer({ policies: createPolicyFactory({ policies: [invoke("allow")] }), now: () => start, caps: { maxResources: 1 } });
     const input = { resource: scope, owner: { domainId: "domain", subject: "owner" }, route: { origin: scope, targets: [scope] }, externalAuthority: "none" as const };
     host.installResource(input);
     host.installBinding({ id: "grant", actor: actor.actor, scope, roles: [], policies: [ref("allow")], authority: { kind: "host-policy", policy: ref("allow") }, revision: 1 });
@@ -351,7 +352,7 @@ describe("P03 completion review", () => {
 
   it("keeps identical admission installation current at capacity and rejects a second admission atomically", async () => {
     const admission = { sessionType: { key: "chat", version: 1 }, providerId: "host" };
-    const factory = createToolPolicyFactory({ policies: [invoke("allow")], bindings: [
+    const factory = createPolicyFactory({ policies: [invoke("allow")], bindings: [
       { ...admission, admitted: { policies: [ref("allow")], namespaces: [] }, mandatory: [] },
       { sessionType: { key: "other", version: 1 }, providerId: "host", admitted: { policies: [ref("allow")], namespaces: [] }, mandatory: [] },
     ] });
@@ -373,7 +374,7 @@ describe("P03 completion review", () => {
 });
 
 const mandatoryHost = (): ReferenceAuthorizer => {
-  const host = createReferenceAuthorizer({ policies: createToolPolicyFactory({ policies: [
+  const host = createReferenceAuthorizer({ policies: createPolicyFactory({ policies: [
     invoke("allow"), { id: "restricted", revision: 1,
       operations: { invoke: { actor: { mode: "roles", actors: { user: { anyOf: ["reviewer"] } } } } },
       challenge: { required: false },

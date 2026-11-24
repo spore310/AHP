@@ -12,7 +12,7 @@ import { encodeState, restoreState } from "../durability/helpers";
 import { createInitialSessionState } from "../state";
 import type { RuntimeResourceContext, RuntimeResourceHandle, SessionResourceLifecycle } from "../resources/types";
 import { projectSessionToolManifest } from "../application/manifest";
-import { APPLICATION_META_KEY } from "@tools";
+import { APPLICATION_META_KEY } from "@tool";
 import { ACTION_TYPE_SESSION_READY } from "@sessions/constants";
 import { sessionReducer } from "@microsoft/agent-host-protocol";
 

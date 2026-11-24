@@ -15,7 +15,7 @@ import { createMemoryPersistenceFixture } from "../persistence/conformance/helpe
 import { mockProvider } from "@sessions/mock";
 import { DEFAULT_GRANT_LIMITS, MAX_GRANT_LIMITS, type GrantControlApproval, type GrantControlRequest, type GrantService, type GrantServiceOptions, type RegisteredGrantControlRule, type ResolvedGrantTarget } from "@authorization";
 import type { SessionCreationContext } from "@sessions/helpers/creation/types";
-import { createToolPolicyFactory } from "@toolPolicy";
+import { createPolicyFactory } from "@authorization/policies";
 
 const factories: SessionsFactory[] = [];
 const services: GrantService[] = [];
@@ -48,7 +48,7 @@ const caller = (): SessionCreationContext => ({ context, connectionId: context.c
   validUntil: Date.now() + 60000, signal: new AbortController().signal, isCurrent: () => true });
 const setup = (startSession: SessionProvider["startSession"] = () => Promise.resolve({ dispose: () => undefined }), now = () => Date.now(), restriction?: "deny" | "challenge", caps?: ReferenceAuthorizerOptions["caps"]) => {
   const rules = { admitted: { policies: [policy], namespaces: [] }, mandatory: restriction === undefined ? [] : [providerPolicy] };
-  const policies = createToolPolicyFactory({ policies: [{ ...policy, operations: {
+  const policies = createPolicyFactory({ policies: [{ ...policy, operations: {
     invoke: { actor: { mode: "direct-grant", actors: ["user", "agent"] }, reveal: true },
     execute: { actor: { mode: "direct-grant", actors: ["user", "agent"] }, reveal: true },
   }, challenge: { required: false } }, { ...providerPolicy, operations: {

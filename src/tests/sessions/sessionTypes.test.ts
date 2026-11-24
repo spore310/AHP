@@ -7,7 +7,7 @@ import { captureSessionApplication } from "@sessions/helpers/application/helpers
 import { resolveWorkKind } from "@work/helpers/definitions";
 import type { SessionWorkPolicyRegistration } from "@work/helpers/authorization";
 import assert from "node:assert/strict";
-import type { ToolCatalogue, ToolContractDefinition, ToolContractRef } from "@tools";
+import type { ToolCatalogue, ToolContractDefinition, ToolContractRef } from "@tool";
 
 const schema: SessionConfigSchema = {
   type: "object",

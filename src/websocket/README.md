@@ -307,7 +307,7 @@ Its synchronous guard, expiry and release cover this permission as well as scope
 facts; revocation must make that guard false. Consumers needing only scoped views
 cannot use native initialize without permitting that host-wide cursor, because
 the pinned protocol requires the real current serverSeq. Protected native views
-preserve this sequence; private v2 tool execution uses separate correlated messages.
+preserve this sequence. Private V1 tool execution uses correlated messages.
 Legacy agentWork authentication by itself does not establish this metadata permission.
 
 Hosted work claim and renewal also require each connection's initial-authority
@@ -372,7 +372,7 @@ remain. The new public tests below use the real unmocked facade/host alongside t
 | [`src/tests/websocket/composition.test.ts`](../tests/websocket/composition.test.ts) | Two composed hosts do not share sessions; stop and failed start are terminal for start and session mutations. |
 | [`src/tests/websocket/sdk.test.ts`](../tests/websocket/sdk.test.ts) | Installed SDK client initializes, observes catalogue fan-out, and receives one accepted rename. |
 | [`src/tests/websocket/sessionTypeCapacity.test.ts`](../tests/websocket/sessionTypeCapacity.test.ts) | A header-enum session type accepts creation, omits admin tools, and rejects object or unmapped headers. |
-| [`src/tests/websocket/toolInvocation.test.ts`](../tests/websocket/toolInvocation.test.ts) | Internal kernel and pinned test-only legacy client over real SDK sockets: matching manifests, atomic/private advertisement denial, local calls/results and privacy, outsider/schema rejection, forged/stale/ambiguous executors, disconnect/URI reuse, concurrent self-calls, capacity/release, and empty registration. |
+| [`src/tests/websocket/toolInvocation.test.ts`](../tests/websocket/toolInvocation.test.ts) | Public V1 remote execution, exact correlation and endpoint ownership. |
 | [`src/tests/websocket/deferred.test.ts`](../tests/websocket/deferred.test.ts) | A broken completion predicate cannot escape the ordered socket queue. |
 | [`src/tests/agents/authenticator.test.ts`](../tests/agents/authenticator.test.ts) | Bearer parsing, exact token lookup, missing/unknown credentials, repeated headers, and value-free errors. |
 | [`src/tests/agents/directory.test.ts`](../tests/agents/directory.test.ts) | Stable registration, cross-principal denial, disabled agents, one live binding, generation fencing, expiry, and stale release. |
@@ -383,60 +383,21 @@ remain. The new public tests below use the real unmocked facade/host alongside t
 | [`src/tests/websocket/agentWork.integration.test.ts`](../tests/websocket/agentWork.integration.test.ts) | Internal kernel host composition, closed remote mutations, redacted work reads, and the host facade during a settling disposal. |
 | [`src/tests/websocket/durableDispatch.test.ts`](../tests/websocket/durableDispatch.test.ts) | Real public host and pinned SDK dispatch, commit-before-envelope ordering, write revocation while parked, and scoped durable disposal. |
 
-## Private canonical compatibility kernel (not a public tool route)
+## Private executor routing
 
-The supported facade rejects legacy `x-ahp/tools/call` and legacy completion.
-Negotiated strict v2 private methods use the same canonical broker/dispatcher.
-Internal compatibility tests use the same private kernel directly (or a file-local
-isolated binding-factory substitution), without changing their canonical assertions.
-They do not prove public multi-user privacy or authorized SDK interoperability.
-No raw kernel, unsafe option, or no-config fallback is exported.
-The internal kernel preserves inert untyped metadata reduction only when neither
-canonical authorization nor a tool manifest exists. Those metadata rows never enter
-the executable broker registry; attempted calls still fail closed. The raw metadata
-compatibility test asserts both reducer/origin behavior and zero tool invocation.
-Accepted canonical tool-row changes synchronously invalidate conflicting broker
-advertisements before fanout. A different connection claiming the same client ID
-cannot clear or replace another connection's admitted row, including with an empty list.
-Pending advertisement tickets also observe canonical row sequences. Activation after
-fanout requires that its exact accepted row is still current, so a nested removal
-cannot activate an obsolete executor. Pending tickets share the bounded admission
-budget and are released after reduction/rejection. Descriptor equality checks each
-field under its existing budget rather than applying one definition's byte cap to
-an entire multi-tool list.
+The protected host dispatches private V1 tool calls using a current assignment,
+an acknowledged private advertisement and the selected executor's connection
+generation. The caller and executor have independent policy checks. The host
+validates the route, resource incarnation and registration before sending the
+invocation. Only the selected connection can complete it. A native active-client
+update remains session metadata.
 
-Within that internal kernel, `toolExecution` wiring requires the same canonical
-registry/compiler as protected creation and authenticated connection setup. Missing
-wiring permits no tools. Advertisements require separate advertise and execute
-assignments, exact descriptors and fresh checks before synchronous reduction and
-activation. Calls use the neutral P08 proxy dispatcher, separate caller invoke and
-executor execute grants, full resource routes and immutable registration revisions.
-The issued manifest remains the schema authority. Work routes only to the unique
-connected peer with an accepted advertisement and a current subscription. Duplicate
-claimed client IDs are ambiguous and rejected; a stale advertisement never
-routes to a replacement connection. The server never executes tool code.
-Invocation and completion are namespaced extensions, not standard AHP methods;
-inputs and results are not fanned out. Completion is accepted only from the
-exact executor connection that received the call. The caller must also be
-subscribed to the session. The raw receive loop defers
-only the invocation request response and permits only its matching completion
-notification through that pending request; other frames remain serialized. This
-allows self-calls without changing ordinary AHP request ordering. See
-[`src/toolClient/README.md`](../toolClient/README.md) for the client adapter and
-its trust limitations.
-
-Private sends serialize first, check connection setup, then apply the invocation's
-canonical policy veto and callback-free local socket fences immediately before
-enqueue. Each actual invocation supports one captured final result guard; denied
-results produce a safe error without the previous output. `send` returning false
-is not proof of remote termination. Disconnect, timeout and shutdown cancel caller
-waits while retaining unresolved remote ownership. `toolExecutionStats()` reports
-active/draining counts after bounded shutdown; no retry or reroute is implied.
-
-`toolPolicyAdmission.test.ts` covers canonical grant separation, post-await ad
-revocation/disconnect/rebind, final-send revocation, private raw-frame canaries,
-draining and reentrant reducer vetoes. Its explicit credential/canonical-authority
-fixtures still select the internal kernel and are not P12 public privacy proof.
+Inputs and results travel on correlated private messages. A final socket check
+can veto delivery after an authorization change. Disconnect and timeout cancel
+the caller's wait. Unsettled work occupies dispatcher capacity until settlement.
+The [public protocol tests](../tests/websocket/toolProtocolV1.test.ts) and
+[policy admission tests](../tests/websocket/toolPolicyAdmission.test.ts) exercise
+these checks through the supported host.
 
 ## Protected native resource views
 
@@ -480,7 +441,7 @@ still no canonical server-tool producer until its later execution packet.
 - [`docs/technical/runtime-lifecycles.md`](../../docs/technical/runtime-lifecycles.md)
   — the server lifecycle state machine in detail.
 
-## Private v2 socket adapter
+## Private V1 socket adapter
 
 Native AHP remains 1.0.0. After minimal initialization, explicit capabilities
 negotiation enables strict selector-only assignment/advertisement/dispatch/status/
@@ -501,7 +462,7 @@ Dispatch reserves private retention before using the sole canonical dispatcher,
 then replies at admission rather than remote completion. Status/cancel freshly
 authorize the original caller, route and selected executor; final record/deadline
 fences follow authority callbacks. Foreign leases return safe absence. The exact
-selected connection alone can complete a v2 invocation. Host-to-executor cancel
+selected connection alone can complete a V1 invocation. Host-to-executor cancel
 notifications carry its exact correlation without input and request cooperative
 cancellation; unresolved work remains draining until actual completion/settlement.
 The public route requires private negotiation and exact completion correlation.
@@ -514,13 +475,11 @@ identity establishes the trusted registration used for dispatch.
 | helpers/ahp/helpers/toolProtocol/types.ts | Trusted broker ports, staged views and adapter lifetime. |
 | helpers/ahp/helpers/toolProtocol/helpers.ts | Negotiation, bounded assigned views, exact advertisement, receipt/status/cancel and cleanup. |
 
-The public tests in toolProtocolV2.test.ts exercise real authenticated sockets,
+The public tests in toolProtocolV1.test.ts exercise real authenticated sockets,
 recipient-specific raw-wire canaries, exact completions, cancellation/draining,
 final status TTL expiry, and actual local handler execution through the public
 client and pinned SDK. toolProtocolCapacity.test.ts tests adapter capacity with
-synthetic ports and makes no authorization claim. Historical P09 native-broker
-assertions use the frozen test-only client under tests/websocket/legacyToolClient;
-it is not exported by production and does not verify the current client runtime.
+synthetic ports.
 
 `policyIntegration.test.ts` extends public proof to self execution and distinct
 caller/executor connections, actual classified agents/delegation, senior/junior/PM
@@ -571,7 +530,7 @@ integrated validation are recorded separately in the R5 execution area.
 ### Proposal management and artifact transfer
 
 `x-ahp/tools/extensions` negotiates optional management and artifact support after
-the base private v2 negotiation. `x-ahp/tools/manage` accepts bounded proposals and
+the base private V1 negotiation. `x-ahp/tools/manage` accepts bounded proposals and
 exact proposal ID/revision operations. The host configures the admission service
 on its session factory. The session owner of the manifest applies a separately
 authorized in-process activation and keeps the pinned native reducer consistent.

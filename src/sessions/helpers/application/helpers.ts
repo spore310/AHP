@@ -5,7 +5,7 @@ import { SessionsError } from "@sessions/helpers/errors";
 import { SessionTypeError, type ResolvedSessionType } from "@sessions/helpers/sessionTypes";
 import { captureCreationPolicy, freezeCreation } from "@sessions/helpers/creation";
 import { captureWorkKinds } from "@work/helpers/definitions";
-import { SESSION_TYPE_SELECTOR_KEY, type ToolContractRef } from "@tools";
+import { SESSION_TYPE_SELECTOR_KEY, type ToolContractRef } from "@tool";
 
 import { ClientAccessRole, ToolAccessLevel } from "./constants";
 import { projectSessionToolManifest, type SessionToolManifest } from "./manifest";

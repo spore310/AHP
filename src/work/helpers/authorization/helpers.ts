@@ -4,7 +4,7 @@ import { POLICY_LIMIT_ABSOLUTE, POLICY_LIMIT_DEFAULTS, identifierSchema, policyA
   type LocalDecisionStamp, type PolicyRef, type ResourceRef } from "@authorization";
 import { sameActor, sameResource } from "@authorization/helpers/context";
 import { resourceKey } from "@authorization/helpers/resources";
-import { captureValue } from "@jsonrpc/helpers/value/helpers";
+import { captureValue } from "@jsonrpc/value";
 import type { StoredWork, WorkIntent } from "@persistence/helpers/durability/workTypes";
 import { captureWorkIntent, sameWorkIntent } from "@persistence/helpers/durability/workIntent";
 import { resolveWorkKind } from "../definitions";

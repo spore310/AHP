@@ -6,7 +6,7 @@ import {
   TOOL_SCHEMA_DIALECT,
   type ToolContractDefinition,
   type ToolContractRef,
-} from "@tools";
+} from "@tool";
 
 /** Issued manifest version. Clients ignore unknown versions. */
 export const APPLICATION_SCHEMA_VERSION = 1;

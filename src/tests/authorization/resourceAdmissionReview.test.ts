@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createReferenceAuthorizer } from "@authorization";
-import { createToolPolicyFactory } from "@toolPolicy";
+import { createPolicyFactory } from "@authorization/policies";
 
 const resource = { domainId: "domain", kind: "session", id: "session", instanceId: "instance" };
 const route = { origin: resource, targets: [resource] };
@@ -35,7 +35,7 @@ const request = (id: string) => ({
 
 const fixture = (linked: boolean) => {
   const host = createReferenceAuthorizer({
-    policies: createToolPolicyFactory({
+    policies: createPolicyFactory({
       policies: [policy("inside"), policy("outside")],
       bindings: [
         { ...admission("restricted"), admitted: { policies: [ref("inside")], namespaces: [] }, mandatory: [] },

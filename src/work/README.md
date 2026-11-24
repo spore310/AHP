@@ -9,6 +9,7 @@ Work submissions resolve an exact session and its canonical resources. The servi
 | `helpers/client/types.ts` | Portable extension transport, work view and client lifetime contracts. |
 | `helpers/client/schemas.ts` | Bounded V1 summary pages, read hints, reset and subscription acknowledgements. |
 | `helpers/client/helpers.ts` | Exact-target subscriptions, bounded periodic reconciliation, cancellation and cache replacement. |
+| `helpers/client/port.ts` | Connects work observers and reconciliation requests to a shared general client. |
 | `helpers/client/index.ts` | Portable client factory and types. |
 | `helpers/chatProjection/types.ts` | Pinned Microsoft message types and the consuming application's presentation boundary. |
 | `helpers/chatProjection/helpers.ts` | Bounded, cancellable formatting and authorized system-notification handoff. |

@@ -4,12 +4,12 @@ import { readFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import type { TrustedRequestContext } from "@authorization";
-import type { ClientToolRoute } from "@toolExecution/helpers/client/helpers/broker";
-import type { ChallengeAdapter } from "@toolExecution";
+import type { ClientToolRoute } from "@tool/helpers/execution/helpers/remote";
+import type { ChallengeAdapter } from "@tool/execution";
 import { sessionReducer, type SessionState, type SessionAction } from "@microsoft/agent-host-protocol";
 import { createToolPolicyHost } from "./toolPolicyFixture";
 import { FrameLog, responseWithId } from "./helpers";
-import { createServerHarness } from "../toolExecution/serverFixture";
+import { createServerHarness } from "../tool/execution/serverFixture";
 import { createPolicyIntegrationFixture, createCodingHarness, expectNoDeniedDispatchFrames, channel } from "./policyIntegrationFixture";
 
 const fixtures: Array<Awaited<ReturnType<typeof createPolicyIntegrationFixture>>> = [];
@@ -20,8 +20,8 @@ const required = <T>(value: T | undefined): T => {
   if (value === undefined) throw new Error("Missing fixture value");
   return value;
 };
-const sourceEvidence = { path: "src/tests/toolExecution/serverFixture.ts", export: "createServerHarness", revision: 7,
-  candidate: createHash("sha256").update(readFileSync("src/tests/toolExecution/serverFixture.ts")).digest("hex") };
+const sourceEvidence = { path: "src/tests/tool/execution/serverFixture.ts", export: "createServerHarness", revision: 7,
+  candidate: createHash("sha256").update(readFileSync("src/tests/tool/execution/serverFixture.ts")).digest("hex") };
 async function fixture(options: Omit<Parameters<typeof createPolicyIntegrationFixture>[0], "mode" | "server"> & { readonly mixed?: boolean } = {}) {
   const context: TrustedRequestContext = { actor: { kind: "user", principal: { domainId: "local", subject: "host-service" } }, connectionId: "host-owned-executor", authRevision: "p15-host-auth-4" };
   let current = true;
@@ -46,7 +46,7 @@ it.each(["junior", "junior-agent"])("E05 public %s invokes the exact host action
   expect(row.execution).toEqual({ binding: f.read.registration.implementation, registrationRevision: 5, source: f.read.registration.source });
   expect(row.descriptor.inputSchema).toEqual(f.read.definition.inputSchema);
   expect(view.connection).toEqual({ id: caller.actual.context.connectionId, generation: caller.actual.fence.connectionGeneration });
-  expect(await caller.request("x-ahp/tools/advertise", { version: 2, channel, viewRevision: view.viewRevision, contracts: [f.selector] })).toHaveProperty("error");
+  expect(await caller.request("x-ahp/tools/advertise", { version: 1, channel, viewRevision: view.viewRevision, contracts: [f.selector] })).toHaveProperty("error");
   await expect(caller.client.callTool(channel, f.selector, { path: "P15-ARGUMENT-CANARY" })).resolves.toEqual({ value: "P15-HOST-RESULT:coding.read:P15-ARGUMENT-CANARY:" + subject });
   expect(f.read.execute).toHaveBeenCalledOnce();
   expect(f.read.cleanup).toHaveBeenCalledOnce();
@@ -58,8 +58,8 @@ it.each(["junior", "junior-agent"])("E05 public %s invokes the exact host action
   expect(actual.contract).toEqual({ id: f.selector.id, revision: 3 });
   expect(actual.authority.policyRevisions).toEqual(expect.arrayContaining([f.provider, f.chatPolicy, f.policy]));
   for (const entry of [...f.harness.slice(1), ...competing]) expect(entry.execute).not.toHaveBeenCalled();
-  await caller.client.client.ping();
-  await observer.client.client.ping();
+  await caller.client.connection.protocol.ping();
+  await observer.client.connection.protocol.ping();
   expect(JSON.stringify(caller.received)).toContain("P15-HOST-RESULT");
   expect(JSON.stringify(caller.received)).not.toMatch(/x-ahp\/tools\/invoke|x-ahp\/tools\/complete|p15-host-auth-4/);
   expect(JSON.stringify(observer.received)).not.toMatch(/P15-|P12-DESCRIPTOR|P12-SCHEMA|p15-source|p15-approved|p15-host-auth/);
@@ -80,8 +80,8 @@ it.each(["caller", "executor", "provider", "missing-evaluator", "challenge"])("E
   } else {
     const caller = await f.connect(f.caller), observer = await f.connect("observer");
     expect(await caller.client.dispatchTool(channel, f.selector, { path: "P15-FORBIDDEN-ARGUMENT" })).toMatchObject({ status: "denied" });
-    await caller.client.client.ping();
-    await observer.client.client.ping();
+    await caller.client.connection.protocol.ping();
+    await observer.client.connection.protocol.ping();
     expect(JSON.stringify(observer.received)).not.toMatch(/P15-|P12-DESCRIPTOR|P12-SCHEMA|p15-source/);
   }
   for (const entry of f.harness) {
@@ -114,14 +114,14 @@ it("E05 strict dispatch rejects contract, schema, identity and implementation su
     expect(await caller.client.dispatchTool(channel, contract, { path: "P15-SUBSTITUTED" })).toMatchObject({ status: "denied" });
   }
   for (const field of ["inputSchema", "outputSchema", "implementation", "implementationId", "source", "registrationRevision", "location", "actor", "executor", "route", "resource", "generation", "mfaPassed"]) {
-    expect(await caller.request("x-ahp/tools/dispatch", { version: 2, channel, contract: f.selector, input: { path: "P15-SUBSTITUTED" }, [field]: "P15-PRIVATE-METADATA" }), field).toHaveProperty("error");
+    expect(await caller.request("x-ahp/tools/dispatch", { version: 1, channel, contract: f.selector, input: { path: "P15-SUBSTITUTED" }, [field]: "P15-PRIVATE-METADATA" }), field).toHaveProperty("error");
   }
   for (const input of [{ path: 42 }, { path: "P15-INVALID-INPUT", roles: ["admin"] }]) expect(await caller.client.dispatchTool(channel, f.selector, input)).toMatchObject({ status: "denied" });
   for (const entry of f.harness) expect(entry.create).not.toHaveBeenCalled();
   await expect(caller.client.joinSession(channel, createCodingHarness())).rejects.toThrow();
   await expect(caller.client.callTool(channel, f.selector, { path: "strict-control" })).resolves.toHaveProperty("value");
   expect(f.read.execute).toHaveBeenCalledOnce();
-  await observer.client.client.ping();
+  await observer.client.connection.protocol.ping();
   expect(JSON.stringify(observer.received)).not.toMatch(/P15-|P12-SCHEMA|P12-DESCRIPTOR|p15-source/);
 });
 
@@ -148,7 +148,7 @@ it("E05 exact full route denies substitutions and missing provider proof then ad
   substitute = (route) => route;
   await expect(caller.client.callTool(channel, f.selector, { path: "fresh-route" })).resolves.toHaveProperty("value");
   expect(f.read.execute).toHaveBeenCalledOnce();
-  await observer.client.client.ping();
+  await observer.client.connection.protocol.ping();
   expect(JSON.stringify(observer.received)).not.toMatch(/P15-|P12-SCHEMA|P12-DESCRIPTOR/);
 });
 
@@ -177,7 +177,7 @@ it.each(["caller-grant", "executor-grant", "host-generation", "caller-generation
     release.resolve("allow");
     expect(await parked).toMatch(/denied|closed|unavailable|disposed/);
     expect(f.read.execute).toHaveBeenCalledOnce();
-    await observer.client.client.ping();
+    await observer.client.connection.protocol.ping();
     expect(JSON.stringify(observer.received)).not.toMatch(/P15-PARKED|P15-HOST-RESULT|P12-SCHEMA|P12-DESCRIPTOR/);
     if (change === "host-generation") {
       f.hostCurrent(true);
@@ -212,12 +212,12 @@ it("E05 server challenge resumes once and private status never discloses to anot
   let status = await caller.client.statusTool(receipt.callId);
   for (let count = 0; count < 20 && status.status !== "completed"; count += 1) status = await caller.client.statusTool(receipt.callId);
   expect(status).toMatchObject({ status: "completed", output: { value: "P15-HOST-RESULT:coding.read:P15-CONTINUATION-INPUT:junior-agent" } });
-  expect(await observer.client.statusTool(receipt.callId)).toEqual({ version: 2, status: "unavailable" });
+  expect(await observer.client.statusTool(receipt.callId)).toEqual({ version: 1, status: "unavailable" });
   expect(await caller.client.resumeTool(receipt.continuationId, "P15-PROOF")).toMatchObject({ status: "denied" });
   expect(f.read.execute).toHaveBeenCalledOnce();
   expect(f.read.cleanup).toHaveBeenCalledOnce();
   expect(JSON.stringify(caller.received)).not.toMatch(/P15-PRIVATE-ADAPTER|x-ahp\/tools\/invoke/);
-  await observer.client.client.ping();
+  await observer.client.connection.protocol.ping();
   expect(JSON.stringify(observer.received)).not.toMatch(/P15-CONTINUATION|P15-HOST-RESULT|P15-PRIVATE-ADAPTER|P15-PROOF|P12-SCHEMA|P12-DESCRIPTOR/);
   f.hostCurrent(false);
   expect(await caller.client.statusTool(receipt.callId)).toMatchObject({ status: "unavailable" });
@@ -235,8 +235,8 @@ it.each(["execute", "cleanup", "output"])("E03/E05 %s failure is sanitized after
   await expect(caller.client.callTool(channel, f.selector, { path: "P15-FAILED-CALL" })).rejects.toThrow("unavailable");
   expect(f.read.execute).toHaveBeenCalledOnce();
   expect(f.read.cleanup).toHaveBeenCalledOnce();
-  await caller.client.client.ping();
-  await observer.client.client.ping();
+  await caller.client.connection.protocol.ping();
+  await observer.client.connection.protocol.ping();
   expect(JSON.stringify(caller.received)).not.toMatch(/P15-SECRET|P15-HOST-RESULT/);
   expect(JSON.stringify(observer.received)).not.toMatch(/P15-|P12-SCHEMA|P12-DESCRIPTOR/);
 });
@@ -268,7 +268,7 @@ it("E03/E05 cancellation retains capacity until noncooperative host work and cle
     expect(status.status).toBe("cancelled");
     expect(f.read.cleanup).toHaveBeenCalledOnce();
     expect(await observer.client.statusTool(receipt.callId)).toMatchObject({ status: "unavailable" });
-    await observer.client.client.ping();
+    await observer.client.connection.protocol.ping();
     expect(JSON.stringify(caller.received)).not.toContain("P15-LATE-RESULT");
     expect(JSON.stringify(observer.received)).not.toMatch(/P15-|P12-SCHEMA|P12-DESCRIPTOR/);
     f.read.execute.mockReturnValue({ value: "fresh-after-drain" });
@@ -303,7 +303,7 @@ it("E03/E05 mixed host and client routes share one public capacity budget withou
   try {
     await entered.promise;
     expect(await caller.client.dispatchTool(channel, remoteSelector, { path: "P15-MIXED-REJECTED" })).toMatchObject({ status: "denied" });
-    await executor.client.client.ping();
+    await executor.client.connection.protocol.ping();
     expect(remote.execute).not.toHaveBeenCalled();
     expect(JSON.stringify(executor.received)).not.toMatch(/P15-MIXED-HOST|P15-MIXED-REJECTED/);
     release.resolve({ value: "P15-MIXED-RESULT" });
@@ -313,7 +313,7 @@ it("E03/E05 mixed host and client routes share one public capacity budget withou
     await expect(caller.client.callTool(channel, remoteSelector, { path: "remote-control" })).resolves.toEqual({ value: "P12-HANDLER-RESULT:coding.summary:remote-control:7" });
     expect(remote.execute).toHaveBeenCalledOnce();
     expect(f.read.execute).toHaveBeenCalledOnce();
-    await observer.client.client.ping();
+    await observer.client.connection.protocol.ping();
     expect(JSON.stringify(observer.received)).not.toMatch(/P15-|P12-HANDLER|P12-SCHEMA|P12-DESCRIPTOR/);
   } finally {
     release.resolve({ value: "P15-MIXED-RESULT" });
@@ -340,18 +340,18 @@ it("E05 forged client completion cannot replace an admitted local result", async
   try {
     await entered.promise;
     const origin = required(f.host.sessions.authorization?.getResource(channel));
-    const completion = { version: 2, callId: receipt.callId, channel, contract: f.selector, route: f.route(origin).route,
+    const completion = { version: 1, callId: receipt.callId, channel, contract: f.selector, route: f.route(origin).route,
       execution: { binding: f.read.registration.implementation, registrationRevision: 5, source: f.read.registration.source },
       connection: { id: caller.actual.context.connectionId, generation: caller.actual.fence.connectionGeneration }, advertisementId: globalThis.crypto.randomUUID(), output: { value: "P15-FORGED-RESULT" } };
     await caller.transport.send(JSON.stringify({ jsonrpc: "2.0", method: "x-ahp/tools/complete", params: completion }));
-    await caller.client.client.ping();
+    await caller.client.connection.protocol.ping();
     expect(await caller.client.statusTool(receipt.callId)).toMatchObject({ status: "running" });
     release.resolve({ value: "P15-GENUINE-RESULT" });
     let status = await caller.client.statusTool(receipt.callId);
     for (let count = 0; count < 20 && status.status !== "completed"; count += 1) status = await caller.client.statusTool(receipt.callId);
     expect(status).toMatchObject({ status: "completed", output: { value: "P15-GENUINE-RESULT" } });
     expect(f.read.execute).toHaveBeenCalledOnce();
-    await observer.client.client.ping();
+    await observer.client.connection.protocol.ping();
     expect(JSON.stringify(caller.received)).not.toContain("P15-FORGED-RESULT");
     expect(JSON.stringify(observer.received)).not.toMatch(/P15-|P12-SCHEMA|P12-DESCRIPTOR/);
   } finally {
@@ -364,21 +364,21 @@ it("E04/E05 shared host identity preserves senior/junior scopes and native snaps
   expect((await senior.assigned()).tools).toHaveLength(4);
   expect((await junior.assigned()).tools.map((entry) => entry.contract.key)).toEqual(["coding.read", "coding.summary"]);
   expect((await observer.assigned()).tools).toEqual([]);
-  const before = (await observer.client.client.subscribe(channel)).result.snapshot?.state as SessionState;
+  const before = (await observer.client.connection.protocol.subscribe(channel)).result.snapshot?.state as SessionState;
   const title = "public native sequence control";
   const envelope = await f.host.sessions.dispatchAction({ channel, clientId: "host", clientSeq: 1, action: { type: "session/titleChanged", title } });
-  await observer.client.client.ping();
+  await observer.client.connection.protocol.ping();
   const action = observer.received.find((frame) => typeof frame === "object" && frame !== null && "method" in frame && frame.method === "action" && JSON.stringify(frame).includes(title));
   if (typeof action !== "object" || action === null || !("params" in action)) throw new Error("Missing native action");
   const params = action.params as { action: SessionAction; serverSeq: number };
   expect(params.serverSeq).toBe(envelope.serverSeq);
-  expect(sessionReducer(before, params.action)).toEqual((await observer.client.client.subscribe(channel)).result.snapshot?.state);
+  expect(sessionReducer(before, params.action)).toEqual((await observer.client.connection.protocol.subscribe(channel)).result.snapshot?.state);
   const write = required(f.harness[2]), selector = { id: write.definition.id, key: write.definition.key, version: write.definition.version };
   expect(await junior.client.dispatchTool(channel, selector, { path: "P15-JUNIOR-FORBIDDEN" })).toMatchObject({ status: "denied" });
   await expect(senior.client.callTool(channel, selector, { path: "P15-SENIOR-PRIVATE" })).resolves.toEqual({ value: "P15-HOST-RESULT:coding.write:P15-SENIOR-PRIVATE:senior" });
   expect(write.execute).toHaveBeenCalledOnce();
-  await junior.client.client.ping();
-  await observer.client.client.ping();
+  await junior.client.connection.protocol.ping();
+  await observer.client.connection.protocol.ping();
   expect(JSON.stringify(junior.received)).not.toMatch(/P15-SENIOR-PRIVATE|P12-SCHEMA-write|P12-DESCRIPTOR-write|P12-SCHEMA-terminal/);
   expect(JSON.stringify(observer.received)).not.toMatch(/P15-|P12-SCHEMA|P12-DESCRIPTOR|p15-source|p15-approved/);
 });
@@ -409,7 +409,7 @@ it("E05 a parked server call cannot cross session destruction and same-URI recre
     expect(f.read.execute).not.toHaveBeenCalled();
     await expect(next.client.callTool(channel, f.selector, { path: "new-incarnation" })).resolves.toHaveProperty("value");
     expect(required(f.read.execute.mock.calls[0])[1].resources.origin).toEqual(replacement);
-    await next.client.client.ping();
+    await next.client.connection.protocol.ping();
     expect(JSON.stringify(next.received)).not.toContain("P15-OLD-INCARNATION");
   } finally {
     release.resolve(undefined);
@@ -466,9 +466,9 @@ it("E05 a live host assignment cannot bypass an invoke-only mandatory provider d
   const recipients = [caller, observer].map((peer) => ({ peer, offset: peer.received.length }));
   const deniedPath = "P15-PROVIDER-DENIED";
   expect(verdict).not.toHaveBeenCalled();
-  expect(await caller.client.dispatchTool(channel, f.selector, { path: deniedPath })).toEqual({ version: 2, status: "denied", code: "unavailable" });
+  expect(await caller.client.dispatchTool(channel, f.selector, { path: deniedPath })).toEqual({ version: 1, status: "denied", code: "unavailable" });
   expect(verdict).toHaveBeenCalled();
-  await Promise.all(recipients.map(({ peer }) => peer.client.client.ping()));
+  await Promise.all(recipients.map(({ peer }) => peer.client.connection.protocol.ping()));
   expect(await f.captureSessionState(caller.client, observer.client)).toEqual(before);
   for (const entry of f.harness) {
     expect(entry.prepare).not.toHaveBeenCalled();
@@ -490,7 +490,7 @@ it("Z02 settled public denials release disclosure capacity before an authorized 
   const caller = await f.connect(f.caller);
   const before = f.host.sessions.getSessionSnapshot(channel);
   for (let index = 0; index < 257; index += 1) {
-    expect(await caller.client.dispatchTool(channel, f.selector, { path: "P19-denied" })).toEqual({ version: 2, status: "denied", code: "unavailable" });
+    expect(await caller.client.dispatchTool(channel, f.selector, { path: "P19-denied" })).toEqual({ version: 1, status: "denied", code: "unavailable" });
   }
   expect(decide).toHaveBeenCalledTimes(257);
   expect(f.host.sessions.getSessionSnapshot(channel)).toEqual(before);

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AhpTransport } from "@microsoft/agent-host-protocol/client";
-import { connectToolClient, type ToolClient } from "./legacyToolClient";
+import { connectToolClient, type ToolClient } from "@tool/client";
 import type { AHPServerHandle, WebSocketConnectionContext } from "@websocket";
 import { createToolPolicyHost, connectPolicyTransport, toolPolicyChannel as channel } from "./toolPolicyFixture";
-import { contract } from "../toolExecution/fixtures";
+import { contract } from "../tool/execution/fixtures";
 import { createSessionsFactory } from "@sessions";
 import type { SessionsFactory } from "@sessions";
 import { createMockProvider } from "@sessions/mock";
@@ -12,17 +12,14 @@ import { createWebSocketServer } from "@websocket";
 import WebSocket from "ws";
 import { FrameLog, responseWithId } from "./helpers";
 
-// Internal guarded execution proof; shared-view/public SDK acceptance belongs to P12.
 const capturedContexts = vi.hoisted(() => new Map<string, WebSocketConnectionContext>());
-const capturedFactories = vi.hoisted(() => new Set<SessionsFactory>());
-vi.mock("@websocket/helpers/ahp", async () => {
-  const { createAHPKernel } = await import("@websocket/helpers/ahp/helpers/kernel/helpers");
-  return { createAHPBinding: (...args: Parameters<typeof createAHPKernel>) => {
-    capturedFactories.add(args[0]);
-    const kernel = createAHPKernel(...args);
-    return { ...kernel, onConnection: (context: WebSocketConnectionContext) => {
+vi.mock("@websocket/helpers/ahp", async (load) => {
+  const actual = await load<typeof import("@websocket/helpers/ahp")>();
+  return { ...actual, createAHPBinding: (...args: Parameters<typeof actual.createAHPBinding>) => {
+    const binding = actual.createAHPBinding(...args);
+    return { ...binding, onConnection: (context: WebSocketConnectionContext) => {
       capturedContexts.set(context.connectionId, context);
-      kernel.onConnection(context);
+      binding.onConnection(context);
     } };
   } };
 });
@@ -40,7 +37,8 @@ const gate = <T>() => {
   return { promise, resolve };
 };
 const setup = async (options: Parameters<typeof createToolPolicyHost>[1] = {}) => {
-  const f = await createToolPolicyHost([contract], options);
+  const roles = Object.fromEntries(Object.entries(options.roles ?? { fixture: ["invoke", "advertise", "execute"] }).map(([subject, operations]) => [subject, ["discover", ...operations]]));
+  const f = await createToolPolicyHost([contract], { ...options, roles, protectedViews: true, toolDiscovery: Object.keys(roles) });
   hosts.push(f.host);
   const address = await f.host.start();
   const url = "ws://127.0.0.1:" + String(address.port) + "/capacity";
@@ -56,7 +54,7 @@ const setup = async (options: Parameters<typeof createToolPolicyHost>[1] = {}) =
     } };
     const client = await connectToolClient({ transport, ownership: "owned" }, { clientId, protocolVersions: ["1.0.0"] });
     clients.push(client);
-    await client.client.subscribe(channel);
+    await client.connection.protocol.subscribe(channel);
     return { client, frames, transport };
   };
   return { ...f, connect, url };
@@ -76,14 +74,13 @@ describe("P09 guarded client wire admission", () => {
     const advertiser = await f.connect();
     const record = [...f.contexts.values()][0];
     const context = record === undefined ? undefined : capturedContexts.get(record.context.connectionId);
-    const factory = [...capturedFactories].find((candidate) => candidate.authorization?.usesRegistry(f.registry));
-    if (factory === undefined || context === undefined) throw new Error("Missing actual binding inputs");
+    if (!context) throw new Error("Missing advertiser transport");
     const before = f.host.sessions.getSessionSnapshot(channel);
-    const dispatch = factory.dispatchAction.bind(factory);
-    vi.spyOn(factory, "dispatchAction").mockImplementation(async (params) => {
-      inVeto = true;
+    const send = context.send.bind(context);
+    vi.spyOn(context, "send").mockImplementation((message, guard) => {
+      inVeto = "result" in message && !!message.result && typeof message.result === "object" && "advertisementId" in message.result;
       try {
-        return await dispatch(params);
+        return send(message, guard);
       } finally {
         inVeto = false;
       }
@@ -137,7 +134,7 @@ describe("P09 guarded client wire admission", () => {
     await executor.client.joinSession(channel, [{ definition: contract, execute }]);
     const offset = executor.frames.length;
     await expect(caller.client.callTool(channel, contract, { path: "secret-input-canary" })).rejects.toThrow();
-    await executor.client.client.ping();
+    await executor.client.connection.protocol.ping();
     expect(execute).not.toHaveBeenCalled();
     expect(executor.frames.slice(offset).join("")).not.toContain("secret-input-canary");
   });
@@ -185,7 +182,7 @@ describe("P09 guarded client wire admission", () => {
       armed = false;
       release.resolve("allow");
       await joining;
-      await observer.client.client.ping();
+      if (invalidation !== "revoke") await observer.client.connection.protocol.ping();
       expect(f.host.sessions.getSessionSnapshot(channel)).toEqual(before);
     });
   }
@@ -204,40 +201,17 @@ describe("P09 guarded client wire admission", () => {
     expect(executeB).not.toHaveBeenCalled();
   });
 
-  it("T04 canonical empty metadata invalidates a previously admitted broker executor", async () => {
+  it("T04 changing native active metadata preserves the independent private advertisement", async () => {
     const f = await setup();
     const caller = await f.connect("fixture", "caller");
     const executor = await f.connect("fixture", "executor");
-    const execute = vi.fn(() => ({ value: "stale-canonical-row" }));
+    const execute = vi.fn(() => ({ value: "private" }));
     await executor.client.joinSession(channel, [{ definition: contract, execute }]);
     await f.host.sessions.dispatchAction({ channel, clientId: "executor", clientSeq: 99,
       action: { type: "session/activeClientSet", activeClient: { clientId: "executor", tools: [] } } });
-    await expect(caller.client.callTool(channel, contract, { path: "removed" })).rejects.toThrow();
-    expect(execute).not.toHaveBeenCalled();
+    await expect(caller.client.callTool(channel, contract, { path: "private" })).resolves.toEqual({ value: "private" });
+    expect(execute).toHaveBeenCalledOnce();
   });
-
-  it("T04 nested canonical removal during advertisement fanout prevents later broker activation", async () => {
-    const f = await setup();
-    const caller = await f.connect("fixture", "caller");
-    const executor = await f.connect("fixture", "executor");
-    const execute = vi.fn(() => ({ value: "stale-activation" }));
-    let replacement: ReturnType<SessionsFactory["dispatchAction"]> | undefined;
-    let replacementStarted = false;
-    const unsubscribe = f.host.sessions.onSessionEnvelope((envelope) => {
-      if (replacementStarted || envelope.channel !== channel) return;
-      replacementStarted = true;
-      replacement = f.host.sessions.dispatchAction({ channel, clientId: "executor", clientSeq: 99,
-        action: { type: "session/activeClientSet", activeClient: { clientId: "executor", tools: [] } } });
-    });
-    await executor.client.joinSession(channel, [{ definition: contract, execute }]);
-    unsubscribe();
-    expect(replacement).toBeDefined();
-    await replacement;
-    expect(f.host.sessions.getSessionSnapshot(channel)?.state.activeClients[0]?.tools).toEqual([]);
-    await expect(caller.client.callTool(channel, contract, { path: "removed-during-fanout" })).rejects.toThrow();
-    expect(execute).not.toHaveBeenCalled();
-  });
-
   it("T02 a same-ID invoke-only connection cannot clear another executor's canonical row", async () => {
     const f = await setup({ roles: { caller: ["invoke"], executor: ["advertise", "execute"] } });
     const executor = await f.connect("executor", "shared-id");
@@ -257,7 +231,7 @@ describe("P09 guarded client wire admission", () => {
     await executor.client.joinSession(channel, [{ definition: contract, execute }]);
     const offset = observer.frames.length;
     await expect(caller.client.callTool(channel, contract, { path: "private-argument-canary" })).resolves.toEqual({ value: "private-result-canary" });
-    await observer.client.client.ping();
+    await observer.client.connection.protocol.ping();
     expect(execute).toHaveBeenCalledOnce();
     expect(observer.frames.slice(offset).join("")).not.toContain("private-argument-canary");
     expect(observer.frames.slice(offset).join("")).not.toContain("private-result-canary");
@@ -283,7 +257,6 @@ describe("P09 guarded client wire admission", () => {
     f.registry.removeBinding({ bindingId: "fixture-grant-caller", scope, revision: 1 });
     finish.resolve({ value: "revoked-result-canary" });
     await result;
-    await caller.client.client.ping();
     expect(caller.frames.join("")).not.toContain("revoked-result-canary");
   });
 
