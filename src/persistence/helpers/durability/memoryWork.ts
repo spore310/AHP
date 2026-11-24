@@ -5,8 +5,9 @@ import { RepositoryError, type AgentRegistrationRecord } from "../../types";
 import { atomic, captureData } from "./helpers";
 import type { Admission, ReplaceData, ResourceRecord, StoredSession } from "./types";
 import type { DurableWorkRepository, StoredWork, WorkFence } from "./workTypes";
-import { captureWorkIntent, sameWorkIntent } from "./workIntent";
+import { captureWorkIntent, durableSelectionLimits, sameWorkIntent } from "./workIntent";
 import { createWorkSelectionGraph } from "@work/helpers/selections";
+import { createMemoryScheduling } from "./memoryScheduling";
 
 function conflict(): never {
   throw new RepositoryError("conflict", "Work state or capacity changed.");
@@ -18,7 +19,7 @@ const active = (row: StoredWork) => row.status === "queued" || row.status === "l
 export function createMemoryWorkRepository(
   jobs: Map<string, StoredWork>, registrations: ReadonlyMap<string, AgentRegistrationRecord>,
   resources: ReadonlyMap<string, ResourceRecord>, session: (ref: ResourceRef<"session">) => StoredSession | undefined,
-  guard: (admit?: Admission) => void,
+  guard: (admit?: Admission) => void, hostEpoch: string,
 ): DurableWorkRepository {
   // SQL serializes fresh work inserts under the host quota lock. A synchronous
   // admission callback can reenter this adapter before the outer insert lands.
@@ -43,6 +44,7 @@ export function createMemoryWorkRepository(
     return { data: captureData(change.data), dataRevision: advance(row.dataRevision) };
   }
   return {
+    ...createMemoryScheduling(jobs, registrations, resources, session, guard, hostEpoch),
     leased(after, limit) {
       return atomic(() => {
         guard();
@@ -63,7 +65,7 @@ export function createMemoryWorkRepository(
         if (action !== "cancel" && !proof) return conflict();
         const root = session(row.session);
         if (!root || root.lifecycle === "retired" || root.lifecycle === "retiring") return conflict();
-        const graph = createWorkSelectionGraph(row.session.domainId, root, [...resources.values()].filter((r) => sameResource(r.session, row.session)));
+        const graph = createWorkSelectionGraph(row.session.domainId, root, [...resources.values()].filter((r) => sameResource(r.session, row.session)), durableSelectionLimits);
         const canRetry = action === "requeue" && row.attemptCount < row.maxAttempts && root.lifecycle === "active"
           && graph.hasActivePositiveScope(row.scope, root.graphRevision);
         const status = action === "cancel" ? "cancelled" : canRetry ? "queued" : "failed";
@@ -74,6 +76,16 @@ export function createMemoryWorkRepository(
         if (jobs.get(row.id) !== row || session(row.session)?.graphRevision !== root.graphRevision) conflict();
         jobs.set(row.id, next);
         return structuredClone(next);
+      });
+    },
+    sampleLease({ session: ref, id, revision }) {
+      return atomic(() => {
+        guard();
+        const row = jobs.get(id);
+        const root = session(ref);
+        if (!root || root.lifecycle === "retiring" || root.lifecycle === "retired" || row?.status !== "leased"
+          || !row.lease || row.revision !== revision || !sameResource(row.session, ref)) return undefined;
+        return { expiresAt: row.lease.expiresAt, databaseTime: Date.now() };
       });
     },
     inspect(domainId, id) {
@@ -145,7 +157,7 @@ export function createMemoryWorkRepository(
           return { id: existing.id, created: false };
         }
         if (inserting) return conflict();
-        const graph = createWorkSelectionGraph(root.ref.domainId, root, [...resources.values()].filter((row) => sameResource(row.session, root.ref)));
+        const graph = createWorkSelectionGraph(root.ref.domainId, root, [...resources.values()].filter((row) => sameResource(row.session, root.ref)), durableSelectionLimits);
         if ([...intent.scope, ...intent.announce].some(({ resource }) =>
           !graph.selected(resource, [{ resource, include: true, includeDescendants: false }], graphRevision))) conflict();
         const targetCurrent = () => {

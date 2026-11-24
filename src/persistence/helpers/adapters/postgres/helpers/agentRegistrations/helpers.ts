@@ -28,7 +28,32 @@ export const createPostgresAgentRegistrationRepository = (
   currentOwner?: () => PostgresOwnership,
 ): AgentRegistrationRepository => {
   const limits = captureAgentRegistrationLimits(options);
+  const change = async (sql: string, values: readonly unknown[]): Promise<AgentRegistrationRecord> => {
+    try {
+      const owner = currentOwner?.();
+      return await withTransaction(database, async (client) => {
+        if (owner) await owner.lock(client);
+        const result = await client.query<AgentRegistrationRow>(sql, values);
+        const row = result.rows[0];
+        if (!row) throw new RepositoryError("conflict", "Agent registration unavailable.");
+        return mapRegistration(row);
+      }, true);
+    } catch (error) {
+      throw databaseFailure(error);
+    }
+  };
   return {
+    bindExecution(record) {
+      return change(`UPDATE agent_registrations SET execution_epoch = execution_epoch + 1
+        WHERE id = $1 AND domain_id = $2 AND principal_subject = $3 AND agent_key = $4
+          AND enabled AND execution_epoch = $5::bigint RETURNING ${SELECT_COLUMNS}`,
+      [record.id, record.domainId, record.principalSubject, record.agentKey, record.executionEpoch]);
+    },
+    setEnabled(id, domainId, enabled) {
+      return change(`UPDATE agent_registrations SET enabled = $3::boolean,
+        execution_epoch = execution_epoch + CASE WHEN enabled <> $3::boolean THEN 1 ELSE 0 END
+        WHERE id = $1 AND domain_id = $2 RETURNING ${SELECT_COLUMNS}`, [id, domainId, enabled]);
+    },
     async register(input) {
       try {
         const owner = currentOwner?.();
@@ -61,7 +86,7 @@ export const createPostgresAgentRegistrationRepository = (
           const row = result.rows[0];
           if (row === undefined) throw new Error("Registration upsert returned no row.");
           return mapRegistration(row);
-        });
+        }, true);
       } catch (error) {
         throw databaseFailure(error);
       }

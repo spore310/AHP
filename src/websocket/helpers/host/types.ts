@@ -18,6 +18,8 @@ import type { WebSocketTransportLimits } from "../../types";
  * methods are not registered.
  */
 export interface AHPServerAgentWorkOptions {
+  readonly configuration?: import("@agents").AgentWorkConfig;
+  readonly leaseMs?: number;
   readonly authenticator?: ConnectionAuthenticator;
   readonly ceiling?: import("@authorization").PolicyScopeRules;
   readonly hooks?: import("@work/helpers/authorityLoss/types").WorkServiceHooks;
@@ -39,6 +41,8 @@ export interface AHPServerAgentWorkOptions {
 
 /** Options for a composed Agent Hosting Protocol host. */
 export interface AHPServerOptions {
+  readonly onDiagnostic?: (event: { readonly event: import("@work").WorkDiagnosticEvent | "lateBackendDisposeFailed" | "malformedNotification";
+    readonly correlationId: string; }) => void;
   readonly nativeWrites?: import("../ahp/types").NativeSessionWrites;
   readonly protectedViews?: ResourceViewOptions;
   readonly toolExecution?: ClientToolBrokerOptions;
@@ -60,6 +64,8 @@ export interface AHPServerOptions {
  * `sessions` is not usable to revive the host after `stop()`.
  */
 export interface AHPServerHandle {
+  readonly workConfiguration?: import("@agents").AgentWorkConfiguration;
+  readonly setAgentEnabled?: (agentId: string, enabled: boolean) => Promise<unknown>;
   /** Trusted in-process commands sharing the host's canonical session policy and durable store. */
   readonly work?: import("@work").WorkService;
   /** Restricts an owning resource operation to the current protected connection's exact work lease. */

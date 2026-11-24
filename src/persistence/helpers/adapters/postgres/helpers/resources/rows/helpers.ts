@@ -58,9 +58,9 @@ const resourceColumns = `SELECT r.resource_pk AS pk, jsonb_build_object(
   FROM canonical_resources r JOIN sessions s ON s.session_instance_id=r.session_instance_id
   LEFT JOIN canonical_resources p ON p.resource_pk=r.parent_resource_pk LEFT JOIN canonical_resources g ON g.resource_pk=r.grant_parent_resource_pk`;
 
-export async function resourceRows(db: QueryableClient, session: ResourceRef<"session">): Promise<ResourceRow[]> {
+export async function resourceRows(db: QueryableClient, session: ResourceRef<"session">, lock?: "share"): Promise<ResourceRow[]> {
   const result = await db.query<ResourceRow>(`${resourceColumns} WHERE s.session_instance_id=$1 AND s.domain_id=$2 AND s.session_uri=$3
-    ORDER BY r.resource_pk LIMIT 257`, [session.instanceId, session.domainId, session.id]);
+    ORDER BY r.resource_pk LIMIT 257 ${lock ? "FOR SHARE OF r" : ""}`, [session.instanceId, session.domainId, session.id]);
   if (result.rows.length > 256) reject();
   return result.rows;
 }

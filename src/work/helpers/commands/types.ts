@@ -35,6 +35,15 @@ export interface WorkAgentContext extends WorkRequestContext {
   fence?(): boolean;
 }
 export interface WorkExecutionRef { readonly workId: string; readonly attempt: number; readonly leaseToken: string }
+export interface WorkLease extends WorkExecutionRef {
+  readonly session: ResourceRef<"session">; readonly kind: string; readonly priority: number;
+  readonly input: JsonObject; readonly data: JsonObject; readonly dataRevision: string; readonly revision: string;
+  readonly scope: readonly WorkResourceSelection[]; readonly leaseExpiresAt: string;
+}
+export type WorkClaimResult = { readonly status: "claimed"; readonly lease: WorkLease }
+  | { readonly status: "capacity" } | { readonly status: "empty" } | { readonly status: "deferred"; readonly retryAfterMs: number };
+export type WorkDiagnosticEvent = "submitted" | "claimCapacityDenied" | "claimScanDeferred" | "staleLeaseRejected"
+  | "authorityLoss" | "publicationFailed" | "storageOutcomeUnknown" | "storageFailed" | "bindingFailed" | "lifecycleFailed";
 export interface WorkEntities { readonly submitter: PolicyActorRef; readonly owner: SecuritySubjectRef; readonly executor?: RegisteredAgentIdentity }
 export interface WorkListSummary {
   readonly id: string; readonly session: ResourceRef<"session">; readonly kind: string; readonly priority: number;
@@ -48,6 +57,17 @@ export interface AuthorizedWorkView extends WorkListSummary {
 export interface WorkApproval { isCurrent(): boolean; fence?(): boolean; release(): void }
 export interface WorkExecutionGuard { current(): boolean; fence(): boolean; release(): void }
 export interface WorkCommandOptions {
+  readonly scheduling?: {
+    readonly allowedKinds: readonly string[];
+    /** Capture outside storage locks. Abort on loss of caller/policy/kind authority,
+     * expiry or, for acquisition, any change to the prepared configuration revision. */
+    admission(caller: WorkAgentContext, approval: WorkApproval, operation: "claim" | "renew", kind: string,
+      configRevision: string): import("../claims/admission").WorkSchedulingAdmission;
+    readonly configuration: { resolve(agent: RegisteredAgentIdentity): { readonly revision: string; readonly maxActiveClaims: number; readonly allowedKinds?: readonly string[] } };
+    readonly leaseMs?: number;
+  };
+  readonly onDiagnostic?: (event: WorkDiagnosticEvent, correlationId?: string) => void;
+  authenticateAgent?(caller: WorkAgentContext): Promise<WorkAgentContext>;
   readonly authorityLoss?: Omit<import("../authorityLoss/types").WorkAuthorityLossOptions, "repository" | "mutate">;
   readonly selectionLimits?: WorkSelectionLimits;
   repository(): DurableWorkRepository;
@@ -57,6 +77,9 @@ export interface WorkCommandOptions {
   readonly limits?: { readonly session: number; readonly host: number };
 }
 export interface WorkService {
+  claim(caller: WorkAgentContext, session: ResourceLocator): Promise<WorkClaimResult>;
+  renew(caller: WorkAgentContext, execution: WorkExecutionRef): Promise<{ readonly leaseExpiresAt: string; readonly revision: string }>;
+  stats(): { readonly pending: number; readonly settling: number; readonly scanDeferrals: number; readonly capacityDenials: number; readonly continuations: number; readonly pendingAuthorityLoss: number };
   authorityChanged(): void;
   authorityIdle(): Promise<void>;
   prepareExecutionGuard(caller: WorkAgentContext, execution: WorkExecutionRef,

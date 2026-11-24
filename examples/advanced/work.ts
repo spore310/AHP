@@ -11,14 +11,27 @@ export async function openWorkClient(url: string, subject: Subject, label: strin
   client.connect();
   try {
     await client.initialize({ clientId: label, protocolVersions: ["1.0.0"], initialSubscriptions: [] });
-    return { client, request: (method: string, params: Record<string, unknown>) => transport.request(method, { version: 1, ...params }) };
+    return { client, async request(method: string, params: Record<string, unknown>) {
+      try {
+        return await transport.request(method, { version: 1, ...params });
+      } catch (cause) {
+        throw new Error("Example request failed for " + method, { cause });
+      }
+    } };
   } catch (error) {
     await client.shutdown();
     throw error;
   }
 }
 
-/** A registered agent can maintain its presence while remote work mutations are closed. */
+export const claimedLease = z.object({ version: z.literal(1), status: z.literal("claimed"),
+  lease: z.object({ workId: z.uuid(), attempt: z.int().positive(), leaseToken: z.uuid(), priority: z.int(), leaseExpiresAt: z.iso.datetime() }) });
+
+export function execution(lease: z.infer<typeof claimedLease>["lease"]) {
+  return { workId: lease.workId, attempt: lease.attempt, leaseToken: lease.leaseToken };
+}
+
+/** The PM submits, the senior owns the session and the mapped junior claims and settles. */
 export async function showWorkBoundary(url: string, demo: ReturnType<typeof createReviewHost>): Promise<void> {
   const worker = await openWorkClient(url, "junior", "review-worker");
   try {
@@ -43,13 +56,17 @@ export async function showWorkBoundary(url: string, demo: ReturnType<typeof crea
     await assert.rejects(worker.request("x-ahp/work/submit", {
       requestKey: "first-review", kind: "code.review", input: {},
       scope: [{ resource: { kind: "session", id: channel }, include: true }],
-    }), /Tool operation unavailable/);
+    }));
     assert.deepEqual(await worker.request("x-ahp/work/get", { workId: job.id }),
       { version: 1, work: null });
+    const { lease } = claimedLease.parse(await worker.request("x-ahp/work/claim", { session: { kind: "session", id: channel } }));
+    assert.equal(lease.workId, job.id);
+    assert.equal(await worker.request("x-ahp/work/complete", { ...execution(lease), result: { reviewed: true } }), null);
+    assert.equal((await service.get(callerFor("senior"), job.id))?.status, "completed");
     assert.equal(demo.revokeJuniorWork(), true);
     assert.equal(await demo.juniorHasWorkGrant(), false);
     assert.equal(await worker.request("x-ahp/agents/unregister", {}), null);
-    process.stdout.write("The project manager submitted work in the senior's session for the mapped junior worker. The senior read the job. The junior's execution grant was current, then revoked.\n");
+    process.stdout.write("The project manager submitted work in the senior's session. The mapped junior claimed and completed the review before its execution grant was revoked.\n");
   } finally {
     await worker.client.shutdown();
   }

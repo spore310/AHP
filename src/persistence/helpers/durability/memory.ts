@@ -1,14 +1,13 @@
 import { sameResource } from "@authorization/helpers/context";
 import { isDeepStrictEqual } from "node:util";
 import type { ResourceRef } from "@authorization";
-import { atomic, canRetrySessionStart, captureData, captureRef, resourceOrder } from "./helpers";
+import { atomic, canRetrySessionStart, captureData, captureRef, memoryResourceKey as key, resourceOrder } from "./helpers";
 import { createMemoryWorkRepository } from "./memoryWork";
 import { fenceHostWork } from "./workFences";
 import type { StoredWork } from "./workTypes";
 import type { AgentRegistrationRecord } from "../../types";
 import type { Admission, DurableHost, DurableStorage, ResourceRecord, StoredSession, Transition } from "./types";
 
-const key = (ref: ResourceRef): string => JSON.stringify([ref.domainId, ref.kind, ref.id, ref.instanceId]);
 const advance = (revision: string): string => (BigInt(revision) + 1n).toString();
 function unavailable(): never {
   throw new Error("Durable operation unavailable.");
@@ -118,7 +117,7 @@ export function createMemoryDurableStorage(work = new Map<string, StoredWork>(),
           if (isOpen()) occupied = false;
         });
       },
-      work: createMemoryWorkRepository(work, registrations, resources, (ref) => sessions.get(key(ref)), guard),
+      work: createMemoryWorkRepository(work, registrations, resources, (ref) => sessions.get(key(ref)), guard, String(owned)),
       sessions: {
         reserve(s, root, admit) {
           return atomic(() => {

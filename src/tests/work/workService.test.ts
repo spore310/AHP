@@ -107,15 +107,15 @@ describe("exact-instance work commands", () => {
       const settle = vi.spyOn(f.host.work, "settle");
       await expect(f.service.complete(worker, execution, { result: [] as unknown as JsonObject })).rejects.toMatchObject({ code: "invalid" });
       expect(settle).not.toHaveBeenCalled();
-      await expect(f.service.complete(worker, { ...execution, attempt: 2 }, { result: {} })).rejects.toMatchObject({ code: "conflict" });
-      await expect(f.service.complete({ ...worker, executionEpoch: "3" }, execution, { result: {} })).rejects.toMatchObject({ code: "conflict" });
+      await expect(f.service.complete(worker, { ...execution, attempt: 2 }, { result: {} })).rejects.toMatchObject({ code: "stale" });
+      await expect(f.service.complete({ ...worker, executionEpoch: "3" }, execution, { result: {} })).rejects.toMatchObject({ code: "stale" });
       f.agents.set(agent.id, { ...agent, enabled: false });
-      await expect(f.service.fail(worker, execution, { retryable: false })).rejects.toMatchObject({ code: "conflict" });
+      await expect(f.service.fail(worker, execution, { retryable: false })).rejects.toMatchObject({ code: "stale" });
       expect(f.rows.get(id)).toEqual(row);
       f.agents.set(agent.id, agent);
       const expired = { ...row, lease: { ...row.lease, expiresAt: new Date(0).toISOString() } };
       f.rows.set(id, expired);
-      await expect(f.service.complete(worker, execution, { result: {} })).rejects.toMatchObject({ code: "conflict" });
+      await expect(f.service.complete(worker, execution, { result: {} })).rejects.toMatchObject({ code: "stale" });
       expect(f.rows.get(id)).toEqual(expired);
     } finally {
       await f.host.release();

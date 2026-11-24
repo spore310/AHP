@@ -67,9 +67,53 @@ export type WorkSettlement
 
 export type WorkDisposition = "cancel" | "requeue" | "fail";
 
+export interface ClaimActor {
+  readonly registrationId: string;
+  readonly principal: PolicyActorRef["principal"];
+  readonly agentKey: string;
+  readonly executionEpoch: Revision;
+}
+export type ClaimCursor = Pick<StoredWork, "priority" | "createdAt" | "id">;
+export interface CandidateScan {
+  readonly session: WorkIntent["session"];
+  readonly registrationId: string;
+  readonly allowedKinds: readonly string[];
+  readonly after?: ClaimCursor;
+  readonly limit: number;
+}
+export interface PreparedClaim {
+  readonly session: WorkIntent["session"];
+  readonly graphRevision: Revision;
+  readonly actor: ClaimActor;
+  readonly allowedKinds: readonly string[];
+  readonly maxActiveClaims: number;
+  readonly leaseMs: number;
+  readonly candidates: readonly Pick<StoredWork, "id" | "revision">[];
+}
+export interface PreparedRenew {
+  readonly fence: WorkFence & Required<Pick<WorkFence, "execution" | "graphRevision">>;
+  readonly actor: ClaimActor;
+  readonly leaseMs: number;
+}
+export interface LockedClaim extends WorkInspection {
+  readonly hostEpoch: Revision;
+  readonly registration: NonNullable<WorkInspection["registration"]>;
+  readonly activeClaims?: number;
+}
+export type ClaimAdmission = (locked: LockedClaim) => undefined;
+export type PreparedClaimResult = { readonly status: "claimed"; readonly row: StoredWork } | { readonly status: "capacity" | "changed" };
+export interface WorkScheduling {
+  scanCandidates(input: CandidateScan): Promise<{ readonly rows: readonly StoredWork[]; readonly hasMore: boolean }>;
+  claimPrepared(input: PreparedClaim, admit: ClaimAdmission): Promise<PreparedClaimResult>;
+  renewPrepared(input: PreparedRenew, admit: ClaimAdmission): Promise<StoredWork>;
+  expireExhausted(session: WorkIntent["session"], limit: number, beforeWrite?: (ids: readonly string[]) => undefined): Promise<readonly Pick<StoredWork, "id" | "revision">[]>;
+}
+
 /** Exact-host work operations. Each write checks admission after obtaining its durable locks. */
-export interface DurableWorkRepository {
+export interface DurableWorkRepository extends WorkScheduling {
   observe?(session: ResourceRef<"session">, id: string): { current(): boolean; release(): void };
+  /** Unlocked preparation sample for one exact leased revision, using the store clock. */
+  sampleLease(fence: Pick<WorkFence, "session" | "id" | "revision">): Promise<{ readonly expiresAt: string; readonly databaseTime: number } | undefined>;
   inspect(domainId: string, id: string): Promise<WorkInspection | undefined>;
   leased(after: string | undefined, limit: number): Promise<readonly { readonly domainId: string; readonly id: string }[]>;
   disposition(fence: WorkFence, action: WorkDisposition, admit: Admission): Promise<StoredWork>;

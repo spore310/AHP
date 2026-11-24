@@ -53,6 +53,9 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
   const retainedById = new Map<string, RetainedIdentity>();
   const retainedByKey = new Map<string, RetainedIdentity>();
   const reservations = new Map<string, { waiters: number; reserved: boolean }>();
+  const pendingKeys = new Map<string, { cancelled: boolean }>();
+  const pendingConnections = new Map<string, { cancelled: boolean }>();
+  const changing = new Set<string>();
   let reservedIdentities = 0;
   let pendingOperations = 0;
 
@@ -90,8 +93,8 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
     return current;
   };
 
-  const beginRegistration = (locator: string, known: RetainedIdentity | undefined) => {
-    if (pendingOperations >= maxPending) throw registrationCapacity();
+  const beginRegistration = (locator: string, known: RetainedIdentity | undefined, bindingOwnsSlot = false) => {
+    if (!bindingOwnsSlot && pendingOperations >= maxPending) throw registrationCapacity();
     let reservation = known === undefined ? reservations.get(locator) : undefined;
     if (known === undefined && reservation === undefined) {
       if (retainedById.size + reservedIdentities >= maxRetained) throw registrationCapacity();
@@ -100,7 +103,7 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
       reservedIdentities += 1;
     }
     if (reservation !== undefined) reservation.waiters += 1;
-    pendingOperations += 1;
+    if (!bindingOwnsSlot) pendingOperations += 1;
     return {
       remember(record: AgentRegistrationRecord): AgentRegistrationRecord {
         const key = registrationKey(record.principalSubject, record.agentKey);
@@ -123,7 +126,7 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
         return record;
       },
       release(): void {
-        pendingOperations -= 1;
+        if (!bindingOwnsSlot) pendingOperations -= 1;
         if (reservation === undefined) return;
         reservation.waiters -= 1;
         if (reservation.waiters === 0) {
@@ -134,88 +137,173 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
     };
   };
 
-  return {
-    async register(
-      principal: AuthenticatedPrincipal,
-      agentKey: string,
-      displayName?: string,
-    ): Promise<AgentRegistrationRecord> {
+  const install = (
+    agentId: string,
+    principal: AuthenticatedPrincipal,
+    connectionId: string,
+    executionEpoch?: string,
+  ): PresenceBinding => {
+    requireDomain(principal);
+    const identity = retainedById.get(agentId);
+    const record = identity?.record;
+    if (identity === undefined || record === undefined) {
+      throw new AgentDirectoryError("not_found", "Agent registration not found");
+    }
+    if (record.principalSubject !== principal.subject || !record.enabled) {
+      throw new AgentDirectoryError("unauthorized", "Agent registration is not available");
+    }
+
+    const at = now();
+    const current = liveBinding(agentId, at);
+    if (current !== undefined) {
+      if (current.connectionId === connectionId) {
+        return current;
+      }
+      throw new AgentDirectoryError("conflict", "Agent already has a live connection");
+    }
+
+    // One connection owns at most one live agent identity. This keeps
+    // `getByConnection` unambiguous for work authorization.
+    for (const otherAgentId of [...(byConnection.get(connectionId) ?? [])]) {
+      if (otherAgentId !== agentId && liveBinding(otherAgentId, at) !== undefined) {
+        throw new AgentDirectoryError("conflict", "Connection already has a live agent");
+      }
+    }
+
+    const generation = identity.generation + 1;
+    if (!Number.isSafeInteger(generation)) throw registrationCapacity();
+    identity.generation = generation;
+    const binding: PresenceBinding = Object.freeze({
+      ...(executionEpoch === undefined ? {} : { executionEpoch }),
+      agentId,
+      principalSubject: principal.subject,
+      connectionId,
+      generation,
+      expiresAt: at + presenceTtlMs,
+    });
+    byAgent.set(agentId, binding);
+    const connectionBindings = byConnection.get(connectionId) ?? new Set<string>();
+    connectionBindings.add(agentId);
+    byConnection.set(connectionId, connectionBindings);
+    return binding;
+  };
+
+  async function register(
+    principal: AuthenticatedPrincipal,
+    agentKey: string,
+    displayName?: string,
+    bindingOwnsSlot = false,
+  ): Promise<AgentRegistrationRecord> {
+    requireDomain(principal);
+    // Keep registration text within the application's portable-text profile.
+    if (!isPortableText(agentKey)
+      || (displayName !== undefined && !isPortableText(displayName))) {
+      throw new AgentDirectoryError("invalid", "Registration text contains unsupported characters.");
+    }
+    const subject = principal.subject;
+    const key = registrationKey(subject, agentKey);
+    const known = retainedByKey.get(key);
+    if (known !== undefined && known.record === undefined) {
+      throw new AgentDirectoryError("not_found", "Agent registration not found");
+    }
+    const admission = beginRegistration(`key:${key}`, known, bindingOwnsSlot);
+    try {
+      const record = await registrations.register({
+        ...(domainId === undefined ? {} : { domainId }),
+        principalSubject: subject,
+        agentKey,
+        ...(displayName !== undefined ? { displayName } : {}),
+      });
+      if ((record.domainId !== undefined && record.domainId !== domainId) || record.principalSubject !== subject || record.agentKey !== agentKey) {
+        throw new AgentDirectoryError("conflict", "Agent registration identity changed.");
+      }
+      return admission.remember(record);
+    } finally {
+      admission.release();
+    }
+  }
+
+  const directory: AgentDirectory = {
+    register: (principal, agentKey, displayName) => register(principal, agentKey, displayName),
+
+    bindPresence(agentId, principal, connectionId) {
+      const identity = retainedById.get(agentId);
+      if (changing.has(agentId) || pendingConnections.has(connectionId) || (identity && pendingKeys.has(identity.key))) throw registrationCapacity();
+      return install(agentId, principal, connectionId);
+    },
+
+    async registerPresence(principal, agentKey, connectionId, request = {}) {
       requireDomain(principal);
-      // Keep registration text within the application's portable-text profile.
-      if (!isPortableText(agentKey)
-        || (displayName !== undefined && !isPortableText(displayName))) {
-        throw new AgentDirectoryError("invalid", "Registration text contains unsupported characters.");
-      }
-      const subject = principal.subject;
-      const key = registrationKey(subject, agentKey);
+      const key = registrationKey(principal.subject, agentKey);
       const known = retainedByKey.get(key);
-      if (known !== undefined && known.record === undefined) {
-        throw new AgentDirectoryError("not_found", "Agent registration not found");
-      }
-      const admission = beginRegistration(`key:${key}`, known);
+      const supportsEpoch = !!domainId && typeof registrations.bindExecution === "function" && typeof registrations.setEnabled === "function";
+      if (request.requireExecutionEpoch && !supportsEpoch) throw new AgentDirectoryError("unauthorized", "Execution registration unavailable.");
+      const connected = directory.getByConnection(connectionId);
+      if (connected && connected.agentId !== known?.id) throw registrationCapacity();
+      const online = known && liveBinding(known.id, now());
+      if (online && online.connectionId !== connectionId) throw registrationCapacity();
+      if ((known && changing.has(known.id)) || pendingKeys.has(key) || pendingConnections.has(connectionId) || pendingOperations >= maxPending) throw registrationCapacity();
+      const reservation = { cancelled: false };
+      pendingOperations += 1;
+      pendingKeys.set(key, reservation);
+      pendingConnections.set(connectionId, reservation);
+      const check = () => {
+        if ((request.current && !request.current()) || reservation.cancelled) throw new AgentDirectoryError("unauthorized", "Connection unavailable.");
+      };
       try {
-        const record = await registrations.register({
-          ...(domainId === undefined ? {} : { domainId }),
-          principalSubject: subject,
-          agentKey,
-          ...(displayName !== undefined ? { displayName } : {}),
-        });
-        if ((record.domainId !== undefined && record.domainId !== domainId) || record.principalSubject !== subject || record.agentKey !== agentKey) {
-          throw new AgentDirectoryError("conflict", "Agent registration identity changed.");
+        check();
+        const record = await register(principal, agentKey, request.displayName, true);
+        check();
+        if (!record.enabled || changing.has(record.id)) throw new AgentDirectoryError("unauthorized", "Agent registration unavailable.");
+        const present = liveBinding(record.id, now());
+        if (present) {
+          if (present.connectionId !== connectionId) throw registrationCapacity();
+          if (present.executionEpoch !== undefined && present.executionEpoch !== record.executionEpoch) {
+            removeBinding(present);
+          } else if (!request.requireExecutionEpoch || present.executionEpoch !== undefined) {
+            return present;
+          } else {
+            throw registrationCapacity();
+          }
         }
-        return admission.remember(record);
+        if (!domainId || !registrations.bindExecution || !registrations.setEnabled) {
+          return install(record.id, principal, connectionId);
+        }
+        const committed = await registrations.bindExecution(record);
+        check();
+        if (!committed.enabled || committed.id !== record.id || committed.principalSubject !== principal.subject || committed.domainId !== domainId
+          || committed.agentKey !== agentKey || record.executionEpoch === undefined || committed.executionEpoch !== (BigInt(record.executionEpoch) + 1n).toString()
+          || changing.has(record.id)) throw new AgentDirectoryError("unauthorized", "Execution registration unavailable.");
+        const identity = retainedById.get(record.id);
+        if (!identity) throw registrationCapacity();
+        identity.record = committed;
+        return install(record.id, principal, connectionId, committed.executionEpoch);
       } finally {
-        admission.release();
+        pendingOperations -= 1;
+        pendingKeys.delete(key);
+        pendingConnections.delete(connectionId);
       }
     },
 
-    bindPresence(
-      agentId: string,
-      principal: AuthenticatedPrincipal,
-      connectionId: string,
-    ): PresenceBinding {
-      requireDomain(principal);
+    async setEnabled(agentId, enabled) {
+      if (!domainId || !registrations.setEnabled || typeof enabled !== "boolean") throw new AgentDirectoryError("invalid", "Registration changes unavailable.");
+      if (changing.has(agentId) || changing.size >= maxPending) throw registrationCapacity();
+      changing.add(agentId);
       const identity = retainedById.get(agentId);
-      const record = identity?.record;
-      if (identity === undefined || record === undefined) {
-        throw new AgentDirectoryError("not_found", "Agent registration not found");
-      }
-      if (record.principalSubject !== principal.subject || !record.enabled) {
-        throw new AgentDirectoryError("unauthorized", "Agent registration is not available");
-      }
-
-      const at = now();
-      const current = liveBinding(agentId, at);
-      if (current !== undefined) {
-        if (current.connectionId === connectionId) {
-          return current;
+      const reservation = identity && pendingKeys.get(identity.key);
+      if (reservation) reservation.cancelled = true;
+      const binding = byAgent.get(agentId);
+      try {
+        if (!enabled && binding) {
+          removeBinding(binding);
+          options.changed?.();
         }
-        throw new AgentDirectoryError("conflict", "Agent already has a live connection");
+        const record = await registrations.setEnabled(agentId, domainId, enabled);
+        if (identity) identity.record = record;
+        return record;
+      } finally {
+        changing.delete(agentId);
       }
-
-      // One connection owns at most one live agent identity. This keeps
-      // `getByConnection` unambiguous for work authorization.
-      for (const otherAgentId of [...(byConnection.get(connectionId) ?? [])]) {
-        if (otherAgentId !== agentId && liveBinding(otherAgentId, at) !== undefined) {
-          throw new AgentDirectoryError("conflict", "Connection already has a live agent");
-        }
-      }
-
-      const generation = identity.generation + 1;
-      if (!Number.isSafeInteger(generation)) throw registrationCapacity();
-      identity.generation = generation;
-      const binding: PresenceBinding = {
-        agentId,
-        principalSubject: principal.subject,
-        connectionId,
-        generation,
-        expiresAt: at + presenceTtlMs,
-      };
-      byAgent.set(agentId, binding);
-      const connectionBindings = byConnection.get(connectionId) ?? new Set<string>();
-      connectionBindings.add(agentId);
-      byConnection.set(connectionId, connectionBindings);
-      return binding;
     },
 
     renewPresence(binding: PresenceBinding): PresenceBinding | undefined {
@@ -235,7 +323,7 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
         return undefined;
       }
 
-      const renewed: PresenceBinding = { ...current, expiresAt: at + presenceTtlMs };
+      const renewed: PresenceBinding = Object.freeze({ ...current, expiresAt: at + presenceTtlMs });
       byAgent.set(renewed.agentId, renewed);
       return renewed;
     },
@@ -245,6 +333,8 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
     },
 
     releaseConnection(connectionId: string): void {
+      const pending = pendingConnections.get(connectionId);
+      if (pending) pending.cancelled = true;
       for (const agentId of [...(byConnection.get(connectionId) ?? [])]) {
         const current = byAgent.get(agentId);
         if (current !== undefined && current.connectionId === connectionId) {
@@ -263,7 +353,7 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
       return () => {
         const live = byAgent.get(binding.agentId);
         const registration = retainedById.get(binding.agentId)?.record;
-        return live?.generation === binding.generation && live.connectionId === binding.connectionId
+        return live?.executionEpoch === epoch && live.generation === binding.generation && live.connectionId === binding.connectionId
           && registration?.enabled === true && registration.executionEpoch === epoch && performance.now() < deadline;
       };
     },
@@ -295,4 +385,5 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
       }
     },
   };
+  return directory;
 };

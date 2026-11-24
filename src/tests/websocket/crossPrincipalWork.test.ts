@@ -9,9 +9,9 @@ import { mockProvider } from "@sessions/mock";
 import { connectToolClient, type ToolInvocationContext } from "@toolExecution/client";
 import { actorFor, channel, clientTool, createReviewHost, demoProof, reviewWorkerKey, selector } from "../../../examples/advanced/host";
 import { createExamplePersistence, createExampleRegistrationState } from "../../../examples/advanced/persistence";
-import { openWorkClient } from "../../../examples/advanced/work";
+import { claimedLease, execution, openWorkClient } from "../../../examples/advanced/work";
 
-it.each(["grant revocation", "disconnect", "provider write revocation"] as const)("enforces the mapped junior's exact work lease through %s", async (loss) => {
+it.each(["grant revocation", "disconnect", "registration disable", "provider write revocation"] as const)("enforces the mapped junior's exact work lease through %s", async (loss) => {
   const directory = createExampleRegistrationState();
   const rows = new Map<string, StoredWork>();
   const underlying = createMemoryDurableStorage(rows, directory.registrations);
@@ -72,12 +72,9 @@ it.each(["grant revocation", "disconnect", "provider write revocation"] as const
     assert.ok(row);
     expect(row.owner).toBe("senior");
     expect(row.submitter).toEqual(actorFor(subject));
-    const binding = directory.registrations.get(registration.agentId);
-    assert.ok(binding?.executionEpoch);
-    const work = { workId: id, attempt: 1, leaseToken: randomUUID() };
-    // P3 owns acquisition. Seed only the issued lease using the registration created by the real connection.
-    rows.set(id, { ...row, status: "leased", revision: "2", attemptCount: 1, lease: { attempt: 1, registrationId: registration.agentId,
-      executionEpoch: binding.executionEpoch, leaseToken: work.leaseToken, expiresAt: new Date(Date.now() + 60_000).toISOString() } });
+    const claim = claimedLease.parse(await junior.request("x-ahp/work/claim", { session: { kind: "session", id: channel } }));
+    const work = execution(claim.lease);
+    expect(work.workId).toBe(id);
     if (loss === "provider write revocation") {
       assert.ok(store);
       const target = demo.origin();
@@ -119,11 +116,23 @@ it.each(["grant revocation", "disconnect", "provider write revocation"] as const
       await senior.joinSession(channel, [{ definition: clientTool, execute }]);
       await expect(dispatch()).resolves.toMatchObject({ status: "denied" });
       expect(await junior.request("x-ahp/tools/dispatch", { version: 2, channel, contract: selector(clientTool), input: {} })).toMatchObject({ status: "challenge-required" });
+    } else if (loss === "registration disable") {
+      const enabled = demo.host.setAgentEnabled;
+      assert.ok(enabled);
+      await enabled(registration.agentId, false);
+      expect(await dispatch()).toMatchObject({ status: "denied" });
+      await enabled(registration.agentId, true);
+      await expect(junior.request("x-ahp/agents/renew", {})).rejects.toThrow();
+      expect(await junior.request("x-ahp/agents/register", { agentKey: reviewWorkerKey })).toMatchObject({ agentId: registration.agentId });
+      await expect(junior.request("x-ahp/work/complete", { ...work, result: {} })).rejects.toThrow();
+      expect(rows.get(id)?.status).toBe("leased");
     } else {
       await junior.client.shutdown();
       const reconnect = await openWorkClient(url, "junior", "registered-junior");
       peers.push(reconnect.client);
       await reconnect.request("x-ahp/tools/capabilities", { version: 2 });
+      await reconnect.request("x-ahp/agents/register", { agentKey: reviewWorkerKey });
+      await expect(reconnect.request("x-ahp/work/renew", work)).rejects.toThrow();
       await reconnect.client.subscribe(channel);
       expect(await reconnect.request("x-ahp/tools/resume", { version: 2, continuationId: next.continuationId, proofRef: demoProof })).toMatchObject({ status: "denied" });
       expect(await reconnect.request("x-ahp/tools/dispatch", { version: 2, channel, contract: selector(clientTool), input: {}, work })).toMatchObject({ status: "denied" });

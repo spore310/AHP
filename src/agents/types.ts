@@ -1,4 +1,19 @@
 import type { AgentRegistrationRecord, AgentRegistrationRepository } from "@persistence/types";
+import type { RegisteredAgentIdentity } from "@work/types";
+
+export interface AgentWorkConfig {
+  readonly defaultMaxActiveClaims?: number;
+  readonly identities?: readonly {
+    readonly identity: { readonly domainId: string; readonly subject: string; readonly agentKey: string; readonly actorAgentId?: string };
+    readonly maxActiveClaims?: number;
+    readonly allowedKinds?: readonly string[];
+  }[];
+}
+
+export interface AgentWorkConfiguration {
+  resolve(identity: RegisteredAgentIdentity): { readonly revision: string; readonly maxActiveClaims: number; readonly allowedKinds?: readonly string[] };
+  replace(input: AgentWorkConfig): void;
+}
 
 /** A trusted subject derived from the transport handshake, never `clientId`. */
 export interface AuthenticatedPrincipal {
@@ -19,6 +34,7 @@ export interface ConnectionAuthenticator {
 
 /** An ephemeral binding between a durable agent and one live connection. */
 export interface PresenceBinding {
+  readonly executionEpoch?: string;
   readonly agentId: string;
   readonly principalSubject: string;
   readonly connectionId: string;
@@ -32,6 +48,7 @@ export interface AgentDirectoryRegistrationLimits {
 }
 
 export interface AgentDirectoryOptions {
+  readonly changed?: () => void;
   readonly domainId?: string;
   readonly registrations: AgentRegistrationRepository;
   readonly registrationLimits?: Partial<AgentDirectoryRegistrationLimits>;
@@ -41,6 +58,9 @@ export interface AgentDirectoryOptions {
 }
 
 export interface AgentDirectory {
+  registerPresence(principal: AuthenticatedPrincipal, key: string, connectionId: string,
+    options?: { readonly displayName?: string; readonly current?: () => boolean; readonly requireExecutionEpoch?: boolean }): Promise<PresenceBinding>;
+  setEnabled(agentId: string, enabled: boolean): Promise<AgentRegistrationRecord>;
   register(
     principal: AuthenticatedPrincipal,
     agentKey: string,

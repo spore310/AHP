@@ -1,198 +1,102 @@
-# Agent Task Lifecycle
+# Agent task lifecycle
 
-This page explains the authenticated agent identity and durable work-lease slice.
-It is a POC coordination model: the AHP host stores identity and work state, but
-never runs a model, agent process, or filesystem executor. Workers run
-independently and execute work in their own environment.
+A protected AHP host records work and leases. Workers run independently and
+execute the work in their own environment. A session owner, a work submitter
+and a registered executor may be three different principals.
 
-## Work service sequence
-
-The diagram describes the in-process work service. Through P2 the WebSocket
-binding exposes agent registration, presence renewal, unregistration and work
-reads. Clients receive `MethodNotFound` for work mutations.
+## From submission to settlement
 
 ```mermaid
 sequenceDiagram
-    participant O as Session owner
+    participant S as Authorized submitter
     participant H as AHP host
-    participant W as Worker
-    participant R as Work store
-
-    O->>H: Submit work
-    H->>R: Insert or find request key
-    R-->>H: Work ID
-    H-->>O: Work ID
-
-    W->>H: Register and bind presence
-    W->>H: Claim eligible work
-    H->>R: Claim atomically
-    R-->>H: Work and lease
-    H-->>W: Work and lease token
+    participant W as Registered worker
+    participant R as Durable store
+    S->>H: Submit work for an exact session and scope
+    H->>R: Record or match the immutable request
+    H-->>S: Work ID
+    W->>H: Register on an authenticated connection
+    H->>R: Resolve the stable identity and advance its execution epoch
+    H-->>W: Registration ID and presence expiry
+    W->>H: Claim within a session
+    H->>R: Acquire an eligible item within the identity-wide limit
+    H-->>W: Work and private lease token
     W->>W: Execute locally
-
-    W->>H: Complete with lease token
-    H->>R: Commit under current lease
-    R-->>H: Committed or stale
+    W->>H: Complete with work ID, attempt, token and result
+    H->>R: Verify current authority and lease, then commit
     H-->>W: Completion reply
-    O->>H: Read work result
-    H-->>O: Current work record
 ```
 
-Workers claim explicitly. The host publishes no work-available push. A worker
-can renew its lease during execution. The host checks the live worker binding
-and lets the repository enforce the current token and deadline on each write.
+1. **Submit.** The host resolves the exact session incarnation, validates the
+   work kind and selectors, and checks the caller's submit grants. An authorized
+   retry with the same request key and complete intent receives the original ID.
+   A different intent with the same key conflicts.
+2. **Register.** The host maps the authenticated agent actor to its durable
+   registration key. It reserves the identity and connection, commits an epoch
+   increment, and publishes live presence if the connection is still current.
+   Repeating registration on that connection preserves its epoch. Disabling an
+   agent withdraws local presence immediately. Re-enabling requires a fresh bind.
+3. **Claim.** The worker supplies a session locator. The host checks its current
+   grants and allowed kinds. The repository claims a prepared candidate under
+   the active-claim limit. Higher priorities come first among eligible unlocked
+   rows in the evaluated scan. The private reply reports `claimed`, `empty`,
+   `capacity` or `deferred`.
+4. **Execute.** The worker can renew its unexpired lease and use a work-tagged
+   tool or resource operation when its independent base permissions also allow
+   that operation. Lease credentials stay private to the executing connection.
+5. **Settle.** Complete or fail supplies the work ID, attempt and token. The
+   host checks the current registered identity, epoch, scope and work policy.
+   The repository verifies the exact lease and its deadline before committing.
+   A lost reply can be reconciled through an authorized work read.
 
-## What each step means
+## What survives a disconnect
 
-1. **Submission:** A client asks the host to persist work. It does not send
-   instructions directly into another model's context or start a server-side
-   agent. The host authenticates the connection, confirms the live session
-   belongs to that principal, bounds the payload, and inserts one row keyed by
-   `(session_uri, request_key)`.
-2. **Registration:** An independently running agent authenticates. Durable
-   identity and live presence are separate: PostgreSQL keeps the registration,
-   while the host keeps the current connection, generation, and expiry in memory.
-3. **Claim:** The database atomically grants one execution lease. A push
-   notification never counts as a claim. A claim verifies the principal, session
-   owner, live presence, enabled registration, work kind, and optional target.
-4. **Execution:** The worker executes locally or in its own sandbox. No
-   server-side Pi/model inference is assumed. A lease expiration does not stop a
-   process by magic.
-5. **Evaluation and commit:** Completion commits only if the caller, token,
-   status, agent, session owner, and deadline still match. For code edits,
-   artifacts must be isolated and independently evaluated before promotion.
-6. **Recovery:** On disconnect or host restart, presence is lost but work remains.
-   Another eligible agent may reclaim only once lease policy permits it, with a
-   new token. There is no exactly-once side-effect guarantee.
+| Value | Owner | Lifetime |
+| --- | --- | --- |
+| Verified principal and canonical actor | Host security composition | Authenticated connection |
+| Registered identity and execution epoch | Durable registration repository | Across reconnects and host restarts |
+| Presence, connection ID and local generation | Agent directory | Until disconnect, withdrawal or presence expiry, 90 seconds by default |
+| Work, attempt count and latest failure | Exact session's durable work store | Through retirement until eligible purge |
+| Lease | Work row, bound to a registration and execution epoch | Until settlement, an authorized disposition or deadline, 60 seconds by default |
 
-## Identity, presence, and leases
+The default capacity is three active claims across all sessions per registered
+identity. A trusted override may replace this limit or restrict kinds. Lowering
+capacity preserves existing leases and permits valid renewals. Reconnecting
+allocates a new execution epoch. The old leases still occupy capacity until
+release or expiry, while their tokens can no longer authorize the new connection.
 
-| Concept | Source of truth | Lifetime | Proves work authority? |
-| ------- | --------------- | -------- | ---------------------- |
-| Principal | WebSocket upgrade authentication | Connection | Only as the session owner / caller |
-| Agent registration | PostgreSQL `agent_registrations` | Durable | No; an agent can be offline |
-| Presence binding | In-memory `AgentDirectory` | 90 s default TTL, renewed | Required for worker mutations |
-| Work row | PostgreSQL `work_items` | Durable | No; a queued row is not assigned |
-| Work lease | `work_items` token + deadline | 60 s default TTL | Yes, while current and unexpired |
-
-An AHP `initialize.clientId` labels the connection. A work request can select
-a target agent, but the wire adapter derives the caller's principal, executing
-agent, connection ID, and presence generation from the live binding.
-
-## Work state machine
+## Work state changes
 
 ```mermaid
 stateDiagram-v2
     [*] --> queued : submit
     queued --> leased : claim
-    leased --> queued : retry
+    leased --> leased : renew or reclaim an expired attempt
+    leased --> queued : retryable failure with attempts remaining
     leased --> completed : complete
-    leased --> failed : fail
+    leased --> failed : terminal failure or exhaustion
     queued --> cancelled : cancel
     leased --> cancelled : cancel
 ```
 
-Renew and reclaim both keep the `leased` status. Renewal extends the deadline
-for the current holder. Reclaim requires an expired lease and an available
-attempt. It keeps the work ID, increments `attempt_count`, and rotates the
-token. The old token cannot renew, complete, or fail the new attempt. A
-retryable failure with attempts left returns to `queued`. Terminal failures and
-expired leases with an exhausted attempt budget end in `failed`.
+A replacement claim keeps the work ID, increments the attempt and rotates the
+token. Bounded maintenance can mark an exhausted, expired lease failed. A
+worker that has lost authority may still be running outside the host. The
+application owns isolation, idempotency of external effects and artifact review.
 
-## Database model
+## Storage and verification
 
-The canonical relationship diagram and column rules are in
-[`database/M2_AGENT_WORK_DATABASE_SCHEMA.md`](../../database/M2_AGENT_WORK_DATABASE_SCHEMA.md).
-The executable DDL is in
-[`database/migrations/0001_session_tool_baseline.sql`](../../database/migrations/0001_session_tool_baseline.sql)
-and
-[`database/migrations/0002_agent_work.sql`](../../database/migrations/0002_agent_work.sql).
+The PostgreSQL adapter stores registrations and work under a durable logical
+host ownership fence. Session and canonical-resource lifecycle writes advance
+graph revisions. Retirement checks nonterminal work dependencies and eligible
+terminal history can later be purged in bounded batches.
+[Persistence](../../src/persistence/README.md) · [Migrations](../../database/migrations)
 
-Only `agent_registrations` and `work_items` are new for this slice. Presence,
-sockets, subscriptions, active client tools, and replay state intentionally have
-no SQL tables. Session disposal is rejected while any work row references the
-session; a submission that settles after its live session was disposed in a
-concurrent request triggers a best-effort cancel of the just-recorded row and a
-conflict reply. A failed cancel leaves the row behind, which keeps blocking
-disposal of the URI until it is resolved operationally.
+Run `pnpm exec vite-node examples/work-capacity.ts` for two workers sharing two
+sessions, reconnect, expiry and a successful replacement settlement. The
+advanced review example demonstrates distinct submitter, owner and executor
+principals. The dedicated PostgreSQL runner exercises two-pool epoch and
+capacity races against the real database.
+[Advanced review](../guides/advanced.md) · [PostgreSQL conformance](../guides/postgresql.md)
 
-Application services consume the database-neutral `PersistenceProvider`
-contract. The adapter registry currently defaults to PostgreSQL and owns the
-adapter selection and cleanup. The provider contract and in-memory conformance
-tests demonstrate substitution; they do not prove real database lock, rollback,
-or database-clock behavior.
-
-Run the [advanced review example](../guides/advanced.md) for the owner and
-worker flow over loopback. Use [PostgreSQL conformance](../guides/postgresql.md)
-to verify a local adapter against the real database.
-
-## Failure cases
-
-- **No authenticator / no principal:** agent and work methods fail closed; no
-  registration, presence, or work mutation occurs.
-- **Duplicate registration:** the same principal and `agentKey` resolve one
-  stable row. A second live connection cannot take over an unexpired binding.
-- **Stale presence generation:** renewal and worker mutations fail; durable work
-  and its lease remain.
-- **Duplicate submission:** the same immutable payload returns the original work
-  ID; a changed kind, input, or target is a conflict.
-- **Concurrent claim:** `FOR UPDATE ... SKIP LOCKED` grants at most one current
-  lease. The loser gets no work or a later eligible row.
-- **Expired lease:** renewal and completion are rejected as stale; a later claim
-  rotates the token and increments the attempt.
-- **Retry exhausted:** reconciliation marks the row `failed`; it cannot be
-  reclaimed.
-- **Worker disconnect:** the lease is not deleted. It remains until expiry, then
-  becomes reclaimable if attempts remain.
-- **Host restart:** registrations and work rows survive if PostgreSQL survives;
-  presence, sockets, subscriptions, and client tool advertisements do not.
-- **Session disposal:** rejected with a conflict while dependent work exists.
-
-## Security and safety boundaries
-
-- Static bearer tokens are a POC authentication adapter, not a production
-  identity system. Tokens are supplied through environment configuration and are
-  never logged or echoed. Use `wss` behind a trusted TLS terminator; the plain
-  `ws` examples bind loopback only.
-- Durable work is restricted to the session owner's principal, including any
-  targeted worker. The separate [tool authorization model](../../src/authorization/README.md)
-  supports scoped participant grants for private tool calls and resource access.
-- Lease fencing prevents an old worker from committing a result; it does not
-  provide OS isolation. Concurrent code-editing attempts must run in separate
-  workspaces, and a trusted evaluator must decide promotion.
-- The host does not execute stored task input. Work payloads are data for a
-  client worker, not server instructions.
-- Large artifacts should be referenced, not embedded in JSONB. Results are
-  bounded and may be exposed only to an authorized principal.
-
-## Current status and evidence
-
-**Implemented in code:** authentication boundary, registration/presence,
-versioned `x-ahp/agents/*` and `x-ahp/work/get` methods, bounded work service,
-database-neutral persistence contracts/facades, the PostgreSQL adapter,
-migrations, and unit/protocol tests.
-
-**Verification:** `pnpm validate` exercises service and wire behavior with local
-fixtures and checks PostgreSQL query shape offline. The [PostgreSQL guide](../guides/postgresql.md)
-describes the separate database run required to test SQL behavior.
-
-**Not implemented:** production identity/OIDC, cross-principal durable work, durable
-presence, event replay, server-side execution, workflow DAGs, and automatic
-wind-down of a worker that lost its lease. Work-kind eligibility is host-global
-in V1 — one configurable allow-list shared by every agent; per-agent kind grants
-from the task plan are deferred (a contract change, not a configuration task).
-There is also no retention path: `work_items` rows and the durable `sessions` row
-they first landed are never deleted (live disposal only removes in-memory
-state), so a retain/cancel-and-archive policy is required before production use.
-
-## Related documentation
-
-- [`docs/plans/ProvidersPlan.md`](../plans/ProvidersPlan.md) — M2 identity /
-  presence and M4 coordination boundaries.
-- [Durable relationships and schema invariants](../../database/M2_AGENT_WORK_DATABASE_SCHEMA.md)
-- [`src/work/README.md`](../../src/work/README.md) — application service.
-- [`src/agents/README.md`](../../src/agents/README.md) — authentication and
-  presence.
-- [`src/persistence/README.md`](../../src/persistence/README.md) — SQL adapters.
-- [`src/websocket/README.md`](../../src/websocket/README.md) — versioned wire
-  extension.
+[Agent directory](../../src/agents/README.md) · [Work service](../../src/work/README.md) · [WebSocket methods](../../src/websocket/README.md)

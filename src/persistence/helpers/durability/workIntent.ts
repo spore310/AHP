@@ -11,8 +11,11 @@ const text = (max: number) => z.string().min(1).max(max).refine((v) => v.trim().
 const fields = z.object({ kind: text(128), requestKey: text(256), priority: z.int32(), maxAttempts: z.int().min(1).max(100),
   targetAgentId: z.uuid().toLowerCase().nullable(), submitter: policyActorRefSchema });
 
+/** Durable validation also covers work accepted by hosts with a raised selector budget. */
+export const durableSelectionLimits = Object.freeze({ maxSelectors: 128 });
+
 function rules(input: readonly WorkResourceSelection[]): readonly WorkResourceSelection[] {
-  if (input.length > 128) throw new TypeError("Invalid work selection count.");
+  if (input.length > durableSelectionLimits.maxSelectors) throw new TypeError("Invalid work selection count.");
   const unique = new Map<string, WorkResourceSelection>();
   for (const rule of input) {
     const { include, includeDescendants } = rule;

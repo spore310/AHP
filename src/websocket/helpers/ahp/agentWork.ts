@@ -1,6 +1,5 @@
 import { AhpErrorCodes, JsonRpcErrorCodes } from "@microsoft/agent-host-protocol";
 import { z } from "zod";
-import { randomUUID } from "node:crypto";
 import { workRequestSchemas } from "@work/helpers/protocol/schemas";
 
 import { AgentDirectoryError, type AgentDirectory, type AuthenticatedPrincipal, type PresenceBinding } from "@agents";
@@ -8,6 +7,7 @@ import { RpcError } from "@jsonrpc";
 import { isPortableText, RepositoryError } from "@persistence";
 import { WorkError, type WorkReadPort, type AuthorizedWorkView, type WorkRequestContext, type WorkApproval } from "@work";
 import { workConnection } from "./workContext";
+import { createWorkMutationHandlers, type ProtectedWorkMutations } from "./workMutations";
 
 import type { JsonRpcHandler, JsonRpcHandlers, WebSocketConnectionContext } from "../../types";
 import {
@@ -24,6 +24,9 @@ export interface AgentWorkExtensionOptions {
 }
 
 export interface ProtectedWorkBinding {
+  bindingFailed?(error: unknown): void;
+  service?: ProtectedWorkMutations["service"];
+  worker?: ProtectedWorkMutations["worker"];
   agentKey(context: WebSocketConnectionContext): string | undefined;
   get(caller: WorkRequestContext, id: string): Promise<AuthorizedWorkView | null>;
   changed?(): void;
@@ -84,7 +87,7 @@ const notConfigured = (): never => {
 const mapRepositoryError = (error: RepositoryError): never => {
   switch (error.code) {
     case "outcome_unknown":
-      throw new RpcError(JsonRpcErrorCodes.InternalError, "Internal error", { version: 1, kind: "outcome_unknown", correlationId: randomUUID() });
+      throw new RpcError(JsonRpcErrorCodes.InternalError, "Internal error", { version: 1, kind: "outcome_unknown", correlationId: error.correlationId });
     case "conflict":
       return conflict();
     case "not_found":
@@ -180,6 +183,9 @@ export const createAgentWorkExtension = (
   };
 
   const handlers: Record<string, JsonRpcHandler> = {
+    ...(options.protectedWork?.service && options.protectedWork.worker
+      ? createWorkMutationHandlers({ service: options.protectedWork.service, worker: options.protectedWork.worker.bind(options.protectedWork) }, mapWorkError)
+      : {}),
     [AGENT_REGISTER_METHOD]: async (params, context) => {
       const principal = requirePrincipal(context);
       const agents = requireAgents();
@@ -189,37 +195,19 @@ export const createAgentWorkExtension = (
         const key = options.protectedWork ? options.protectedWork.agentKey(context) : actor.kind === "agent" ? actor.agentId : undefined;
         if (actor.kind !== "agent" || key !== parsed.agentKey) return invalid();
       }
-      // A connection holding another live agent can never bind a new one, so
-      // refuse before a durable registration row is created; there is no delete
-      // path to clean a stranded row up later. Re-registering the connection's
-      // own agent key stays allowed (the binding is idempotent).
-      const connected = agents.getByConnection(context.connectionId);
-      if (connected !== undefined) {
-        const bound = await agents.getRegistration(connected.agentId);
-        if (bound === undefined
-          || bound.principalSubject !== principal.subject
-          || bound.agentKey !== parsed.agentKey) {
-          conflict();
-        }
-      }
       try {
-        const registration = await agents.register(
-          principal,
-          parsed.agentKey,
-          parsed.displayName,
-        );
-        if (context.security && context.isSecurityCurrent?.() !== true) return invalid();
-        const binding = agents.bindPresence(
-          registration.id,
-          principal,
-          context.connectionId,
-        );
+        const binding = await agents.registerPresence(principal, parsed.agentKey, context.connectionId, {
+          ...(parsed.displayName === undefined ? {} : { displayName: parsed.displayName }),
+          ...(context.security && { current: () => context.isSecurityCurrent?.() === true }),
+          requireExecutionEpoch: options.protectedWork !== undefined,
+        });
         return {
           version: 1,
-          agentId: registration.id,
+          agentId: binding.agentId,
           presenceExpiresAt: toIso(binding.expiresAt),
         };
       } catch (error) {
+        options.protectedWork?.bindingFailed?.(error);
         return mapAgentError(error);
       }
     },

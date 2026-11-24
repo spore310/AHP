@@ -98,12 +98,12 @@ const registerAgent = async (
 };
 
 describe("agent work extension request surface", () => {
-  it("omits remote work mutations even when the service is configured", () => {
+  it("requires the protected command service to install V1 mutation handlers", () => {
     const { extension } = setup();
     for (const method of ["submit", "claim", "renew", "complete", "fail", "cancel", "updateData"]) {
       const name = `x-ahp/work/${method}`;
       expect(extension.handlers[name], name).toBeUndefined();
-      expect(AHP_REQUEST_METHODS.has(name), name).toBe(false);
+      expect(AHP_REQUEST_METHODS.has(name), name).toBe(true);
     }
   });
 

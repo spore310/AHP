@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { Client } from "pg";
 
 /** Drop a single acknowledgement after the real PostgreSQL transaction has committed. */
-export async function loseCommitAcknowledgement(prefix: string, marker: string, operation: () => Promise<unknown>): Promise<void> {
+export async function loseCommitAcknowledgement(prefix: string, marker: string, operation: () => Promise<unknown>): Promise<number> {
   // eslint-disable-next-line @typescript-eslint/unbound-method -- Reflect.apply preserves each client as receiver.
   const query = Client.prototype.query;
   let writer: unknown;
@@ -26,4 +26,6 @@ export async function loseCommitAcknowledgement(prefix: string, marker: string, 
     Client.prototype.query = query;
   }
   assert.equal(injected, true);
+  assert.ok(writer instanceof Client && "processID" in writer && typeof writer.processID === "number");
+  return writer.processID;
 }

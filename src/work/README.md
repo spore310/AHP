@@ -1,6 +1,6 @@
 # Work
 
-Work submissions resolve an exact session and its canonical resources. The service captures immutable intent, prepares trusted admission and commits through the acquired host’s work repository. Through P2 the remote binding exposes the protected detail read. The command service is available in process.
+Work submissions resolve an exact session and its canonical resources. The service captures immutable intent, prepares trusted admission and commits through the acquired host’s work repository. A configured protected host exposes V1 submit, claim, renew, complete, fail, cancel, updateData and get requests.
 
 ## Files
 
@@ -22,8 +22,12 @@ Work submissions resolve an exact session and its canonical resources. The servi
 | `helpers/errors.ts` | `WorkError`: sanitized `invalid`, `not_found`, `unauthorized`, `conflict`, `stale`, or `exhausted` failures. |
 | `helpers/helpers.ts` | Command factory and projection exports. |
 | `helpers/commands/types.ts` | Trusted contexts, commands, service ports and projections. |
+| `helpers/commands/facts.ts` | Detached, recursively frozen authority facts for trusted command and acquisition preparers. |
 | `helpers/commands/helpers.ts` | Strict capture, type resolution, submission, data updates and settlement. |
 | `helpers/commands/views.ts` | Detail and summary serializers. |
+| `helpers/commands/failure.ts` | Bounded application failure formatter, generic fallback and callback settlement. |
+| `helpers/claims/helpers.ts` | Priority candidate sweeps, private continuations, capacity admission, renewal and guarded claimant disclosure. |
+| `helpers/claims/admission.ts` | Captures native revocation signals and framework-issued scheduling receipts for locked admission. |
 | `helpers/executionGuard/helpers.ts` | Invalidates private work proofs before a mutation, including while its acknowledgement is pending. |
 | `helpers/authorityLoss/types.ts` | Consumer decisions and captured facts for the affected attempt. |
 | `helpers/authorityLoss/helpers.ts` | Paged authority checks, callback deadlines, retained capacity and fenced disposition. |
@@ -65,16 +69,47 @@ budget before normalization. Trusted overrides support up to 128 selectors,
 
 ## Commands
 
-Pass an acquired work repository, an exact session-type resolver and a trusted approval preparer to `createWorkService`. The preparer receives a detached, frozen copy of the facts. Its currentness check runs at storage admission and before the response returns. Each prepared approval has a release callback.
+Pass an acquired work repository, an exact session-type resolver and a trusted approval preparer to `createWorkService`. The preparer receives a detached, frozen copy of the facts. Claim and renewal use the locked scheduling receipts described below. Each prepared approval has a release callback.
 
 - `submit` resolves the scope and pins the actor, type configuration and signed 32-bit priority. An identical retry returns the original ID in every status, including after data changes or a lost commit acknowledgement. The unique key includes the session incarnation, kind and request key.
 - `get` returns an authorized detail projection. The list summary contains identity, priority, status, revision and timestamps. Lease secrets and immutable submitted data are private storage fields.
+- `claim` returns a private lease, an empty queue, a capacity result or a retryable deferral. A call examines up to 128 candidates in pages of 32. Priority descends, then creation time and ID ascend. A private continuation resumes a denied prefix on the same identity and authority. A locked work item can be skipped.
+- `renew` requires a current registration, attempt, token and unexpired deadline. The default identity cap is three across all sessions, kinds and binding epochs. A change to the cap affects the next acquisition. The default lease lasts 60 seconds.
 - `cancel` requires the operation's explicit scoped policy. The durable update checks the exact session and work revision.
 - `updateData` replaces the whole data object at the expected revision. The work revision and data revision advance together. A stale command changes neither.
-- `complete` and `fail` check the registration epoch, attempt, lease token, deadline and exact session before settlement. An optional final data update commits atomically. A failure records a generic summary. Direct execution requests must come from a matching trusted agent context.
+- `complete` and `fail` check the registration epoch, attempt, lease token, deadline and exact session before settlement. An optional final data update commits atomically. The default failure summary is generic. A configured formatter may return an application-approved code and summary. Direct execution requests must come from a matching trusted agent context.
 
 The [durable lifecycle example](../../examples/durable-lifecycle.ts) submits work scoped to one child, updates its data and retries the original submission. The [shared work contract](../tests/persistence/conformance/work.ts) runs on both storage adapters. The [service](../tests/work/workService.test.ts), [settlement](../tests/work/data.test.ts) and [selection](../tests/work/selections.test.ts) suites cover the in-process entry points.
 
 Tagged execution requires an active lease bound to the caller's registration and epoch. The host checks each resolved target against the captured scope, using the origin for an empty target list. It converts the remaining database lease lifetime into a conservative local monotonic deadline. Application permissions and the work guard are rechecked before effects and disclosure.
 
 An observed authority change schedules a bounded scan of active leases. Consumers can retain, requeue, fail or cancel the affected attempt. A missing decision, failure or timeout retains the lease until expiry. A timed-out callback occupies its slot through settlement. Every modifying decision checks the current revision, attempt and lease, and requeue also checks lifecycle, positive anchors and retry budget.
+
+### Scheduling admission
+
+The protected host prepares policy callbacks before entering the storage
+transaction. At the locked mutation boundary it checks captured registry and
+presence generations, allowed kinds, configuration, policy expiration and
+revocation. Capacity-only changes affect new acquisition. Existing eligible
+leases can still renew.
+
+A custom work service that enables scheduling must supply
+`scheduling.admission(caller, approval, operation, kind, configRevision)`.
+Return a native `AbortSignal` that aborts synchronously when the prepared
+caller, permission, or kind becomes ineligible. For a claim, also abort on a
+configuration revision change. A decision with a deadline returns
+`{ signal, validUntil }` with its epoch-millisecond expiry. Durable lease and registration checks still
+run inside the storage transaction. The public caller and approval can use
+their standard `isCurrent` methods for checks outside the locks.
+
+An application narrowing receipt for claim or renewal must supply either
+`signal` or `invalidation: "registry"` together with its normal `validUntil`,
+`isCurrent`, and `release`. For registry-based invalidation, call
+`registry.invalidateExternal(revision)` synchronously when the underlying
+decision changes. A callback alone cannot revoke a decision during a row-lock
+wait.
+
+The protected connection's expiry and closure also guard a pending claim or
+renewal. Its initial authority provider must report early withdrawal by
+aborting the receipt's native signal or, when the receipt declares
+`invalidation: "registry"`, synchronously calling `registry.invalidateExternal(revision)`.

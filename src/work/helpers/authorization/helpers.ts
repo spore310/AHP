@@ -10,6 +10,7 @@ import { captureWorkIntent, sameWorkIntent } from "@persistence/helpers/durabili
 import { resolveWorkKind } from "../definitions";
 import type { WorkAgentContext, WorkRequestContext } from "../commands/types";
 import { WorkError } from "../errors";
+import { captureSignal, issueWorkApproval } from "../claims/admission";
 import { samePolicy, workOperations } from "./registration";
 import type { WorkAuthorizerOptions, WorkOperation, WorkPolicyFacts, WorkPolicyRestriction } from "./types";
 
@@ -45,8 +46,8 @@ function current(check: () => unknown): boolean {
 function factsCopy<T>(input: T): T {
   return captureValue(input, { maxBytes: 512 * 1024, maxDepth: 24, maxKeys: 20000, postgres: true }).value as T;
 }
-interface Restriction { readonly validUntil: number; readonly isCurrent: () => boolean; release(): void }
-function restriction(value: WorkPolicyRestriction | null | undefined): Restriction {
+interface Restriction { readonly validUntil: number; readonly isCurrent: () => boolean; readonly active?: () => boolean; release(): void }
+function restriction(value: WorkPolicyRestriction | null | undefined, scheduling: boolean): Restriction {
   if (!value || typeof value.release !== "function") return deny();
   const drop: () => unknown = value.release.bind(value);
   const release = () => {
@@ -58,7 +59,9 @@ function restriction(value: WorkPolicyRestriction | null | undefined): Restricti
     const effect: unknown = value.effect;
     if (effect === "deny") return refused();
     if (value.effect !== "allow" || !Number.isSafeInteger(value.validUntil) || typeof value.isCurrent !== "function") return deny();
-    return { validUntil: value.validUntil, isCurrent: value.isCurrent.bind(value), release };
+    if (scheduling && value.signal === undefined && value.invalidation !== "registry") return deny();
+    const active = value.signal === undefined ? undefined : captureSignal(value.signal);
+    return { validUntil: value.validUntil, isCurrent: value.isCurrent.bind(value), active, release };
   } catch (error) {
     release();
     throw error;
@@ -95,7 +98,7 @@ export function createWorkAuthorizer(options: WorkAuthorizerOptions) {
     const before = registry.captureFence();
     const deadline = Date.now() + deadlineMs;
     const cancelled = Promise.withResolvers<never>();
-    const callerActive = () => !caller.signal.aborted;
+    const callerActive = captureSignal(caller.signal);
     const stop = () => {
       controller.abort();
       cancelled.reject(new WorkError("unauthorized", "Work preparation expired."));
@@ -137,12 +140,21 @@ export function createWorkAuthorizer(options: WorkAuthorizerOptions) {
       if (["claim", "renew", "complete", "fail"].includes(operation) && !bound) return deny();
       if (bound && (actor.actor.kind !== "agent" || actor.actor.agentId !== bound.actorAgentId || !agentCaller.executionEpoch
         || !isDeepStrictEqual(actor.actor.principal, bound.principal))) return deny();
-      if (operation === "claim" && ((intent.targetAgentId && bound?.registrationId !== intent.targetAgentId)
-        || (row && (row.status !== "queued" || row.attemptCount >= row.maxAttempts)))) return deny();
       const lease = row?.lease;
-      const leaseDeadline = lease ? Date.parse(lease.expiresAt) : 0;
+      let leaseDeadline = 0, expiredAtSource = false;
+      if (bound && row && lease) {
+        const sampled = performance.now();
+        const snapshot = await options.sampleLease?.({ session: durable.ref, id: row.id, revision: row.revision });
+        if (!snapshot || snapshot.expiresAt !== lease.expiresAt || !preparing()) return deny();
+        const remaining = Date.parse(lease.expiresAt) - snapshot.databaseTime;
+        leaseDeadline = sampled + remaining;
+        expiredAtSource = remaining <= 0;
+      }
+      if (operation === "claim" && ((intent.targetAgentId && bound?.registrationId !== intent.targetAgentId)
+        || (row && ((row.status !== "queued" && !(row.status === "leased" && expiredAtSource))
+          || row.attemptCount >= row.maxAttempts)))) return deny();
       const executing = bound && row?.status === "leased" && lease?.registrationId === bound.registrationId
-        && lease.executionEpoch === agentCaller.executionEpoch && leaseDeadline > Date.now();
+        && lease.executionEpoch === agentCaller.executionEpoch && leaseDeadline > performance.now();
       if (["renew", "complete", "fail"].includes(operation) && !executing) return deny();
       const entities = { submitter: policyActorRefSchema.parse(intent.submitter), owner, ...((operation === "claim" || executing) && bound && { executor: {
         registrationId: bound.registrationId, principal: actor.actor.principal, actorAgentId: bound.actorAgentId, agentKey: bound.agentKey } }) };
@@ -223,7 +235,7 @@ export function createWorkAuthorizer(options: WorkAuthorizerOptions) {
       if (!stillCurrent() || !preparing()) return deny();
       if (work.prepare) {
         for (const facts of policyFacts) {
-          const receipt = restriction(await work.prepare(facts, controller.signal));
+          const receipt = restriction(await work.prepare(facts, controller.signal), operation === "claim" || operation === "renew");
           if (!preparing()) {
             receipt.release();
             return deny();
@@ -232,12 +244,12 @@ export function createWorkAuthorizer(options: WorkAuthorizerOptions) {
           if (!stillCurrent() || !preparing()) return deny();
         }
       }
-      const validUntil = Math.min(...proofs.map((proof) => proof.validUntil), ...restrictions.map((receipt) => receipt.validUntil),
-        executing ? leaseDeadline : Infinity);
-      const fence = (): boolean => !released && !caller.signal.aborted && before() && Date.now() < validUntil;
+      const validUntil = Math.min(...proofs.map((proof) => proof.validUntil), ...restrictions.map((receipt) => receipt.validUntil));
+      const fence = (): boolean => !released && callerActive() && before() && Date.now() < validUntil && restrictions.every((receipt) => receipt.active?.() !== false)
+        && (!executing || performance.now() < leaseDeadline);
       const isCurrent = (): boolean => fence() && restrictions.every((receipt) => current(receipt.isCurrent)) && current(stillCurrent) && fence();
       if (!isCurrent() || !preparing()) return deny();
-      return Object.freeze({ isCurrent, fence, release });
+      return issueWorkApproval(Object.freeze({ isCurrent, fence, release }), fence);
     };
     pending += 1;
     try {

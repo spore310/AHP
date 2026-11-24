@@ -3,7 +3,7 @@ import { expect, it, vi } from "vitest";
 import { openWorkClient } from "../../../examples/advanced/work";
 import { observableStorage, sessionHost } from "../sessions/durableFixture";
 
-it("reads the canonical work detail only for the ready incarnation's owner and keeps remote mutations closed", async () => {
+it("reads the ready incarnation's authorized detail and denies mutations from an unbound worker", async () => {
   const pending = Promise.withResolvers<undefined>();
   const deliver = Promise.withResolvers<undefined>();
   let park = false;
@@ -74,7 +74,7 @@ it("reads the canonical work detail only for the ready incarnation's owner and k
       cancel: body,
     };
     for (const [method, params] of Object.entries(requests)) {
-      await expect(owner.request("x-ahp/work/" + method, params)).rejects.toThrow();
+      await expect(other.request("x-ahp/work/" + method, params)).rejects.toThrow();
     }
     expect(mutations).not.toHaveBeenCalled();
     expect(await work.get(session.domainId, id)).toEqual(before);

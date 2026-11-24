@@ -1,7 +1,11 @@
 import { assertDurableResourceConformance } from "../../conformance/helpers";
 import { createPostgresDurableStorage } from "@persistence/helpers/adapters/postgres";
 import { testPublicLifecycle } from "./publicLifecycle";
+import { verifyInitialClaimAuthority } from "./p3InitialAuthority";
 import { testWorkAuthorityStorage } from "./p2Work";
+import { testPostgresScheduling } from "./p3Work";
+import { verifyAgentEpochs } from "./p3Epochs";
+import { verifyWorkClock } from "./p3Clock";
 import { testWorkSettlement } from "./p1Work";
 import { testP1Schema } from "./p1Schema";
 import { assertWorkDataConformance } from "../../conformance/work";
@@ -294,6 +298,10 @@ export const runP0PostgresConformance = async (input: string): Promise<void> => 
       } finally {
         await provider.dispose();
       }
+      await testPostgresScheduling(url.href, first, second, waitForBlocker);
+      await verifyAgentEpochs(url.href);
+      await verifyWorkClock(url.href, first);
+      await verifyInitialClaimAuthority(url.href, first, waitForBlocker);
     } finally {
       await Promise.all([first.end(), second.end()]);
       await admin.query(`DROP SCHEMA ${schema} CASCADE`);

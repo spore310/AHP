@@ -14,6 +14,8 @@ PostgreSQL implements the production storage adapter.
 | `helpers/durability/workFences.ts` | Synchronous readers tied to the acquired host, exact session lifecycle and work revision. |
 | `helpers/durability/workIntent.ts` | Canonical work capture and structural replay equality. |
 | `helpers/durability/memoryWork.ts` | Work admission, quotas, data CAS and settlement over the same records used for retirement. |
+| `helpers/durability/memoryScheduling.ts` | In-memory candidate ordering, identity-wide capacity, lease renewal and bounded exhaustion. |
+| `helpers/durability/scheduling.ts` | Shared preparation bounds and synchronous admission against exact, detached session and work records. |
 | `helpers/durability/helpers.ts` | Bounded data capture, resource identities and graph order. |
 | `helpers/durability/memory.ts` | Single-owner in-memory lifetime, revisions and retirement transactions. |
 | `types.ts` | Repository ports, plain DTOs, `PersistenceProvider`, and `RepositoryError`. |
@@ -122,12 +124,17 @@ work fixture, and PostgreSQL query doubles. The opt-in PostgreSQL 17 runner
 exercises migrations 0003 and 0004, ownership takeover, blocked registration shutdown,
 concurrent resource writes, exact-instance retirement, purge, public host recovery,
 deferred positive-scope constraints, replay at full quota and atomic fenced settlement.
+Two independent pools exercise claims, renewal, registration epochs and capacity
+across sessions. The same scheduling contract runs against the in-memory repository.
+Durable admission and requeue support up to 128 exact selectors per set. The
+work service applies its configured selector budget at the request boundary.
 
 | Test | Pins |
 | ---- | ---- |
 | [`src/tests/persistence/contracts.test.ts`](../tests/persistence/contracts.test.ts) | Provider shape and neutral contract constraints. |
 | [`src/tests/persistence/facade.test.ts`](../tests/persistence/facade.test.ts) | Exact delegation, receiver preservation, shared draining, and no driver evaluation. |
 | [`src/tests/persistence/conformance.test.ts`](../tests/persistence/conformance.test.ts) | Example provider durability and closed mutations, historical work fixture and provider substitution. |
+| [`src/tests/persistence/scheduling.test.ts`](../tests/persistence/scheduling.test.ts) | Bound capacity, exact lease attempts, stale epochs and bounded expiry against the memory repository. |
 | [`src/tests/persistence/adapters/postgres/`](../tests/persistence/adapters/postgres/) | Driver-double unit tests and opt-in PostgreSQL 17 conformance. |
 
 The explicit real-database conformance runner is

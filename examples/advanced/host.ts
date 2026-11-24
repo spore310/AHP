@@ -17,6 +17,7 @@ import { createExamplePersistence } from "./persistence";
 
 export const channel = "ahp-session:/review";
 export const reviewWorkerKey = "review-worker-v1";
+export const backupWorker = { domainId: "demo", subject: "backup", actorAgentId: "backup-agent", agentKey: "backup-worker-v1" } as const;
 const reviewActorId = "review-agent";
 const domainId = "demo";
 const sessionType = { key: "example.review", version: 1 };
@@ -31,6 +32,7 @@ const operations = ["discover", "invoke", "advertise", "execute", "propose", "ap
 const roles = {
   "senior": ["discover", "invoke", "advertise", "execute", "propose", "publish", "activate", "project", "work-read", "work-manage"],
   "junior": ["discover", "invoke", "advertise", "execute"],
+  "backup": ["work-execute"],
   "pm": ["discover", "approve"],
   "observer": ["discover"],
   "host-action": ["execute"],
@@ -39,6 +41,7 @@ export type Subject = Exclude<keyof typeof roles, "host-action">;
 
 export function actorFor(subject: keyof typeof roles): PolicyActorRef {
   const principal = { domainId, subject };
+  if (subject === "backup") return { kind: "agent", principal, agentId: backupWorker.actorAgentId };
   return subject === "junior" ? { kind: "agent", principal, agentId: reviewActorId } : { kind: "user", principal };
 }
 
@@ -87,6 +90,8 @@ export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
   readonly restoration?: import("@sessions").SessionTypePolicyRegistration["restoration"];
   readonly persistence?: import("@persistence").PersistenceProvider;
   readonly nativeWrites?: import("@websocket").NativeSessionWrites;
+  readonly initialAuthority?: import("@websocket/helpers/security").InitialAuthoritySource;
+  readonly capacityDemo?: { readonly leaseMs: number; readonly configuration: import("@agents").AgentWorkConfig };
 }) {
   const { admitted, namespaces } = createExamplePolicyAdmission(mode, definitions);
   const rules = { admitted, mandatory: [providerPolicy] };
@@ -124,12 +129,12 @@ export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
   const authenticator: ConnectionAuthenticator = { authenticate: ({ headers }) => {
     const token = headers["sec-websocket-protocol"];
     const subject = typeof token === "string" && token.startsWith("demo-") ? token.slice(5) : "";
-    return Promise.resolve(subject !== "host-action" && Object.hasOwn(roles, subject) ? { subject } : undefined);
+    return Promise.resolve(subject !== "host-action" && (subject !== "backup" || lifecycle?.capacityDemo) && Object.hasOwn(roles, subject) ? { subject } : undefined);
   } };
   const composition: SecurityComposition = {
     identity: createLegacyConnectionIdentityAdapter({ authenticator, domainId }),
     actors: { resolve: ({ principal, connectionId, authRevision }) => Promise.resolve({ actor: actorFor(principal.subject as Subject),
-      connectionId, authRevision, ...(principal.subject === "junior" ? { agentGeneration: 1, delegationRef: "demo-junior-delegation" } : {}) }) },
+      connectionId, authRevision, ...(["junior", "backup"].includes(principal.subject) ? { agentGeneration: 1, delegationRef: "demo-" + principal.subject + "-delegation" } : {}) }) },
     bindings: { read: () => Promise.resolve([]) },
     resources: { resolve: () => Promise.reject(new Error("No initial scope needed.")) },
     freshness: { current: () => Promise.resolve({ domainId, revision: 1, invalidated: false }), invalidate: () => Promise.resolve() },
@@ -200,12 +205,18 @@ export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
     serverToolExecution: { registry, policies, dispatcher, resolve: ({ origin: resource }) => routeFor(resource), registrations: [serverTool],
       executor: { context: executorContext, generation: 1, current: () => true, fence: () => true } },
     agentWork: { registrations: persistence.registrations, work: persistence.work, allowedKinds: new Set(["code.review"]),
-      agentMappings: [{ domainId, subject: "junior", actorAgentId: reviewActorId, agentKey: reviewWorkerKey }],
+      ...lifecycle?.capacityDemo,
+      agentMappings: [{ domainId, subject: "junior", actorAgentId: reviewActorId, agentKey: reviewWorkerKey }, ...(lifecycle?.capacityDemo ? [backupWorker] : [])],
       ceiling: { admitted: { policies: [workPolicy, submitPolicy], namespaces: [] }, mandatory: [providerPolicy] }, dispose: () => persistence.dispose() },
-    security: { composition, workDomainId: domainId, initialAuthority: { prepare: ({ context, fence }) => {
+    security: { composition, workDomainId: domainId, initialAuthority: { async prepare(input) {
+      const { context, fence } = input;
+      const seed = await lifecycle?.initialAuthority?.prepare(input) ?? { scopes: [], allowGlobalSequence: true, validUntil: Date.now() + 60_000,
+        signal: input.signal, isCurrent: () => true, release() {} };
       connections.set(context.connectionId, { context, fence });
-      return Promise.resolve({ scopes: [], allowGlobalSequence: true, validUntil: Date.now() + 60_000,
-        isCurrent: () => connections.has(context.connectionId), release: () => { connections.delete(context.connectionId); } });
+      return { ...seed, isCurrent: () => connections.has(context.connectionId) && seed.isCurrent(), release() {
+        connections.delete(context.connectionId);
+        seed.release();
+      } };
     } } },
   });
 
@@ -227,26 +238,28 @@ export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
     const { context, fence } = connection(subject);
     allowExecutor(subject, definition, { actor: context.actor, connectionId: fence.connectionId, generation: fence.connectionGeneration, registrationRevision }, implementation);
   };
-  const provision = async (workingDirectories?: readonly string[]): Promise<void> => {
+  const provision = async (workingDirectories?: readonly string[], sessionId = channel): Promise<void> => {
     const authorization = host.sessions.authorization;
     assert.ok(authorization);
     const context: TrustedRequestContext = { actor: actorFor("senior"), connectionId: "demo-session-setup", authRevision: "demo" };
-    await authorization.createSession({ channel, ...(workingDirectories ? { workingDirectories } : {}) }, { context, connectionId: context.connectionId, connectionGeneration: 1,
+    await authorization.createSession({ channel: sessionId, ...(workingDirectories ? { workingDirectories } : {}) }, { context, connectionId: context.connectionId, connectionGeneration: 1,
       validUntil: Date.now() + 30_000, signal: new AbortController().signal, isCurrent: () => true });
-    const resource = authorization.getResource(channel);
+    const resource = authorization.getResource(sessionId);
     assert.ok(resource);
-    origin = resource;
+    if (sessionId === channel) origin = resource;
+    const grantId = (label: string) => sessionId === channel ? label : label + "-" + resource.instanceId;
     for (const [subject, scopedRoles] of Object.entries(roles) as [keyof typeof roles, string[]][]) registry.installBinding({
-      id: "demo-" + subject, actor: actorFor(subject), scope: origin, roles: scopedRoles,
+      id: grantId("demo-" + subject), actor: actorFor(subject), scope: resource, roles: scopedRoles,
       policies: [policy, providerPolicy, challengePolicy, projectionPolicy, activationPolicy, workPolicy], revision: 1,
       authority: subject === "junior"
-        ? { kind: "delegation", issuer: actorFor("senior"), parentGrantId: "demo-senior" }
+        ? { kind: "delegation", issuer: actorFor("senior"), parentGrantId: grantId("demo-senior") }
         : { kind: "host-policy", policy },
     });
-    registry.installBinding({ id: "demo-junior-work", scope: origin, actor: actorFor("junior"), roles: ["work-execute"],
+    registry.installBinding({ id: grantId("demo-junior-work"), scope: resource, actor: actorFor("junior"), roles: ["work-execute"],
       policies: [workPolicy], revision: 1, authority: { kind: "host-policy", policy: workPolicy } });
-    registry.installBinding({ id: "demo-pm-submit", scope: origin, actor: actorFor("pm"), roles: ["submit-review"],
+    registry.installBinding({ id: grantId("demo-pm-submit"), scope: resource, actor: actorFor("pm"), roles: ["submit-review"],
       policies: [submitPolicy], revision: 1, authority: { kind: "host-policy", policy: submitPolicy } });
+    if (sessionId !== channel) return;
     allowTool("senior", clientTool, ["discover", "invoke"], true);
     allowTool("junior", clientTool, ["discover", "invoke", "advertise"], true);
     allowTool("pm", clientTool, ["discover"]);

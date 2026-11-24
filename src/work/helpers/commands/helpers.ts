@@ -9,6 +9,9 @@ import { captureWorkSelectionInput, createWorkSelectionGraph } from "../selectio
 import { WorkError } from "../errors";
 import { createWorkFences } from "../executionGuard/helpers";
 import { createAuthorityLossMonitor } from "../authorityLoss/helpers";
+import { createWorkAcquisition } from "../claims/helpers";
+import { createFailureFormatter } from "./failure";
+import { immutableFacts } from "./facts";
 import { workDetail } from "./views";
 import type { WorkAgentContext, WorkCommandOptions, WorkExecutionRef, WorkRequestContext, WorkService } from "./types";
 
@@ -42,17 +45,6 @@ function approved(value: unknown): boolean {
   if (value !== true) void Promise.resolve(value).catch(() => undefined);
   return value === true;
 }
-/** Facts handed to trusted application callbacks remain detached from the command being committed. */
-function immutableFacts<T extends WorkIntent>(value: T): T {
-  const copy = structuredClone(value);
-  const visit = (entry: unknown) => {
-    if (!entry || typeof entry !== "object" || Object.isFrozen(entry)) return;
-    Object.freeze(entry);
-    for (const child of Object.values(entry)) visit(child);
-  };
-  visit(copy);
-  return copy;
-}
 function executionFence(caller: WorkRequestContext, id: string, execution?: WorkExecutionRef): WorkFence["execution"] {
   if (!execution) return undefined;
   const command = capture(executionSchema, execution);
@@ -67,8 +59,17 @@ function executionFence(caller: WorkRequestContext, id: string, execution?: Work
 export function createWorkService(options: WorkCommandOptions): WorkService {
   const heads = createWorkFences();
   let closed = false;
+  let pendingCommands = 0;
+  let settling = 0;
+  const report = (event: import("./types").WorkDiagnosticEvent, correlationId?: string) => {
+    try {
+      void Promise.resolve(options.onDiagnostic?.(event, correlationId)).catch(() => undefined);
+    } catch { /* Best-effort diagnostics. */ }
+  };
+  const acquisition = createWorkAcquisition(options, report);
+  const failureFormatter = createFailureFormatter(options.authorityLoss);
   const monitor = options.authorityLoss && createAuthorityLossMonitor({ ...options.authorityLoss,
-    repository: options.repository.bind(options), mutate: heads.mutate.bind(heads) });
+    repository: options.repository.bind(options), mutate: heads.mutate.bind(heads), onLoss: () => { report("authorityLoss"); } });
   const limits = Object.freeze({ ...(options.limits ?? { session: 1000, host: 10000 }) });
   const selectionLimits = Object.freeze({ ...options.selectionLimits });
   if (![limits.session, limits.host].every((v) => Number.isSafeInteger(v) && v > 0)) return invalid();
@@ -90,7 +91,11 @@ export function createWorkService(options: WorkCommandOptions): WorkService {
     let transferred = false;
     try {
       if (!admit()) return unavailable();
-      const result = await run(admit);
+      let result: T;
+      settling++;
+      try {
+        result = await run(admit);
+      } finally { settling--; }
       if (!admit()) return unavailable();
       if (caller.retainReply) {
         caller.retainReply({ isCurrent: admit, release: () => {
@@ -100,6 +105,7 @@ export function createWorkService(options: WorkCommandOptions): WorkService {
       }
       return result;
     } catch (err) {
+      if (err instanceof RepositoryError && err.code === "outcome_unknown") report("storageOutcomeUnknown", err.correlationId);
       if (err instanceof RepositoryError && err.code === "conflict") throw new WorkError("conflict", "Work state or capacity changed.");
       throw err;
     } finally { if (!transferred) approval.release(); }
@@ -160,17 +166,37 @@ export function createWorkService(options: WorkCommandOptions): WorkService {
     const { row, store, kind, graph } = await lookup(caller, execution.workId) ?? unavailable();
     const graphRevision = requireAnchors(row, graph);
     const data = input.data && { expectedDataRevision: input.data.expectedDataRevision, data: checked(() => kind.parseData(input.data?.data)) };
-    const operation = "retryable" in input
-      ? { status: "failed" as const, retryable: input.retryable, code: "worker_failure", summary: "Work execution failed.", data }
-      : { status: "completed" as const, result: checked(() => kind.parseResult(input.result)), data };
-    return authorized(caller, operation.status === "completed" ? "complete" : "fail", row, row,
-      (admit) => heads.mutate(row.id, () => store.settle({ id: row.id, session: row.session, revision: row.revision, execution: proof, graphRevision }, operation, admit)));
+    return authorized(caller, "retryable" in input ? "fail" : "complete", row, row, async (admit) => {
+      const current = await store.inspect(row.session.domainId, row.id);
+      const lease = current?.row.lease;
+      if (!proof || !lease || !current.registration?.enabled || current.registration.epoch !== proof.executionEpoch
+        || lease.registrationId !== proof.registrationId || lease.executionEpoch !== proof.executionEpoch || Date.parse(lease.expiresAt) <= current.databaseTime
+        || lease.attempt !== proof.attempt || lease.leaseToken !== proof.leaseToken) {
+        report("staleLeaseRejected");
+        throw new WorkError("stale", "Work attempt changed.");
+      }
+      if (current.row.revision !== row.revision || !admit()) return unavailable();
+      const operation = "retryable" in input
+        ? { status: "failed" as const, retryable: input.retryable, data, ...await failureFormatter.format({ workId: row.id, kind: row.kind,
+            attempt: execution.attempt, reported: { code: input.code, message: input.message, retryable: input.retryable } }, caller.signal) }
+        : { status: "completed" as const, result: checked(() => kind.parseResult(input.result)), data };
+      if (!admit()) return unavailable();
+      return heads.mutate(row.id, () => store.settle({ id: row.id, session: row.session, revision: row.revision, execution: proof, graphRevision }, operation, admit));
+    });
   }
-  return {
-    authorityChanged() { monitor?.signal(); },
+  const service: WorkService = {
+    claim: acquisition.claim,
+    renew: acquisition.renew,
+    stats: () => ({ ...acquisition.stats(), pending: pendingCommands + acquisition.stats().pending, settling, pendingAuthorityLoss: monitor?.pending() ?? 0 }),
+    authorityChanged() {
+      acquisition.changed();
+      monitor?.signal();
+    },
     async authorityIdle() { await monitor?.idle(); },
     close() {
       closed = true;
+      acquisition.close();
+      failureFormatter.close();
       heads.close();
       monitor?.close();
     },
@@ -269,6 +295,7 @@ export function createWorkService(options: WorkCommandOptions): WorkService {
               state.changed = locked?.id !== previous?.id || locked?.revision !== previous?.revision;
               return !state.changed && admit();
             }));
+          if (result.created) report("submitted");
           return { id: result.id };
         } catch (error) {
           if ((!state.changed && observation?.current() !== false) || !current(caller)
@@ -306,4 +333,17 @@ export function createWorkService(options: WorkCommandOptions): WorkService {
     async complete(caller, execution, command) { await settle(caller, execution, capture(completionSchema, command)); },
     async fail(caller, execution, command) { return { status: (await settle(caller, execution, capture(failureSchema, command))).status }; },
   };
+  function bounded<Args extends unknown[], T>(run: (...args: Args) => Promise<T>) {
+    return async (...args: Args) => {
+      if (closed || pendingCommands >= 64) throw new WorkError("exhausted", "Work admission is unavailable.");
+      pendingCommands++;
+      try {
+        return await run(...args);
+      } finally { pendingCommands--; }
+    };
+  }
+  return { ...service, submit: bounded(service.submit.bind(service)), get: bounded(service.get.bind(service)),
+    cancel: bounded(service.cancel.bind(service)), updateData: bounded(service.updateData.bind(service)),
+    complete: bounded(service.complete.bind(service)), fail: bounded(service.fail.bind(service)),
+    prepareExecutionGuard: bounded(service.prepareExecutionGuard.bind(service)) };
 }

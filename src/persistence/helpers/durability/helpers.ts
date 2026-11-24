@@ -2,6 +2,8 @@ import { captureValue } from "@jsonrpc/helpers/value/helpers";
 import { resourceRefSchema, type ResourceRef } from "@authorization";
 import type { JsonObject, ResourceRecord } from "./types";
 
+export const memoryResourceKey = (ref: ResourceRef): string => JSON.stringify([ref.domainId, ref.kind, ref.id, ref.instanceId]);
+
 /** Only an interrupted, unprovisioned session may re-enter provider startup. */
 export function canRetrySessionStart(record: ResourceRecord): boolean {
   return record.ref.kind === "session" && (record.lifecycle === "failed" || record.lifecycle === "suspended")

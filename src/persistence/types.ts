@@ -26,6 +26,10 @@ export interface AgentRegistrationLimits {
 }
 
 export interface AgentRegistrationRepository {
+  /** Allocates an execution generation only for this exact, enabled identity. */
+  bindExecution?(record: AgentRegistrationRecord): Promise<AgentRegistrationRecord>;
+  /** A state change advances the epoch atomically. */
+  setEnabled?(id: string, domainId: string, enabled: boolean): Promise<AgentRegistrationRecord>;
   /** Idempotently resolves the row for one verified principal and agent key. */
   register(input: {
     readonly domainId?: string;
@@ -172,11 +176,13 @@ export interface PersistenceProvider extends PersistenceRepositories {
 export type RepositoryErrorCode = "conflict" | "not_found" | "unauthorized" | "database" | "outcome_unknown";
 
 export class RepositoryError extends Error {
+  readonly correlationId: string | undefined;
   constructor(
     readonly code: RepositoryErrorCode,
     message: string,
   ) {
     super(message);
     this.name = "RepositoryError";
+    this.correlationId = code === "outcome_unknown" ? globalThis.crypto.randomUUID() : undefined;
   }
 }

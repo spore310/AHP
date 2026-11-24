@@ -9,6 +9,7 @@ export const AGENT_WORK_REQUEST_METHODS: ReadonlySet<string> = new Set([
   AGENT_RENEW_METHOD,
   AGENT_UNREGISTER_METHOD,
   WORK_GET_METHOD,
+  ...["submit", "claim", "renew", "complete", "fail", "cancel", "updateData"].map((operation) => `x-ahp/work/${operation}`),
 ]);
 
 /** Project-owned private tool protocol; native AHP remains unchanged. */

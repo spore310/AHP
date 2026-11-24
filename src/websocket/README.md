@@ -57,6 +57,7 @@ host fences prevent reuse even though standalone factories may be reused.
 | `helpers/security/helpers.ts` | Captured limits, scoped read preparation, identity/actor/resource/binding validation, bounded snapshot freshness and release. |
 | `helpers/security/index.ts` | Internal security orchestration and type exports. |
 | `helpers/ahp/agentWork.ts` | Authenticated agent registration/presence and work request handlers, schemas, and error mapping. |
+| `helpers/ahp/workMutations.ts` | Strict V1 work commands with host-derived agent identity and response checks through final send. |
 | `helpers/ahp/workContext.ts` | Captures a protected caller with its connection lifetime and current setup. |
 | `helpers/host/work.ts` | Composes work authorization, exact agent mappings, lease loss handling and private tool guards. |
 | `helpers/ahp/toolInvocation.ts` | Namespaced client-executed tool calls, accepted executor ownership, contract validation, and settlement. |
@@ -246,9 +247,9 @@ const server = createWebSocketServer({
   an unavailable incarnation returns `work: null`. Protected replies recheck
   the connection, captured work policy and original session at send.
   A protected host without a canonical work configuration returns an empty read.
-  Remote work mutation methods stay closed through P2.
+  The canonical work service installs strict V1 mutation handlers. Claims, renewals and settlements derive the agent and epoch from the active connection. The public capacity example exercises two sessions and a per-agent override. [Work capacity](../../examples/work-capacity.ts)
   `durableWorkRead.test.ts` checks the projected reply on a real connection,
-  cross-owner denial, stale session replacement and zero remote work writes.
+  cross-owner denial, stale session replacement and zero writes from a denied caller.
 - **Trusted contextual creation owns exactly its creator.** Protected callers use
   `host.sessions.authorization.createSession(params, context)` (no native cursor
   prerequisite in-process); context-free create rejects. Public native create also
@@ -286,6 +287,13 @@ cannot use native initialize without permitting that host-wide cursor, because
 the pinned protocol requires the real current serverSeq. Protected native views
 preserve this sequence; private v2 tool execution uses separate correlated messages.
 Legacy agentWork authentication by itself does not establish this metadata permission.
+
+Hosted work claim and renewal also require each connection's initial-authority
+receipt to provide a native revocation `signal` or declare
+`invalidation: "registry"` and synchronously invalidate the canonical work
+registry on withdrawal. This fences the mutation while storage locks are held.
+Callback-only initial authority remains supported for native transport operations.
+[Provider migration example](../../docs/guides/advanced.md)
 The application selects existing full resource incarnations and grant revisions; setup calls
 `resources.resolve` and `bindings.read({actor,scope,grantRevision})` exactly. It
 never issues/installs grants or manufactures resources. A synchronous seed guard

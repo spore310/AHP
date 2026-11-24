@@ -1,4 +1,5 @@
 import type { DurableHost } from "./types";
+import { synchronousAdmission } from "./scheduling";
 
 /** All writes on an acquired host invalidate affected synchronous readers before touching the store. */
 export function fenceHostWork(host: DurableHost): DurableHost {
@@ -13,15 +14,31 @@ export function fenceHostWork(host: DurableHost): DurableHost {
   function cleanup(k: string, value: State) {
     if (value.readers === 0 && value.writers === 0) states.delete(k);
   }
-  async function write<T>(k: string, run: () => Promise<T>) {
+  function begin(k: string) {
     const value = state(k);
     value.writers++;
     value.revision++;
+    return () => {
+      value.writers--;
+      cleanup(k, value);
+    };
+  }
+  async function write<T>(k: string, run: () => Promise<T>) {
+    const end = begin(k);
     try {
       return await run();
     } finally {
-      value.writers--;
-      cleanup(k, value);
+      end();
+    }
+  }
+  async function selectedWrite<T>(run: (mark: (ids: readonly string[]) => void) => Promise<T>) {
+    const ends: Array<() => void> = [];
+    try {
+      return await run((ids) => {
+        for (const id of ids) ends.push(begin(key("work", id)));
+      });
+    } finally {
+      for (const end of ends) end();
     }
   }
   const work = host.work;
@@ -29,6 +46,23 @@ export function fenceHostWork(host: DurableHost): DurableHost {
   const resources = host.resources;
   return { ...host,
     work: { ...work,
+      claimPrepared: (input, admit) => selectedWrite((mark) => work.claimPrepared(input, (locked) => {
+        const id = locked.row.id;
+        synchronousAdmission(admit, locked);
+        mark([id]);
+        return undefined;
+      })),
+      renewPrepared: (input, admit) => selectedWrite((mark) => work.renewPrepared(input, (locked) => {
+        const id = locked.row.id;
+        synchronousAdmission(admit, locked);
+        mark([id]);
+        return undefined;
+      })),
+      expireExhausted: (session, limit, beforeWrite) => selectedWrite((mark) => work.expireExhausted(session, limit, (ids) => {
+        if (beforeWrite) synchronousAdmission(beforeWrite, [...ids]);
+        mark(ids);
+        return undefined;
+      })),
       observe(session, id) {
         const watched = [key("session", session.instanceId), key("work", id)].map((k) => {
           const value = state(k);

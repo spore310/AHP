@@ -10,6 +10,9 @@ export interface InitialBindingScope {
   readonly grantRevision: number;
 }
 export interface PreparedInitialScopes {
+  /** Hosted claim/renew require a native signal or synchronous invalidation of the host's canonical work registry on any withdrawal. */
+  readonly signal?: AbortSignal;
+  readonly invalidation?: "registry";
   readonly scopes: readonly InitialBindingScope[];
   /** Explicit host-wide activity-cursor disclosure permission, default false. Guard/expiry cover it too. */
   readonly allowGlobalSequence?: boolean;

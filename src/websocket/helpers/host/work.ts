@@ -1,15 +1,17 @@
 import { sameResource } from "@authorization/helpers/context";
-import type { AgentDirectory } from "@agents";
-import type { DurableHost } from "@persistence";
+import { createAgentWorkConfig, type AgentDirectory } from "@agents";
+import { RepositoryError, type DurableHost } from "@persistence";
 import type { WorkInspection } from "@persistence/helpers/durability/workTypes";
 import type { SessionsFactory } from "@sessions/types";
 import { createWorkService, WorkError, type RegisteredAgentIdentity, type WorkAgentContext } from "@work";
 import { createWorkAuthorizer } from "@work/helpers/authorization";
+import { createSchedulingStamp } from "@work/helpers/claims/admission";
 import { lostWorkPolicy } from "@work/helpers/authorityLoss/helpers";
 import type { WorkAuthorityLossReason } from "@work/helpers/authorityLoss/types";
 import { createWorkSelectionGraph } from "@work/helpers/selections";
 import { isDeepStrictEqual } from "node:util";
 import { workConnection } from "../ahp/workContext";
+import { initialSchedulingFence } from "../security/helpers";
 import type { AHPBindingOptions } from "../ahp/types";
 import type { WebSocketConnectionContext } from "../../types";
 import type { AHPServerOptions } from "./types";
@@ -19,14 +21,21 @@ function unavailable(): never {
 }
 
 export function createHostedWork(options: AHPServerOptions, sessions: SessionsFactory, agents: AgentDirectory,
-  lease: () => DurableHost | undefined, stopped: () => boolean) {
+  lease: () => DurableHost | undefined, stopped: () => boolean, diagnostic: (event: import("@work").WorkDiagnosticEvent, correlationId?: string) => void) {
   const settings = options.agentWork;
   const security = options.sessions.creationSecurity;
   const catalogue = options.sessions.application?.catalogue;
   const auth = sessions.authorization;
   if (!settings || !security || !catalogue || !auth || !settings.ceiling || !sessions.durability) return undefined;
   const workDomain = options.security?.workDomainId;
+  const registry = security.registry;
   const mappings = structuredClone(settings.agentMappings ?? []);
+  const hostKinds = [...settings.allowedKinds];
+  const securityNow = options.security?.now ?? Date.now;
+  const configuration = createAgentWorkConfig(settings.configuration, () => {
+    service.authorityChanged();
+  });
+  const kindAllowed = (identity: RegisteredAgentIdentity, kind: string) => configuration.resolve(identity).allowedKinds?.includes(kind) !== false;
   const actorKeys = new Set<string>();
   const registrationKeys = new Set<string>();
   for (const item of mappings) {
@@ -44,6 +53,7 @@ export function createHostedWork(options: AHPServerOptions, sessions: SessionsFa
   const authorizer = createWorkAuthorizer({ registry: security.registry, policies: security.policies,
     allowedKinds: [...settings.allowedKinds], ceiling: settings.ceiling, resolveType, session: (ref) => host().sessions.get(ref),
     resource: (ref) => host().resources.get(ref),
+    sampleLease: (fence) => host().work.sampleLease(fence),
     isSessionCurrent: (ref, operation) => {
       const actual = auth.getResource(ref.id);
       return !!actual && sameResource(actual, ref) && !auth.isSettling(ref.id) && (operation === "read" || auth.isReady(ref)) && !!lease()?.isOpen() && !stopped();
@@ -57,17 +67,22 @@ export function createHostedWork(options: AHPServerOptions, sessions: SessionsFa
     if (registrationKeys.has(JSON.stringify([workDomain, actor.principal.subject, actor.agentId]))) return undefined;
     return actor.agentId;
   }
-  async function worker(connection: WebSocketConnectionContext): Promise<WorkAgentContext> {
+  async function worker(connection: WebSocketConnectionContext, scheduling = false): Promise<WorkAgentContext> {
     const base = workConnection(connection);
     const actor = base.context.actor;
     const bound = agents.getByConnection(connection.connectionId);
     const key = agentKey(connection);
     if (actor.kind !== "agent" || !key || !bound || bound.principalSubject !== actor.principal.subject) return unavailable();
     const record = await agents.getRegistration(bound.agentId);
-    if (!record?.enabled || !record.executionEpoch || record.domainId !== actor.principal.domainId || record.principalSubject !== bound.principalSubject
+    if (!record?.enabled || !record.executionEpoch || bound.executionEpoch !== record.executionEpoch || record.domainId !== actor.principal.domainId || record.principalSubject !== bound.principalSubject
       || record.agentKey !== key || record.id !== bound.agentId) return unavailable();
     const presence = agents.capturePresenceFence?.(bound, record.executionEpoch) ?? unavailable();
-    const fence = () => !stopped() && !base.signal.aborted && !!lease()?.isOpen() && connection.isOpen?.() === true && presence();
+    const owner = host();
+    const setup = connection.security ?? unavailable();
+    const initial = scheduling ? initialSchedulingFence(setup, registry.captureFence()) ?? unavailable() : undefined;
+    const deadline = performance.now() + setup.validUntil - securityNow();
+    const fence = () => !stopped() && !base.signal.aborted && lease() === owner && connection.security === setup
+      && performance.now() < deadline && connection.isOpen?.() === true && presence() && initial?.() !== false;
     const isCurrent = () => !stopped() && !!lease()?.isOpen() && base.isCurrent()
       && agents.getByConnection(connection.connectionId)?.generation === bound.generation
       && agents.getOnline(bound.agentId)?.connectionId === connection.connectionId;
@@ -83,6 +98,7 @@ export function createHostedWork(options: AHPServerOptions, sessions: SessionsFa
         && m.subject === registration.subject && m.agentKey === registration.key)?.actorAgentId ?? registration.key };
     const lost = (reason: WorkAuthorityLossReason) => ({ reason, executor });
     if (!registration.enabled || row.lease.executionEpoch !== registration.epoch) return lost("registration-disabled");
+    if (!kindAllowed(executor, row.kind)) return lost("policy-changed");
     if (value.session.lifecycle !== "active" || !createWorkSelectionGraph(row.session.domainId, value.session, value.resources)
       .hasActivePositiveScope(row.scope, value.session.graphRevision)) return lost("resource-unavailable");
     if (Date.parse(row.lease.expiresAt) <= value.databaseTime) return lost("authority-expired");
@@ -92,18 +108,35 @@ export function createHostedWork(options: AHPServerOptions, sessions: SessionsFa
     const caller = await worker(connection);
     return await lostWorkPolicy(() => authorizer.prepare(caller, "renew", row, row)) ? lost("policy-changed") : undefined;
   }
-  const service = createWorkService({ repository: () => host().work, resolveType, async prepare(caller, operation, intent, row, execution) {
-    const supplied = caller as Partial<WorkAgentContext>;
-    if (!supplied.agent) return authorizer.prepare(caller, operation, intent, row, execution);
+  async function authenticateAgent(caller: WorkAgentContext, scheduling = false): Promise<WorkAgentContext> {
     const connection = connections.get(caller.context.connectionId) ?? unavailable();
-    const actual = await worker(connection);
-    if (!isDeepStrictEqual(caller.context, actual.context) || !isDeepStrictEqual(actual.agent, supplied.agent)
-      || supplied.executionEpoch !== actual.executionEpoch) return unavailable();
-    const approval = await authorizer.prepare({ ...actual, signal: AbortSignal.any([caller.signal, actual.signal]) }, operation, intent, row, execution);
-    const fence = () => actual.fence?.() === true && approval.fence();
-    return { isCurrent: () => actual.isCurrent() && approval.isCurrent() && fence(), fence, release: approval.release.bind(approval) };
-  },
-  authorityLoss: settings.hooks && { hooks: settings.hooks, deadlineMs: settings.hookDeadlineMs, maxPending: settings.maxPendingHooks, assess } });
+    const actual = await worker(connection, scheduling);
+    if (!isDeepStrictEqual(caller.context, actual.context) || !isDeepStrictEqual(actual.agent, caller.agent)
+      || caller.executionEpoch !== actual.executionEpoch) return unavailable();
+    return { ...actual, signal: AbortSignal.any([caller.signal, actual.signal]), retainReply: caller.retainReply?.bind(caller) };
+  }
+  const service = createWorkService({ repository: () => host().work, resolveType, authenticateAgent: (caller) => authenticateAgent(caller, true),
+    scheduling: { allowedKinds: hostKinds, configuration, leaseMs: settings.leaseMs,
+      admission(caller, approval, operation, kind, revision) {
+        // Only the reauthenticated worker and the host's prepared approval reach this hook.
+        const presence = caller.fence?.bind(caller) ?? unavailable();
+        const policy = approval.fence?.bind(approval) ?? unavailable();
+        const identity = caller.agent;
+        return createSchedulingStamp((locking) => {
+          const current = configuration.resolve(identity);
+          return presence() && policy() && (!locking || operation === "renew" || current.revision === revision) && current.allowedKinds?.includes(kind) !== false;
+        });
+      } }, onDiagnostic: diagnostic,
+    async prepare(caller, operation, intent, row, execution) {
+      const supplied = caller as Partial<WorkAgentContext>;
+      if (!supplied.agent) return authorizer.prepare(caller, operation, intent, row, execution);
+      const actual = await authenticateAgent(caller as WorkAgentContext);
+      if (!kindAllowed(actual.agent, intent.kind)) return unavailable();
+      const approval = await authorizer.prepare(actual, operation, intent, row, execution);
+      const fence = () => actual.fence?.() === true && kindAllowed(actual.agent, intent.kind) && approval.fence();
+      return { isCurrent: () => actual.isCurrent() && approval.isCurrent() && fence(), fence, release: approval.release.bind(approval) };
+    },
+    authorityLoss: settings.hooks && { hooks: settings.hooks, deadlineMs: settings.hookDeadlineMs, maxPending: settings.maxPendingHooks, assess } });
   const unsubscribe = security.registry.onInvalidate(service.authorityChanged.bind(service));
   let timer: ReturnType<typeof setInterval> | undefined;
   const prepareToolWork: NonNullable<AHPBindingOptions["prepareToolWork"]> = async (connection, context, execution, route, input, signal) => {
@@ -115,7 +148,11 @@ export function createHostedWork(options: AHPServerOptions, sessions: SessionsFa
     const connection = connections.get(caller.connectionId) ?? unavailable();
     return prepareToolWork(connection, caller, execution, route, input, signal);
   };
-  return { service, prepareToolWork, prepareResourceWork, binding: { agentKey, get: service.get.bind(service), changed: service.authorityChanged.bind(service) },
+  function bindingFailed(error: unknown) {
+    if (error instanceof RepositoryError && error.code === "outcome_unknown") diagnostic("storageOutcomeUnknown", error.correlationId);
+    else diagnostic(error instanceof RepositoryError && error.code === "database" ? "storageFailed" : "bindingFailed");
+  }
+  return { service, configuration, prepareToolWork, prepareResourceWork, binding: { agentKey, worker, service, bindingFailed, get: service.get.bind(service), changed: service.authorityChanged.bind(service) },
     connected(connection: WebSocketConnectionContext) {
       connections.set(connection.connectionId, connection);
       connection.onClose(() => {
@@ -123,7 +160,12 @@ export function createHostedWork(options: AHPServerOptions, sessions: SessionsFa
         service.authorityChanged();
       });
     },
-    start() {
+    async start() {
+      // Startup does a bounded pass. Normal claims continue per-session reconciliation.
+      const durable = host();
+      for (const session of (await durable.sessions.listRecoverable()).slice(0, 32)) {
+        if (session.lifecycle === "active") await durable.work.expireExhausted(session.ref, 32);
+      }
       if (settings.hooks?.onLeaseAuthorityLost && !timer) {
         service.authorityChanged();
         timer = setInterval(service.authorityChanged.bind(service), Math.max(30000, 2 * (settings.hookDeadlineMs ?? 5000)));

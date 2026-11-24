@@ -24,7 +24,13 @@ export function captureAgentRegistrationLimits(input: unknown = {}): AgentRegist
 export const createAgentRegistrationFacade = (
   repository: AgentRegistrationRepository,
   scope: PersistenceOperationScope,
-): AgentRegistrationRepository => ({
-  register: (input) => scope.run(() => repository.register(input)),
-  getById: (id, domainId) => scope.run(() => domainId === undefined ? repository.getById(id) : repository.getById(id, domainId)),
-});
+): AgentRegistrationRepository => {
+  const bind = repository.bindExecution?.bind(repository);
+  const set = repository.setEnabled?.bind(repository);
+  return {
+    ...(bind && { bindExecution: (record) => scope.run(() => bind(record)) }),
+    ...(set && { setEnabled: (id, domain, enabled) => scope.run(() => set(id, domain, enabled)) }),
+    register: (input) => scope.run(() => repository.register(input)),
+    getById: (id, domainId) => scope.run(() => domainId === undefined ? repository.getById(id) : repository.getById(id, domainId)),
+  };
+};

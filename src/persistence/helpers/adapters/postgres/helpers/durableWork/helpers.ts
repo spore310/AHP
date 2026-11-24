@@ -1,7 +1,7 @@
 import type { ResourceRef } from "@authorization";
 import { resourceKey } from "@authorization/helpers/resources";
 import { captureData } from "@persistence/helpers/durability/helpers";
-import { captureWorkIntent, sameWorkIntent } from "@persistence/helpers/durability/workIntent";
+import { captureWorkIntent, durableSelectionLimits, sameWorkIntent } from "@persistence/helpers/durability/workIntent";
 import type { Admission } from "@persistence/helpers/durability/types";
 import type { DurableWorkRepository, WorkFence, WorkInspection } from "@persistence/helpers/durability/workTypes";
 import type { WorkResourceSelection } from "@work/helpers/selections/types";
@@ -9,7 +9,8 @@ import { createWorkSelectionGraph } from "@work/helpers/selections";
 import type { PoolClientLike } from "../connection";
 import { reject, resourceRows, sessionRow } from "../resources/rows/helpers";
 import type { DurableTransaction, ResourceRow } from "../resources/types";
-import { workRow } from "./rows";
+import { sampleLease, workRow } from "./rows";
+import { createPostgresScheduling } from "./scheduling";
 
 function anchors(rules: readonly WorkResourceSelection[], rows: readonly ResourceRow[], domainId: string) {
   const available = new Map(rows.map((row) => [resourceKey(row.record.ref), row]));
@@ -44,8 +45,9 @@ async function lockWork(client: PoolClientLike, fence: WorkFence): Promise<void>
   if (locked.rowCount !== 1) reject();
 }
 
-export function createPostgresDurableWork(tx: DurableTransaction, authorize: (check: Admission) => void): DurableWorkRepository {
+export function createPostgresDurableWork(tx: DurableTransaction, authorize: (check: Admission) => void, hostEpoch: string): DurableWorkRepository {
   return {
+    ...createPostgresScheduling(tx, authorize, hostEpoch),
     leased(after, limit) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 128) return reject();
       return tx(async (client) => (await client.query<{ domainId: string; id: string }>(
@@ -68,7 +70,7 @@ export function createPostgresDurableWork(tx: DurableTransaction, authorize: (ch
         let status = action === "cancel" ? "cancelled" : "failed";
         if (action === "requeue" && root.lifecycle === "active" && row.attemptCount < row.maxAttempts) {
           const resources = (await resourceRows(client, root.ref)).map((r) => r.record);
-          if (createWorkSelectionGraph(root.ref.domainId, root, resources).hasActivePositiveScope(row.scope, root.graphRevision)) status = "queued";
+          if (createWorkSelectionGraph(root.ref.domainId, root, resources, durableSelectionLimits).hasActivePositiveScope(row.scope, root.graphRevision)) status = "queued";
         }
         authorize(admit);
         await client.query(`UPDATE work_items SET status=$2,revision=revision+1,updated_at=clock_timestamp(),
@@ -78,6 +80,10 @@ export function createPostgresDurableWork(tx: DurableTransaction, authorize: (ch
           last_failed_at=CASE WHEN $2='failed' THEN clock_timestamp() ELSE last_failed_at END WHERE id=$1`, [row.id, status]);
         return await workRow(client, root.ref.domainId, row.id) ?? reject();
       });
+    },
+    sampleLease(input) {
+      const fence = structuredClone(input);
+      return tx((client) => sampleLease(client, fence));
     },
     async inspect(domain, id) {
       // A concurrent lease rotation can change the registration while we await the work row.

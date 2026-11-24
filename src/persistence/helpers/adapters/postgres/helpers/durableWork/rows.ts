@@ -1,10 +1,21 @@
 import { resourceKey } from "@authorization/helpers/resources";
 import type { WorkResourceSelection } from "@work/helpers/selections/types";
-import type { StoredWork } from "@persistence/helpers/durability/workTypes";
+import type { StoredWork, WorkFence } from "@persistence/helpers/durability/workTypes";
 import type { QueryableClient } from "../../types";
 
 // Keep all six PostgreSQL fractional-second digits for work list keysets.
 const stamp = (column: string): string => `to_char(${column} AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+
+/** Preparation must see committed facts without waiting behind a candidate held by another worker. */
+export async function sampleLease(db: QueryableClient, { id, session, revision }: Pick<WorkFence, "id" | "session" | "revision">) {
+  const result = await db.query<{ expiresAt: string; databaseTime: number }>(`SELECT ${stamp("w.lease_expires_at")} AS "expiresAt",
+    ceil(extract(epoch FROM statement_timestamp())*1000)::double precision AS "databaseTime"
+    FROM work_items w JOIN sessions s ON s.session_instance_id=w.session_instance_id AND s.domain_id=w.domain_id
+    WHERE w.id=$1 AND w.revision=$2 AND w.status='leased' AND w.session_instance_id=$3 AND w.domain_id=$4
+      AND s.session_uri=$5 AND s.lifecycle_status NOT IN ('retired','retiring')`, [id, revision, session.instanceId, session.domainId, session.id]);
+  return result.rows[0];
+}
+
 const columns = `SELECT
   w.id, jsonb_build_object('kind','session','id',s.session_uri,'domainId',s.domain_id,'instanceId',s.session_instance_id) AS session,
   s.owner_principal_subject AS owner, w.kind, w.request_key AS "requestKey", w.priority, w.input, w.submitted_data AS "submittedData",
@@ -23,7 +34,7 @@ const columns = `SELECT
   FROM work_items w JOIN sessions s ON s.session_instance_id=w.session_instance_id AND s.domain_id=w.domain_id`;
 
 type WorkRow = Omit<StoredWork, "scope" | "announce" | "result" | "failure" | "lease"> & {
-  readonly selections: readonly { readonly purpose: "scope" | "announce"; readonly rule: WorkResourceSelection }[];
+  readonly selections: readonly { readonly purpose: "scope" | "announce"; readonly rule: WorkResourceSelection }[] | null;
   readonly lease: StoredWork["lease"] | null;
   readonly result: StoredWork["result"] | null;
   readonly failure: StoredWork["failure"] | null;
@@ -31,10 +42,15 @@ type WorkRow = Omit<StoredWork, "scope" | "announce" | "result" | "failure" | "l
 
 /** Reads work and its selector set from one statement snapshot. */
 export async function workRow(db: QueryableClient, domain: string, id: string): Promise<StoredWork | undefined> {
-  const { rows: [row] } = await db.query<WorkRow>(`${columns} WHERE w.domain_id=$1 AND w.id=$2`, [domain, id]);
-  if (!row) return undefined;
+  return (await workRows(db, "WHERE w.domain_id=$1 AND w.id=$2", [domain, id]))[0];
+}
+export async function workRows(db: QueryableClient, where: string, params: readonly unknown[]): Promise<StoredWork[]> {
+  return (await db.query<WorkRow>(workRowsQuery(where), params)).rows.map(decode);
+}
+export const workRowsQuery = (where: string) => `${columns} ${where}`;
+function decode(row: WorkRow): StoredWork {
   const { selections, lease, result, failure, ...rest } = row;
-  const rules = (purpose: "scope" | "announce") => selections.filter((s) => s.purpose === purpose).map((s) => s.rule)
+  const rules = (purpose: "scope" | "announce") => (selections ?? []).filter((s) => s.purpose === purpose).map((s) => s.rule)
     .sort((a, b) => resourceKey(a.resource) < resourceKey(b.resource) ? -1 : 1);
   return { ...rest, scope: rules("scope"), announce: rules("announce"),
     ...(lease ? { lease } : {}), ...(result ? { result } : {}), ...(failure ? { failure } : {}) };

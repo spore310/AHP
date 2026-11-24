@@ -29,6 +29,26 @@ export function createExampleRegistrationState(registrationLimits?: Partial<Agen
     return `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`;
   };
   const repository: AgentRegistrationRepository = {
+    bindExecution: operation((record) => {
+      assertOpen();
+      const active = registrations.get(record.id);
+      if (!active?.enabled || !active.domainId || active.domainId !== record.domainId || active.principalSubject !== record.principalSubject
+        || active.agentKey !== record.agentKey || active.executionEpoch !== record.executionEpoch || active.executionEpoch === undefined) {
+        throw new RepositoryError("conflict", "Agent registration unavailable.");
+      }
+      const next = { ...active, executionEpoch: (BigInt(active.executionEpoch) + 1n).toString() };
+      registrations.set(active.id, next);
+      return next;
+    }),
+    setEnabled: operation((id, domainId, enabled) => {
+      assertOpen();
+      const active = registrations.get(id);
+      if (!active || active.domainId !== domainId || active.executionEpoch === undefined) throw new RepositoryError("not_found", "Agent registration unavailable.");
+      if (active.enabled === enabled) return active;
+      const next = { ...active, enabled, executionEpoch: (BigInt(active.executionEpoch) + 1n).toString() };
+      registrations.set(id, next);
+      return next;
+    }),
     register: operation((input) => {
       assertOpen();
       const key = registrationKey(input.domainId, input.principalSubject, input.agentKey);
@@ -77,7 +97,7 @@ export function createExampleRegistrationState(registrationLimits?: Partial<Agen
   };
 }
 
-/** The example uses exact-instance storage. P0 accepts no work submissions or leases. */
+/** The example shares committed registration epochs with its exact-instance work store. */
 export function createExamplePersistence(registrationLimits?: Partial<AgentRegistrationLimits>): { provider: PersistenceProvider } {
   const directory = createExampleRegistrationState(registrationLimits);
   const unavailable = operation((): never => {

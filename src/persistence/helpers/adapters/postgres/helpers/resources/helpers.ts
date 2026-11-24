@@ -1,4 +1,3 @@
-import { DatabaseError } from "pg";
 import { createPostgresDurableWork } from "../durableWork/helpers";
 import { fenceHostWork } from "@persistence/helpers/durability/workFences";
 import type { ResourceRef } from "@authorization";
@@ -7,7 +6,7 @@ import { canRetrySessionStart, captureRef, captureData } from "@persistence/help
 import type { Admission, DurableHost, DurableStorage, StoredSession, Transition } from "@persistence/helpers/durability/types";
 import { RepositoryError } from "@persistence/types";
 import { acquirePostgresOwnership, type PostgresOwnership } from "../ownership";
-import { createPostgresPool, databaseFailure } from "../connection";
+import { createPostgresPool, databaseFailure, uncertainCommit } from "../connection";
 import type { PostgresOptions, QueryableClient } from "../../types";
 import { admit, assertSessionRef, captureRecord, insertResource, lockReservation, reject, requireRow, resourceRow, resourceRows, sessionColumns, sessionRow } from "./rows/helpers";
 import { retirement } from "./retirement/helpers";
@@ -66,9 +65,7 @@ export function createOwnedPostgresStorage(
           try {
             await client.query("COMMIT");
           } catch (error) {
-            // Only a PostgreSQL ErrorResponse can confirm that COMMIT failed.
-            const code = error instanceof DatabaseError && error.severity === "ERROR" ? error.code : undefined;
-            if (!code || !/^[0-9A-Z]{5}$/u.test(code) || code === "40003" || code.startsWith("08") || code.startsWith("57")) {
+            if (uncertainCommit(error)) {
               discard = true;
               const unknown = new RepositoryError("outcome_unknown", "The durable commit outcome is uncertain.");
               unknown.name = "DurableCommitUncertain";
@@ -136,7 +133,7 @@ export function createOwnedPostgresStorage(
         });
       }
       const host: DurableHost = {
-        work: createPostgresDurableWork(tx, authorize),
+        work: createPostgresDurableWork(tx, authorize, owner.epoch),
         epoch: owner.epoch, serverSeq: owner.serverSeq, isOpen,
         release() {
           closing = true;

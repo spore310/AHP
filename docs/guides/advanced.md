@@ -39,7 +39,8 @@ ceiling. The registered binding and assignment supply the actual authority.
    the senior's session. The senior reads the job and its recorded submitter.
    The canonical registry confirms the junior's scoped execution grant.
    The worker's network detail read returns `work: null`.
-   Revoking the grant removes its execution permission. The job remains queued.
+   The junior claims and completes the job over its registered connection.
+   The senior verifies completion and the host revokes the junior's work grant.
    [Work lifecycle](../architecture/agent-task-lifecycle.md)
 2. **Subscribe to the protected session.** The observer gets a `ready` snapshot
    without the private tool manifest. The application separately grants SDK
@@ -70,9 +71,9 @@ flowchart TB
 Each step has its own authority. An approved definition becomes usable only
 after the host activates it and grants the exact assignment.
 
-The public host integration test seeds the issued lease for the registered junior
-while P3 implements claim acquisition. It exercises tagged tool dispatch and a
-direct resource-data replacement against that lease. Revoking the work grant
+The public host integration test has the registered junior claim through the
+WebSocket API. It exercises tagged tool dispatch and a direct resource-data
+replacement against the returned private lease. Revoking the work grant
 while the provider write waits preserves both its previous data and revision.
 [Cross-principal integration](../../src/tests/websocket/crossPrincipalWork.test.ts)
 
@@ -83,6 +84,7 @@ while the provider write waits preserves both its previous data and revision.
 | [index.ts](../../examples/advanced/index.ts) | Runs both forms of client invocation, the denial, the host action, and the proposal-to-artifact flow. |
 | [host.ts](../../examples/advanced/host.ts) | Composes the registry, provider rules, SDK host, and public extension ports. |
 | [work.ts](../../examples/advanced/work.ts) | Submits a targeted review and checks the worker's presence, separate execution and read permissions, and revocation. |
+| [work-capacity.ts](../../examples/work-capacity.ts) | Exercises default and identity-specific limits across two sessions, then reconnects, waits for a lease to expire, reclaims the work and completes the new attempt. Run with `pnpm exec vite-node examples/work-capacity.ts`. |
 | [persistence.ts](../../examples/advanced/persistence.ts) | Supplies in-memory registrations and exact-instance durable storage, and rejects URI-only session and work mutations. |
 
 The artifact loader selects a known local handler for the verified fixture bytes.
@@ -94,6 +96,36 @@ and the [persistence module](../../src/persistence/README.md).
 
 ## Adapt the composition
 
+### Migrate a connection or work-policy provider for scheduling
+
+If your connection setup or work narrowing callback already returns
+`isCurrent`, keep that check and add a revocation source. The same membership
+change that makes `isCurrent()` false must abort the source immediately. The
+host checks the captured source after waiting for durable locks. The following
+fields can be included in an initial-authority receipt or an allowing work
+restriction. Keep the receipt's existing scopes or effect, deadline and cleanup.
+
+```ts
+const revoked = new AbortController();
+const unsubscribe = membership.onRevoked(() => revoked.abort());
+const authority = {
+  signal: revoked.signal,
+  isCurrent: () => membership.isCurrent() && !revoked.signal.aborted,
+  release() {
+    unsubscribe();
+    revoked.abort();
+  },
+};
+```
+
+An application that already invalidates the host's canonical work registry can
+return `invalidation: "registry"` and call
+`registry.invalidateExternal(revision)` synchronously on every withdrawal.
+Supply one of these contracts independently on the hosted initial-authority
+receipt and on each optional claim/renew narrowing receipt. The example's
+default initial authority lasts for the connection and uses its lifetime signal.
+Existing callback-only initial authority continues to support native operations.
+
 1. Supply your provider and typed session catalogue. Keep application config,
    provider config, and the pinned revision of each tool explicit. [Sessions](../../src/sessions/README.md)
 2. Use a trusted authenticator, resolve the real user or agent, and scope each
@@ -103,7 +135,8 @@ and the [persistence module](../../src/persistence/README.md).
    registration for trusted local code and an SDK advertisement for a client
    handler. The client API also exposes status, cancellation, and approved
    artifact loading. [SDK tool client](../../src/toolClient/README.md)
-4. Configure the work repositories for durable registrations and authorized
-   reads. Remote work mutations stay closed through P2. [Work service](../../src/work/README.md)
+4. Configure the work repositories for durable execution epochs and exact
+   session storage. Grant each work operation to its intended actors and set a
+   trusted capacity override where needed. [Work service](../../src/work/README.md)
 
 [Five-minute example](quickstart.md) · [Documentation index](../README.md)

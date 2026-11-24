@@ -16,6 +16,8 @@ registration and a live presence binding are separate concepts.
 | `constants.ts` | Default 90-second presence TTL. |
 | `helpers/authenticator.ts` | `createStaticTokenAuthenticator`: exact bearer-token lookup from the handshake `Authorization` header. |
 | `helpers/directory.ts` | `createAgentDirectory`: durable registration resolution, one live binding per agent, generation fencing, renewal, and connection-scoped release. |
+| `helpers/workConfiguration/helpers.ts` | Captures bounded claim limits and allowed kinds, resolves full registered identities, and atomically replaces the configuration. |
+| `helpers/workConfiguration/index.ts` | Exports the trusted work configuration factory. |
 | `helpers/policyIdentity/types.ts` | Exact legacy authenticator/domain bridge options. |
 | `helpers/policyIdentity/helpers.ts` | Explicit subject-to-domain adapter with private exact-source provenance; no actor inference. |
 | `helpers/policyIdentity/index.ts` | Public bridge factory/type exports only; internal provenance lookup is not exported. |
@@ -38,6 +40,8 @@ registration and a live presence binding are separate concepts.
     that principal and key in the host-configured domain. PostgreSQL requires this trusted domain for registration and lookup.
   - `bindPresence(agentId, principal, connectionId)` creates or returns the
     current binding, denying a different live connection.
+  - `registerPresence(principal, key, connectionId, options)` reserves the connection and identity while resolving the registration and allocating an execution epoch. A protected host requires a durable epoch store.
+  - `setEnabled(agentId, enabled)` changes the durable enabled state. Disabling immediately withdraws local presence and invalidates pending bindings for that identity.
   - `renewPresence(binding)` advances only the exact current connection and
     generation.
   - `releasePresence(binding)` and `releaseConnection(connectionId)` remove only
@@ -45,13 +49,21 @@ registration and a live presence binding are separate concepts.
   - `getOnline(agentId)` and `getByConnection(connectionId)` return only
     unexpired bindings.
 
+- `createAgentWorkConfig(input?, changed?)` returns a trusted configuration
+  handle. `resolve(identity)` returns the local revision, effective limit and any
+  kind restriction. `replace(input)` validates and captures the complete
+  replacement before notifying the host. New claims default to three active
+  leases per registered identity across every session. Limits range from zero
+  to 1,024. A full-identity override can pin the canonical actor ID.
+  An empty kind list pauses acquisition of every kind for that identity.
+
 ## Presence semantics
 
 Presence is process-local. It is not persisted, not shared across hosts, and not
 replaced by WebSocket heartbeat. A binding is:
 
 ```text
-{ agentId, principalSubject, connectionId, generation, expiresAt }
+{ agentId, principalSubject, connectionId, generation, executionEpoch?, expiresAt }
 ```
 
 Expiry is checked with the injected clock. A new binding for the same agent gets
@@ -64,27 +76,19 @@ for work authorization.
 - `clientId`, session payloads, tool metadata, and request JSON cannot supply a
   principal, agent ID, connection ID, or generation.
 - A registration is durable, but it does not imply that the agent is online.
-- The presence-bind path consults an in-process registration cache refreshed by
-  `register`/`getRegistration`; renewals never consult any registration source —
-  neither the cache nor the repository. There is no disable path in this slice,
-  so directly flipping `enabled` in the database cannot evict live presence: a
-  re-newal keeps a disabled registration alive until the connection closes or
-  the TTL lapses. Every work mutation re-reads the registration, so claims and
-  completions still fail closed. Invalidation belongs with a real
-  disable/decommission path.
+- Each new durable binding increments the registration's epoch. A repeat on
+  the same live connection preserves its epoch. Disable and re-enable each
+  rotate the epoch on an actual transition. Re-enable leaves the agent offline.
+  A lost connection or uncertain commit cannot publish pending presence.
 - The directory defaults to 4,096 retained identities and 64 pending
   registration or lookup operations. Configure `maxRetained` and `maxPending`
   through `registrationLimits`. Known identities remain usable at the
   retention limit as pending capacity allows. New identities need a slot
   before a repository call. Closing a binding preserves its generation history.
-- Registration rows grow only with unique `(domain_id, principal_subject, agent_key)` tuples. The
-  register handler refuses a connection-level bind conflict before the durable
-  write, and same-key registrations are upserts. The reachable "row landed but
-  bind failed" shapes stay inside that bound: one connection racing two
-  concurrent registrations of distinct keys (both pass the synchronous,
-  map-reading conflict pre-check, then compete for the one live binding it may
-  hold), or one agent key raced across two connections (one row via upsert, one
-  failed bind).
+- Durable rows are keyed by domain, principal and agent key. A binding reserves
+  its connection and identity before the repository call. Contending callers
+  receive a conflict. Disconnect cancels admission immediately, and outstanding
+  operations retain their capacity slot until they settle.
 - Native initialize discloses the real shared server sequence even with empty
   snapshots. It therefore requires verified live setup with explicit trusted
   `allowGlobalSequence: true`; absent/false permission denies before the getter.
@@ -105,6 +109,7 @@ for work authorization.
 
 | Test | Pins |
 | ---- | ---- |
+| [`src/tests/agents/epochs.test.ts`](../tests/agents/epochs.test.ts) | Full-identity overrides, durable epoch and enabled transitions, bounded pending bindings, disconnect and uncertain commit. |
 | [`src/tests/agents/policyActor.test.ts`](../tests/agents/policyActor.test.ts) | Exact scoped setup reads, bridge capture, trusted user/registered-agent controls, captured limits, invalidation/expiry and successor-safe presence release. |
 | [`src/tests/agents/authenticator.test.ts`](../tests/agents/authenticator.test.ts) | Bearer parsing, exact token lookup, missing/unknown credentials, repeated headers, and rejection of empty tokens or subjects. |
 | [`src/tests/agents/directory.test.ts`](../tests/agents/directory.test.ts) | Stable registration, cross-principal denial, disabled agents, one live binding per agent and connection, generation fencing, expiry, and stale release. |

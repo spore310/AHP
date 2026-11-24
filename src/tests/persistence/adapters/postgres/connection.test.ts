@@ -27,6 +27,7 @@ interface DriverDouble {
   /** Statements routed through pool.query — the transaction helper must produce none. */
   readonly poolStatements: string[];
   releaseCount(): number;
+  readonly releaseArguments: (Error | false | undefined)[];
 }
 
 interface DriverDoubleConfig {
@@ -41,7 +42,7 @@ const statementError = (statement: string): Error =>
 const createDriverDouble = (config: DriverDoubleConfig = {}): DriverDouble => {
   const clientStatementAttempts: string[] = [];
   const poolStatements: string[] = [];
-  let releases = 0;
+  const releaseArguments: (Error | false | undefined)[] = [];
   const client: PoolClientLike = {
     query<T extends QueryResultRow = never>(text: string): Promise<QueryResult<T>> {
       clientStatementAttempts.push(text);
@@ -50,8 +51,8 @@ const createDriverDouble = (config: DriverDoubleConfig = {}): DriverDouble => {
       }
       return Promise.resolve(emptyResult<T>());
     },
-    release(): void {
-      releases += 1;
+    release(error): void {
+      releaseArguments.push(error);
     },
   };
   const pool: PoolLike = {
@@ -71,7 +72,8 @@ const createDriverDouble = (config: DriverDoubleConfig = {}): DriverDouble => {
     client,
     clientStatementAttempts,
     poolStatements,
-    releaseCount: () => releases,
+    releaseCount: () => releaseArguments.length,
+    releaseArguments,
   };
 };
 
@@ -131,6 +133,13 @@ describe("adapter connection — withTransaction", () => {
     expect(double.releaseCount()).toBe(1);
   });
 
+  it("discards the registration transaction client once when COMMIT confirmation is lost", async () => {
+    const double = createDriverDouble({ failStatement: "COMMIT" });
+    await expect(withTransaction(double.pool, unusedOperation, true)).rejects.toMatchObject({ code: "outcome_unknown" });
+    expect(double.clientStatementAttempts).toEqual(["BEGIN", "COMMIT"]);
+    expect(double.releaseCount()).toBe(1);
+  });
+
   it("does not mask an operation failure with a failing ROLLBACK", async () => {
     const double = createDriverDouble({ failStatement: "ROLLBACK" });
     const primaryError = new Error("primary failure");
@@ -143,6 +152,7 @@ describe("adapter connection — withTransaction", () => {
     await expect(attempt).rejects.toBe(primaryError);
     expect(double.clientStatementAttempts).toEqual(["BEGIN", "INSERT 1", "ROLLBACK"]);
     expect(double.releaseCount()).toBe(1);
+    expect(double.releaseArguments).toEqual([expect.any(Error)]);
   });
 
   it("rejects with the connect failure, never touching a client", async () => {

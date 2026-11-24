@@ -299,6 +299,7 @@ export interface WorkPolicyFacts {
 export type WorkPolicyRestriction =
   | { readonly effect: "deny"; release(): void }
   | { readonly effect: "allow"; readonly validUntil: number;
+      readonly signal?: AbortSignal; readonly invalidation?: "registry";
       isCurrent(): boolean; release(): void };
 ```
 
@@ -307,6 +308,20 @@ The optional prepare callback only narrows an already permitted operation. Absen
 Application work ceilings intersect session-type operation policies, allowed kinds, canonical scope/route permissions and mandatory restrictions. Read/list uses read permission per item; it never equates “can submit” with “can inspect everyone else's input/data/result.” Owners, submitters and executors are addressable facts, not hardcoded roles.
 
 ### Authority timing
+
+Claim and renewal require passive revocation from both the connection's
+`initialAuthority.prepare` receipt and any application `WorkPolicyRestriction`
+that permits the operation. Keep `isCurrent`, `release`, and the existing
+deadline. Add a native `signal` whose controller aborts synchronously on loss
+of the represented permission. Alternatively declare `invalidation: "registry"`
+and synchronously call the protected host's work-policy
+`registry.invalidateExternal(revision)` when that permission changes. Each
+source must cover every independent way its own `isCurrent` can become false.
+The host captures these fences before entering storage and checks them after
+lock waits without invoking either application callback. The earlier receipt
+shape remains valid for native setup and for other work operations. A hosted
+caller with callback-only initial authority cannot acquire or renew a lease.
+[Advanced guide and migration example](../../guides/advanced.md)
 
 All async lookup/policy preparation and SQL lock waits happen before final synchronous admission. The server creates a private, single-use admission receipt tied to the exact command and trusted proofs. The repository calls the supplied host-private synchronous admission closure after locks/expected-revision checks and immediately before its first mutation.
 

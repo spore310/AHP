@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { DatabaseError, Pool } from "pg";
 
 import { RepositoryError } from "@persistence/types";
 
@@ -26,20 +26,43 @@ export const createPostgresPool = (options: PostgresOptions): Pool => {
 export const withTransaction = async <TResult>(
   pool: PoolLike,
   operation: (client: PoolClientLike) => Promise<TResult>,
+  classifyCommit = false,
 ): Promise<TResult> => {
   const client = await pool.connect();
+  let discard: Error | undefined;
   try {
     await client.query("BEGIN");
     const result = await operation(client);
-    await client.query("COMMIT");
+    try {
+      await client.query("COMMIT");
+    } catch (error) {
+      if (classifyCommit && uncertainCommit(error)) {
+        discard = new RepositoryError("outcome_unknown", "The durable commit outcome is uncertain.");
+        throw discard;
+      }
+      throw error;
+    }
     return result;
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
+    if (!discard) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        discard = new RepositoryError("database", "The durable transaction could not be rolled back.");
+      }
+    }
     throw error;
   } finally {
-    client.release();
+    if (discard) client.release(discard);
+    else client.release();
   }
 };
+
+/** Only a PostgreSQL ErrorResponse can establish a definite COMMIT failure. */
+export function uncertainCommit(error: unknown): boolean {
+  const code = error instanceof DatabaseError && error.severity === "ERROR" ? error.code : undefined;
+  return !code || !/^[0-9A-Z]{5}$/u.test(code) || code === "40003" || code.startsWith("08") || code.startsWith("57");
+}
 
 export const toIso = (value: Date | string): string => (
   value instanceof Date ? value.toISOString() : new Date(value).toISOString()

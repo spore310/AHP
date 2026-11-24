@@ -8,9 +8,18 @@ import {
   scopedPolicyBindingSchema, securitySubjectRefSchema, trustedRequestContextSchema,
 } from "@authorization/helpers/validation";
 import type { FreshnessNotice } from "@authorization/types";
+import { captureSignal } from "@work/helpers/claims/admission";
 
 import { DEFAULT_INITIAL_AUTHORITY_COUNT, MAX_INITIAL_AUTHORITY_COUNT } from "./constants";
-import type { AHPServerSecurityOptions, ConnectionSetupAdapter, InitialScopeAuthority } from "./types";
+import type { AHPServerSecurityOptions, ConnectionSecuritySnapshot, ConnectionSetupAdapter, InitialScopeAuthority } from "./types";
+
+// Keep source-owned revocation state out of the serializable, frozen setup snapshot.
+const schedulingSources = new WeakMap<ConnectionSecuritySnapshot, { readonly active: () => boolean; readonly registry: boolean }>();
+export function initialSchedulingFence(setup: ConnectionSecuritySnapshot, registryFence: () => boolean): (() => boolean) | undefined {
+  const source = schedulingSources.get(setup);
+  if (source) return () => source.active() && (!source.registry || registryFence());
+  return undefined;
+}
 
 export const setupCount = (value: number | undefined): number => {
   const resolved = value ?? DEFAULT_INITIAL_AUTHORITY_COUNT;
@@ -118,12 +127,15 @@ export const createConnectionSetupAdapter = (options: AHPServerSecurityOptions):
         }
         const allowGlobalSequence = sequencePermission === true;
         const seedDeadline = prepared.validUntil;
+        const signal = prepared.signal;
+        const active = signal === undefined ? undefined : captureSignal(signal);
+        const registryInvalidation = prepared.invalidation === "registry";
         const scopes = freeze(prepared.scopes.map((scope) => seedScopeSchema.parse(scope)));
         const scopeKeys = new Set(scopes.map((item) => JSON.stringify(item.scope)));
         if (scopeKeys.size !== scopes.length || scopes.some((item) => item.scope.domainId !== principal.domainId)) {
           throw new Error("Invalid initial scope identity.");
         }
-        const available = (): boolean => !released && !input.signal.aborted;
+        const available = (): boolean => !released && !input.signal.aborted && active?.() !== false;
         const current = (deadline = seedDeadline): boolean => {
           try {
             if (!available() || !Number.isFinite(deadline)) return false;
@@ -198,6 +210,7 @@ export const createConnectionSetupAdapter = (options: AHPServerSecurityOptions):
         if (!isCurrent()) {
           throw new Error("Stale prepared setup.");
         }
+        if (active || registryInvalidation) schedulingSources.set(snapshot, { active: available, registry: registryInvalidation });
         retained = true;
         return { snapshot, isCurrent, release };
       } finally {

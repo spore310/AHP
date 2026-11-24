@@ -42,6 +42,7 @@ export function createAuthorityLossMonitor(options: WorkAuthorityLossOptions) {
     const version = generation;
     const loss = await options.assess(inspection);
     if (!loss || isClosed() || generation !== version) return;
+    options.onLoss?.();
     const { id, session, kind, submitter, owner, input, data, status, revision, scope, announce } = row;
     const facts = freeze(structuredClone({ work: { id, session, kind, submitter, owner, input, data, status, revision, scope, announce },
       executor: loss.executor, attempt: lease.attempt, reason: loss.reason }));
@@ -92,6 +93,7 @@ export function createAuthorityLossMonitor(options: WorkAuthorityLossOptions) {
     }
   }
   return {
+    pending: () => pending.size,
     signal(): void {
       if (closed || !callback) return;
       generation++;

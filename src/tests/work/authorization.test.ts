@@ -6,6 +6,7 @@ import { captureCreationPolicy, captureCreationSecurity, validateCreationRegistr
 import { createWorkAuthorizer, type SessionWorkPolicyRegistration, type WorkPolicyFacts, type WorkPolicyRestriction } from "@work/helpers/authorization";
 import { workFixture } from "./commandsFixture";
 import { createAuthorityLossMonitor, lostWorkPolicy } from "@work/helpers/authorityLoss/helpers";
+import { createWorkService } from "@work";
 
 const permit = { id: "work.review", revision: 1 };
 const extra = { id: "tool.ordinary", revision: 1 };
@@ -94,6 +95,35 @@ async function setup(work: SessionWorkPolicyRegistration = { operations }, dynam
     session: (ref: typeof f.ref) => f.host.sessions.get(ref), isSessionCurrent: () => true };
   return { ...f, grant, options, registry, captured, intent };
 }
+
+it("continues a bounded priority scan past 128 denied rows with a compiled claim policy", async () => {
+  const f = await setup({ operations: { claim: { purpose: "execute", policies: [permit] } },
+    prepare: (facts) => Promise.resolve(facts.input.visible === true
+      ? { effect: "allow" as const, invalidation: "registry" as const, isCurrent: () => true, validUntil: Date.now() + 60000, release() {} }
+      : { effect: "deny" as const, release() {} }) });
+  const auth = createWorkAuthorizer(f.options);
+  const service = createWorkService({ repository: () => f.host.work, resolveType: f.options.resolveType,
+    prepare: auth.prepare.bind(auth), scheduling: { allowedKinds: ["review"], admission: (caller) => caller.signal, configuration: { resolve: () => ({ revision: "1", maxActiveClaims: 2 }) } } });
+  try {
+    const seed = await f.service.submit(f.caller, f.request);
+    const { worker } = f.lease(seed.id);
+    await f.service.cancel(f.caller, seed.id);
+    f.grant(permit, worker.context.actor, "worker");
+    for (let index = 0; index < 128; index++) {
+      await f.service.submit(f.caller, { ...f.request, requestKey: `denied-${String(index)}`, priority: 1 });
+    }
+    const allowed = await f.service.submit(f.caller, { ...f.request, requestKey: "visible", input: { visible: true } });
+    const caller = { ...worker, context: { ...worker.context, agentGeneration: 1 }, fence: () => true };
+    const session = { kind: "session", id: f.ref.id };
+    expect(await service.claim(caller, session)).toMatchObject({ status: "deferred" });
+    expect(service.stats()).toMatchObject({ continuations: 1, scanDeferrals: 1 });
+    expect(await service.claim(caller, session)).toMatchObject({ status: "claimed", lease: { workId: allowed.id } });
+    expect(service.stats()).toMatchObject({ continuations: 0 });
+  } finally {
+    service.close();
+    await f.host.release();
+  }
+});
 
 it("requires explicit work grants and extinguishes a genuine approval after revocation", async () => {
   const f = await setup();
@@ -188,9 +218,11 @@ it("requires a real evaluator and evaluates a distinct host namespace against th
 
 it("authorizes a cross-principal agent only with a canonical scoped executor grant", async () => {
   const seen: WorkPolicyFacts[] = [];
+  const revoked = new AbortController();
+  let revocable = false;
   const f = await setup({ operations: { claim: { purpose: "execute", policies: [permit] } }, prepare: (facts) => {
     seen.push(facts);
-    return Promise.resolve({ effect: "allow", validUntil: Date.now() + 60000, isCurrent: () => true, release() {} });
+    return Promise.resolve({ effect: "allow", validUntil: Date.now() + 60000, ...(revocable && { signal: revoked.signal }), isCurrent: () => true, release() {} });
   } });
   const principal = { domainId: f.ref.domainId, subject: "remote-worker" };
   const actor = { kind: "agent" as const, agentId: "canonical-reviewer", principal };
@@ -200,8 +232,13 @@ it("authorizes a cross-principal agent only with a canonical scoped executor gra
   f.grant();
   await expect(auth.prepare(worker, "claim", f.intent)).rejects.toMatchObject({ code: "unauthorized" });
   f.grant(permit, actor, "cross-principal-review");
+  await expect(auth.prepare(worker, "claim", f.intent)).rejects.toMatchObject({ code: "unauthorized" });
+  revocable = true;
   const receipt = await auth.prepare(worker, "claim", f.intent);
   expect(seen[0]?.entities).toEqual({ owner: f.caller.context.actor.principal, submitter: f.caller.context.actor, executor: worker.agent });
+  expect(receipt.fence()).toBe(true);
+  revoked.abort();
+  expect(receipt.fence()).toBe(false);
   receipt.release();
 });
 

@@ -21,6 +21,7 @@ contract and do not inspect this adapter.
 | `helpers/resources/index.ts` | Durable storage factory. |
 | `helpers/durableWork/helpers.ts` | Exact-instance work submissions, quota serialization, epoch-fenced data writes and atomic settlement. |
 | `helpers/durableWork/rows.ts` | Internal work record and selectors, including microsecond timestamps. |
+| `helpers/durableWork/scheduling.ts` | Keyset candidate scans, registration-wide capacity, locked claim and renewal admission, and bounded expiry. |
 | `helpers/resources/types.ts` | Transaction and resource-row types. |
 | `helpers/resources/helpers.ts` | Session/root reservation, fenced state writes, resource data CAS and recovery reads. |
 | `helpers/resources/rows/helpers.ts` | Exact reference lookup, row mapping, bounded value capture and resource insertion. |
@@ -41,7 +42,8 @@ it after validating its neutral selection options. Pass the returned
 uses the same captured epoch. Registration writes require an acquired host.
 The host uses a dedicated ownership connection and a separate pool for durable
 transactions. Both pools bound checkout at five seconds and apply PostgreSQL
-statement and idle-in-transaction timeouts of 30 seconds. Provider disposal
+statement and idle-in-transaction timeouts of 30 seconds. A failed rollback
+discards its client and preserves the original transaction error. Provider disposal
 drains and closes its resources.
 
 Applications using durable sessions independently can construct
@@ -72,6 +74,8 @@ under [`database/migrations/`](../../../../../database/migrations/).
 - A pool-construction failure after allocation awaits one cleanup attempt and
   rethrows the original construction error.
 - The acquired host exposes exact-instance work graph lookup, submission, data replacement and settlement. Submission serializes quota reservations on the host state row and writes work and selections atomically. Settlement checks the registration epoch, attempt, token and database deadline.
+- Claim and renewal lock the host, session, its canonical rows in primary-key order, and the requesting registration. A separate READ COMMITTED statement counts active leases across all sessions and epochs for that registration. Claim checks prepared revisions and locks one eligible row with `SKIP LOCKED`. Renewal checks the database clock after acquiring its work lock and again in its update. Each expiry batch locks up to 32 exhausted leases in the requested session.
+- Policy preparation reads the lease deadline and database time in a single nonlocking statement for the expected session and work revision. This lets a worker claim a lower-priority item while another transaction holds an expired higher-priority item.
 - Session rows join exact catalogue ID, key, version, provider and work manifest.
   State commits take the host checkpoint lock first. Ordinary resource data
   writers take shared session locks and compare the exact data revision.
@@ -79,3 +83,17 @@ under [`database/migrations/`](../../../../../database/migrations/).
 - The disposable PostgreSQL conformance runner exercises ownership takeover,
   deferred root checks, concurrent writers, anchored retirement and purge.
   [PostgreSQL setup and conformance](../../../../../docs/guides/postgresql.md)
+
+## Scheduling measurements
+
+The disposable PostgreSQL 17 gate loads 12,000 queued, leased and terminal work
+items across two sessions, then runs `ANALYZE` and `EXPLAIN (ANALYZE, BUFFERS)`.
+The table records a warm local run of 32 queries per operation with concurrency
+four. Four clients returned idle with zero waiting. The candidate query includes
+hydration of work rows and their resource selections. [Performance fixture](../../../../tests/persistence/adapters/postgres/p3Performance.ts)
+
+| Operation | Scheduling indexes used | Shared hits / reads | Explain execution (ms) | Client p50 / p95 (ms) |
+| --- | --- | --- | --- | --- |
+| Candidate scan | `work_items_queued_priority_idx`, `work_items_expired_claim_idx` | 626 / 0 | 1.236 | 3.260 / 14.469 |
+| Active capacity | `work_items_active_agent_idx` | 174 / 0 | 0.110 | 0.719 / 0.830 |
+| Expiry batch | `work_items_expired_claim_idx` | 340 / 0 | 0.250 | 1.013 / 2.956 |

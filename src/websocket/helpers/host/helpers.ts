@@ -1,4 +1,5 @@
 import type { AddressInfo } from "node:net";
+import { randomUUID } from "node:crypto";
 import { resourceRefSchema, type ReferenceAuthorizer, type ResourceRef } from "@authorization";
 import { sameResource } from "@authorization/helpers/context";
 import type { SessionCreationContext, SessionFactoryAuthorization } from "@sessions/helpers/creation/types";
@@ -30,6 +31,11 @@ const HOST_SESSIONS_SETTLING = "A session disposal is still settling; create the
  * and attempts every cleanup even when one fails.
  */
 export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
+  const diagnostic = (event: Parameters<NonNullable<AHPServerOptions["onDiagnostic"]>>[0]["event"], correlationId?: string) => {
+    try {
+      void Promise.resolve(options.onDiagnostic?.({ event, correlationId: correlationId ?? randomUUID() })).catch(() => undefined);
+    } catch { /* Sink failure is isolated. */ }
+  };
   const security = options.security;
   const creationConfig = options.sessions.creationSecurity;
   const coherent: unknown = creationConfig?.registry.usesPolicyFactory(creationConfig.policies);
@@ -76,6 +82,14 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
   }
   const sessions: SessionsFactory = createSessionsFactory({
     ...options.sessions,
+    onDiagnostic(event) {
+      diagnostic(event.event);
+      if (options.sessions.onDiagnostic !== (options.onDiagnostic as unknown)) {
+        try {
+          void Promise.resolve(options.sessions.onDiagnostic?.(event)).catch(() => undefined);
+        } catch { /* Optional module sink. */ }
+      }
+    },
     durability,
     sequence,
   });
@@ -98,6 +112,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     ? undefined
     : createAgentDirectory({
         registrations: options.agentWork.registrations,
+        changed: () => { hostedWork?.binding.changed(); },
         domainId: workDomain,
         registrationLimits: options.agentWork.registrationLimits,
         ...(options.agentWork.presenceTtlMs !== undefined
@@ -105,7 +120,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
           : {}),
         ...(options.agentWork.now !== undefined ? { now: options.agentWork.now } : {}),
       });
-  const hostedWork = agents && createHostedWork(options, sessions, agents, () => currentLease, isStopped);
+  const hostedWork = agents && createHostedWork(options, sessions, agents, () => currentLease, isStopped, diagnostic);
   const work = options.agentWork === undefined || agents === undefined
     ? undefined
     : createWorkReadPort({
@@ -115,7 +130,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
       });
   const binding = createAHPBinding(
     sessions,
-    () => undefined,
+    (event) => { diagnostic(event.event); },
     options.agentWork === undefined || agents === undefined || work === undefined
       ? { maxInitialSubscriptions, nativeWrites: options.nativeWrites, ...(options.toolExecution === undefined ? {} : { toolExecution: options.toolExecution }),
           ...(options.serverToolExecution === undefined ? {} : { serverToolExecution: options.serverToolExecution }),
@@ -309,6 +324,8 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
   return {
     work: hostedWork?.service,
     prepareResourceWork: hostedWork?.prepareResourceWork,
+    workConfiguration: hostedWork?.configuration,
+    setAgentEnabled: hostedWork && agents.setEnabled.bind(agents),
     toolExecutionStats: binding.toolStats.bind(binding),
     sessions: hostedSessions,
     start: async (): Promise<AddressInfo> => {
@@ -320,9 +337,10 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
           void stop().catch(() => undefined);
         });
         if (isStopped()) throw new Error(HOST_STOPPED);
-        hostedWork?.start();
+        await hostedWork?.start();
         return await transport.start();
       } catch (error) {
+        diagnostic("lifecycleFailed");
         await stop();
         throw error;
       }

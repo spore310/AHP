@@ -24,7 +24,9 @@ export interface WorkPolicyFacts {
   readonly extension?: JsonObject;
 }
 export type WorkPolicyRestriction = { readonly effect: "deny"; release(): void }
-  | { readonly effect: "allow"; readonly validUntil: number; isCurrent(): boolean; release(): void };
+  | { readonly effect: "allow"; readonly validUntil: number; isCurrent(): boolean; release(): void;
+    /** Claim/renew must declare a native revocation signal or synchronous registry.invalidateExternal on policy changes. */
+    readonly signal?: AbortSignal; readonly invalidation?: "registry"; };
 export interface SessionWorkPolicyRegistration {
   readonly operations: Readonly<Partial<Record<WorkOperation, WorkOperationPolicy>>>;
   prepare?(facts: WorkPolicyFacts, signal: AbortSignal): Promise<WorkPolicyRestriction>;
@@ -37,6 +39,7 @@ export interface WorkAuthorizerOptions {
   readonly allowedOperations?: readonly WorkOperation[];
   resolveType(type: StoredSession["type"]): ResolvedSessionType;
   session(ref: ResourceRef<"session">): Promise<StoredSession | undefined>;
+  readonly sampleLease?: import("@persistence/helpers/durability/workTypes").DurableWorkRepository["sampleLease"];
   resource?(ref: ResourceRef): Promise<ResourceRecord | undefined>;
   isSessionCurrent(ref: ResourceRef<"session">, operation: WorkOperation): boolean;
   readonly prepareDeadlineMs?: number;

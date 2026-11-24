@@ -12,12 +12,17 @@ export interface WorkAuthorityLossContext {
   readonly signal: AbortSignal;
 }
 export interface WorkServiceHooks {
+  formatFailure?(context: {
+    readonly workId: string; readonly kind: string; readonly attempt: number;
+    readonly reported: { readonly retryable: boolean; readonly code?: string; readonly message?: string }; readonly signal: AbortSignal;
+  }): { readonly code: string; readonly summary: string } | Promise<{ readonly code: string; readonly summary: string }>;
   onLeaseAuthorityLost?(context: WorkAuthorityLossContext): WorkAuthorityLossDecision | Promise<WorkAuthorityLossDecision>;
 }
 export interface WorkAuthorityLossOptions {
   readonly hooks: WorkServiceHooks;
   readonly deadlineMs?: number;
   readonly maxPending?: number;
+  onLoss?(): void;
   repository(): import("@persistence/helpers/durability/workTypes").DurableWorkRepository;
   assess(inspection: WorkInspection): Promise<{ readonly reason: WorkAuthorityLossReason; readonly executor: RegisteredAgentIdentity } | undefined>;
   mutate<T>(id: string, run: () => Promise<T>): Promise<T>;
