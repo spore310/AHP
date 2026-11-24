@@ -1,5 +1,6 @@
 import type { TrustedRequestContext } from "@authorization";
 import type { ToolActionRegistration, ToolActionRegistrationOptions } from "../action";
+import type { WorkOperationRestriction } from "@authorization/helpers/resources/types";
 import type { ToolDispatcherOptions } from "../dispatcher";
 import type { ToolPolicyRegistration, ToolPolicyResolutionRequest, ToolExecutorPolicyOptions } from "../policy";
 
@@ -24,7 +25,7 @@ export interface ServerToolBrokerOptions extends Omit<ToolExecutorPolicyOptions<
   readonly executor: ServerToolExecutor;
   readonly dispatcher?: ToolDispatcherOptions;
 }
-export interface ServerToolDispatchRequest extends ToolPolicyResolutionRequest<"server"> {
+export interface ServerToolDispatchRequest extends ToolPolicyResolutionRequest<"server">, WorkOperationRestriction {
   readonly callId: string;
   current(): boolean;
   /** Pure captured caller/session ownership check. */

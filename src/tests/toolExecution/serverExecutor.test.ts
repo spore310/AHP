@@ -88,7 +88,7 @@ function fixture(options: { normalize?: boolean; callerGrant?: boolean; executor
     },
     dispatcher: { limits: { shutdownWaitMs: 5 }, ...options.dispatcher } }, options.shared);
   owned.push(dispatcher);
-  const dispatch = (callId = "server-call", actual = caller) => dispatcher.dispatch({ callId, caller: actual, origin, sessionType, providerId: "mock", registration: required(dispatcher.policy.registrations[0]), input: { path: "initial" }, signal: new AbortController().signal, current: () => true, fence: () => true });
+  const dispatch = (callId = "server-call", actual = caller, tag: import("@authorization/helpers/resources/types").WorkOperationRestriction = {}) => dispatcher.dispatch({ ...tag, callId, caller: actual, origin, sessionType, providerId: "mock", registration: required(dispatcher.policy.registrations[0]), input: { path: "initial" }, signal: new AbortController().signal, current: () => true, fence: () => true });
   return { dispatcher, registration, dispatch, sessionType, policyRef, providerRef, caller, executorContext, executor, registry, policies, origin, initial, normalized, routes, inputs, events, create, prepare, execute, cleanup, installActor, hostCurrent: (value: boolean) => {
     hostCurrent = value;
   } };
@@ -113,6 +113,27 @@ describe("host-controlled tool executor", () => {
     expect(f.prepare).not.toHaveBeenCalled();
     expect(f.execute).not.toHaveBeenCalled();
     if (missing !== "challenge") expect(f.create).not.toHaveBeenCalled();
+  });
+  it.each(["allowed", "out-of-scope", "missing-grant"] as const)("combines canonical and work authority on the normalized route: %s", async (mode) => {
+    const work = { workId: "bbbbbbbb-aaaa-4444-8888-eeeeeeeeeeee", attempt: 2, leaseToken: "aaaaaaaa-bbbb-4444-8888-eeeeeeeeeeee" };
+    const f = fixture({ normalize: true, callerGrant: mode !== "missing-grant" });
+    const release = vi.fn();
+    const prepareWork = vi.fn<import("@toolExecution").ToolWorkPreparation>((caller, ref, route, input) => {
+      expect(caller).toEqual(f.caller);
+      expect(ref).toEqual(work);
+      const normalized = route.targets.some((item) => item.id === f.normalized.id);
+      expect(input).toEqual({ path: normalized ? "normalized" : "initial" });
+      const allowed = !normalized || mode === "allowed";
+      return Promise.resolve({ current: () => allowed, fence: () => allowed, release });
+    });
+    const handle = f.dispatch("work-call", f.caller, { work, prepareWork });
+    expect(await handle.settled).toMatchObject({ status: mode === "allowed" ? "succeeded" : "failed" });
+    handle.release();
+    expect(f.execute).toHaveBeenCalledTimes(mode === "allowed" ? 1 : 0);
+    expect(f.prepare).toHaveBeenCalledTimes(mode === "allowed" ? 1 : 0);
+    expect(prepareWork).toHaveBeenCalledTimes(mode === "missing-grant" ? 0 : 2);
+    expect(release).toHaveBeenCalledTimes(prepareWork.mock.calls.length);
+    expect(JSON.stringify(f.execute.mock.calls)).not.toContain(work.leaseToken);
   });
   it("E03 pins normalized target input for execution and status refresh", async () => {
     const f = fixture({ normalize: true });
@@ -202,7 +223,11 @@ describe("host-controlled tool executor", () => {
     }
   });
 
-  it.each([false, true])("E03 server result projection joins invocation and resource authority; revoke=%s", async (revoke) => {
+  it.each(["allow", "revoke", "tagged", "undeclared-origin", "expired-work"] as const)("E03 server result projection joins invocation and resource authority: %s", async (mode) => {
+    const tagged = !["allow", "revoke"].includes(mode);
+    const shouldCommit = mode === "allow" || mode === "tagged";
+    let workLive = true;
+    const work = { workId: "bbbbbbbb-aaaa-4444-8888-eeeeeeeeeeee", attempt: 1, leaseToken: "aaaaaaaa-bbbb-4444-8888-eeeeeeeeeeee" };
     const core = createToolDispatcher({ projection: { project: (...args) => projection.project(...args) } });
     const f = fixture({ shared: core });
     const refs = [f.origin, f.initial, f.normalized], commits: unknown[] = [];
@@ -217,14 +242,19 @@ describe("host-controlled tool executor", () => {
     for (const ref of refs) resources.install({ resource: ref, owner: subject("owner").principal, route: ref === f.normalized ? required(f.routes.normalized) : required(f.routes.initial),
       ...(ref === f.origin ? { allowedRoutes: [required(f.routes.normalized)] } : {}), externalAuthority: "none", admission: { sessionType: ref === f.origin ? f.sessionType : { key: "test.workspace", version: 1 }, providerId: "mock" },
       ...(ref === f.origin ? {} : { mandatory: [{ ref: f.providerRef, applicable: true }] }) });
-    const projection: ToolResultProjection = createToolResultProjection({ resources, project: (output) => {
+    const projection: ToolResultProjection = createToolResultProjection({ resources, project: (output, context) => {
+      expect(JSON.stringify([output, context])).not.toContain(work.leaseToken);
       expect(f.cleanup).toHaveBeenCalledOnce();
-      if (revoke) f.registry.removeBinding({ bindingId: "host-service:initial", scope: f.origin, revision: 1 });
-      return { target: f.initial, operation: "mutate", payload: output };
+      if (mode === "expired-work") workLive = false;
+      if (mode === "revoke") f.registry.removeBinding({ bindingId: "host-service:initial", scope: f.origin, revision: 1 });
+      return { target: mode === "undeclared-origin" ? f.origin : f.initial, operation: "mutate", payload: output };
     } });
     try {
-      expect(await f.dispatch().settled).toMatchObject({ status: revoke ? "failed" : "succeeded" });
-      expect(commits).toEqual(revoke ? [] : [{ value: "host:junior:initial" }]);
+      const prepareWork = () => Promise.resolve({ current: () => workLive, fence: () => workLive, release: () => {} });
+      const handle = f.dispatch("project", f.caller, tagged ? { work, prepareWork } : {});
+      expect(await handle.settled).toMatchObject({ status: shouldCommit ? "succeeded" : "failed" });
+      handle.release();
+      expect(commits).toEqual(shouldCommit ? [{ value: "host:junior:initial" }] : []);
       expect(f.execute).toHaveBeenCalledOnce();
     } finally {
       resources.dispose();

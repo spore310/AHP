@@ -6,7 +6,8 @@ import { workRequestSchemas } from "@work/helpers/protocol/schemas";
 import { AgentDirectoryError, type AgentDirectory, type AuthenticatedPrincipal, type PresenceBinding } from "@agents";
 import { RpcError } from "@jsonrpc";
 import { isPortableText, RepositoryError } from "@persistence";
-import { WorkError, type WorkReadPort } from "@work";
+import { WorkError, type WorkReadPort, type AuthorizedWorkView, type WorkRequestContext, type WorkApproval } from "@work";
+import { workConnection } from "./workContext";
 
 import type { JsonRpcHandler, JsonRpcHandlers, WebSocketConnectionContext } from "../../types";
 import {
@@ -19,6 +20,13 @@ import {
 export interface AgentWorkExtensionOptions {
   readonly agents?: AgentDirectory;
   readonly work?: Pick<WorkReadPort, "get">;
+  readonly protectedWork?: ProtectedWorkBinding;
+}
+
+export interface ProtectedWorkBinding {
+  agentKey(context: WebSocketConnectionContext): string | undefined;
+  get(caller: WorkRequestContext, id: string): Promise<AuthorizedWorkView | null>;
+  changed?(): void;
 }
 
 export interface AgentWorkExtension {
@@ -134,6 +142,10 @@ export const createAgentWorkExtension = (
   options: AgentWorkExtensionOptions,
 ): AgentWorkExtension => {
   const requirePrincipal = (context: WebSocketConnectionContext): AuthenticatedPrincipal => {
+    if (context.security) {
+      if (context.isSecurityCurrent?.() !== true) return authRequired();
+      return context.security.context.actor.principal;
+    }
     const { principal } = context;
     if (principal === undefined) {
       return authRequired();
@@ -172,6 +184,11 @@ export const createAgentWorkExtension = (
       const principal = requirePrincipal(context);
       const agents = requireAgents();
       const parsed = registerSchema.parse(params);
+      if (context.security) {
+        const actor = context.security.context.actor;
+        const key = options.protectedWork ? options.protectedWork.agentKey(context) : actor.kind === "agent" ? actor.agentId : undefined;
+        if (actor.kind !== "agent" || key !== parsed.agentKey) return invalid();
+      }
       // A connection holding another live agent can never bind a new one, so
       // refuse before a durable registration row is created; there is no delete
       // path to clean a stranded row up later. Re-registering the connection's
@@ -191,6 +208,7 @@ export const createAgentWorkExtension = (
           parsed.agentKey,
           parsed.displayName,
         );
+        if (context.security && context.isSecurityCurrent?.() !== true) return invalid();
         const binding = agents.bindPresence(
           registration.id,
           principal,
@@ -229,29 +247,33 @@ export const createAgentWorkExtension = (
       const binding = agents.getByConnection(context.connectionId);
       if (binding !== undefined && binding.principalSubject === principal.subject) {
         agents.releasePresence(binding);
+        options.protectedWork?.changed?.();
       }
       return null;
     },
 
     [WORK_GET_METHOD]: async (params, context, invocation) => {
       const principal = requirePrincipal(context);
-      const work = requireWork();
       const parsed = getSchema.parse(params);
       try {
-        const setup = context.security;
-        if (!setup) return { version: 1, work: await work.get(principal, parsed.workId) };
-        const identity = setup.context.actor.principal;
-        if (identity.subject !== principal.subject || !invocation.guardReply) return invalid();
-        let instanceCurrent: (() => boolean) | undefined;
-        const view = await work.get(principal, parsed.workId, identity.domainId, (check) => {
-          instanceCurrent = check;
-        });
-        const deliveryCheck = instanceCurrent;
-        const current = () => context.security === setup && context.isSecurityCurrent?.() === true
-          && (view === null || deliveryCheck?.() === true);
-        if (!current()) return invalid();
-        invocation.guardReply(current);
-        return { version: 1, work: view };
+        if (context.security) {
+          if (!invocation.guardReply || invocation.kind !== "request") return invalid();
+          const caller = workConnection(context);
+          let receipt: WorkApproval | undefined;
+          const retainReply = (approval: WorkApproval) => {
+            if (receipt) return invalid();
+            receipt = approval;
+            invocation.onReplySettled(() => {
+              approval.release();
+            });
+          };
+          const view = await options.protectedWork?.get({ ...caller, retainReply }, parsed.workId) ?? null;
+          const check = () => caller.isCurrent() && (view === null || receipt?.isCurrent() === true);
+          if (!check()) return invalid();
+          invocation.guardReply(check);
+          return { version: 1, work: view };
+        }
+        return { version: 1, work: await requireWork().get(principal, parsed.workId) };
       } catch (error) {
         return mapWorkError(error);
       }
@@ -262,6 +284,7 @@ export const createAgentWorkExtension = (
     handlers,
     onConnectionClose(connectionId: string): void {
       options.agents?.releaseConnection(connectionId);
+      options.protectedWork?.changed?.();
     },
     dispose(): void {
       // Presence is connection-scoped and released by the binding owner.

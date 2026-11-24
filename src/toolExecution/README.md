@@ -230,6 +230,7 @@ cancel it. Exact call-ID tombstones prevent replay; at 4096 admitted IDs the
 endpoint closes instead of evicting replay protection.
 
 The public client exposes dispatchTool, statusTool, cancelTool and resumeTool.
+`dispatchTool` and `callTool` accept an optional fourth argument `{ work }` containing the work ID, attempt and lease token. Only the caller-to-host private dispatch carries it. A tagged call requires the host's `ToolWorkPreparation` adapter and ordinary invoke and executor authority. The adapter checks the resolved route and captured input, including any normalized input. The broker checks the held guard before execution, projection and retained result disclosure. Removing the private call releases its guard. Direct broker owners call the returned handle's `release()` after their final disclosure.
 Resume verifies one opaque continuation for the same connection and invocation. Convenience callTool resolves an exact
 private assignment, dispatches once, and polls status with 25-500 ms backoff and
 a 35-second overall budget. It returns only completed output; known unresolved

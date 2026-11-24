@@ -23,6 +23,17 @@ const setup = (ttlMs = 1_000) => {
 };
 
 describe("createAgentDirectory registration", () => {
+  it("rejects an authenticated namesake in another domain before creating a registration or binding", async () => {
+    const fixture = createRegistrationFixture();
+    const directory = createAgentDirectory({ domainId: "local", registrations: fixture.repository });
+    const local = { domainId: "local", subject: "same" };
+    const foreign = { domainId: "other", subject: "same" };
+    const original = await directory.register(local, "worker");
+    await expect(directory.register(foreign, "worker")).rejects.toThrow();
+    expect(() => directory.bindPresence(original.id, foreign, "foreign-connection")).toThrow();
+    expect(fixture.registerCalls).toHaveLength(1);
+    expect(directory.getOnline(original.id)).toBeUndefined();
+  });
   it("preserves retained identities and fences while refusing new identities at capacity", async () => {
     const registrations = createRegistrationFixture();
     const options = { registrations: registrations.repository, registrationLimits: { maxRetained: 1 } };

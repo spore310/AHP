@@ -108,6 +108,7 @@ export const createAHPKernel = (
     ? undefined
     : createAgentWorkExtension({
         agents: options.agents,
+        protectedWork: options.protectedWork,
         work: options.work,
       });
 
@@ -218,7 +219,7 @@ export const createAHPKernel = (
     return peer;
   };
 
-  const toolInvocations = createToolInvocationBroker(factory, peers, requirePeer, options?.toolExecution, options?.serverToolExecution);
+  const toolInvocations = createToolInvocationBroker(factory, peers, requirePeer, options?.toolExecution, options?.serverToolExecution, options?.prepareToolWork);
   const protectedDelivery = options?.protectedViews === undefined ? undefined : createProtectedViewDelivery(factory, options.protectedViews, failPeer);
 
   const beginPending = (peer: AHPPeer, uri: string): void => {

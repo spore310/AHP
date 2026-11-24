@@ -59,6 +59,8 @@ export interface CompiledNamespaceView {
 
 export interface ToolPolicyFactory {
   getPolicy(ref: PolicyRef): CompiledToolPolicy | undefined;
+  /** Resolve a trusted application ceiling against these same registered namespaces. */
+  selectRules?(rules: PolicyScopeRules, context: PolicyResolutionContext): Promise<PolicySelectionResult>;
   forSessionType(
     sessionType: { readonly key: string; readonly version: number },
     providerId: string,

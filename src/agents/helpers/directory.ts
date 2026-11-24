@@ -35,6 +35,11 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
   const registrations: AgentRegistrationRepository = options.registrations;
   const now = options.now ?? Date.now;
   const presenceTtlMs = options.presenceTtlMs ?? DEFAULT_PRESENCE_TTL_MS;
+  const requireDomain = (principal: AuthenticatedPrincipal) => {
+    if (principal.domainId !== undefined && principal.domainId !== domainId) {
+      throw new AgentDirectoryError("unauthorized", "Agent registration is unavailable.");
+    }
+  };
   if (!Number.isFinite(presenceTtlMs) || presenceTtlMs <= 0) {
     throw new Error("Agent presence TTL must be a positive finite number of milliseconds");
   }
@@ -135,6 +140,7 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
       agentKey: string,
       displayName?: string,
     ): Promise<AgentRegistrationRecord> {
+      requireDomain(principal);
       // Keep registration text within the application's portable-text profile.
       if (!isPortableText(agentKey)
         || (displayName !== undefined && !isPortableText(displayName))) {
@@ -168,6 +174,7 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
       principal: AuthenticatedPrincipal,
       connectionId: string,
     ): PresenceBinding {
+      requireDomain(principal);
       const identity = retainedById.get(agentId);
       const record = identity?.record;
       if (identity === undefined || record === undefined) {
@@ -249,6 +256,16 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
 
     getOnline(agentId: string): PresenceBinding | undefined {
       return liveBinding(agentId, now());
+    },
+    capturePresenceFence(binding, epoch) {
+      const start = performance.now();
+      const deadline = start + binding.expiresAt - now();
+      return () => {
+        const live = byAgent.get(binding.agentId);
+        const registration = retainedById.get(binding.agentId)?.record;
+        return live?.generation === binding.generation && live.connectionId === binding.connectionId
+          && registration?.enabled === true && registration.executionEpoch === epoch && performance.now() < deadline;
+      };
     },
 
     getByConnection(connectionId: string): PresenceBinding | undefined {

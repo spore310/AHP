@@ -24,14 +24,15 @@ export interface ToolClientOptions {
   readonly protocolVersions: readonly string[];
 }
 
+export interface ToolCallOptions { readonly work?: import("@work").WorkExecutionRef }
 export interface ToolClient {
   /** The installed public AHP SDK client used for ordinary protocol operations. */
   readonly client: import("@microsoft/agent-host-protocol/client").AhpClient;
   /** Subscribe, obtain private assignments, and activate an exact private advertisement. */
   joinSession(channel: string, implementations: readonly LocalToolImplementation[]): Promise<void>;
   /** Ask a connected session tool provider to execute one exact contract. */
-  callTool(channel: string, ref: { readonly id?: string; readonly key: string; readonly version: number }, input: unknown): Promise<unknown>;
-  dispatchTool(channel: string, contract: ToolInvoke["contract"], input: unknown): Promise<ToolDispatchReply>;
+  callTool(channel: string, ref: { readonly id?: string; readonly key: string; readonly version: number }, input: unknown, options?: ToolCallOptions): Promise<unknown>;
+  dispatchTool(channel: string, contract: ToolInvoke["contract"], input: unknown, options?: ToolCallOptions): Promise<ToolDispatchReply>;
   statusTool(callId: string): Promise<ToolStatusReply>;
   cancelTool(callId: string): Promise<ToolStatusReply>;
   resumeTool(continuationId: string, proofRef: string): Promise<ToolDispatchReply>;

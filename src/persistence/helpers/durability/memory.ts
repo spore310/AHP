@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { ResourceRef } from "@authorization";
 import { atomic, canRetrySessionStart, captureData, captureRef, resourceOrder } from "./helpers";
 import { createMemoryWorkRepository } from "./memoryWork";
+import { fenceHostWork } from "./workFences";
 import type { StoredWork } from "./workTypes";
 import type { AgentRegistrationRecord } from "../../types";
 import type { Admission, DurableHost, DurableStorage, ResourceRecord, StoredSession, Transition } from "./types";
@@ -246,7 +247,7 @@ export function createMemoryDurableStorage(work = new Map<string, StoredWork>(),
         },
       },
       };
-      return host;
+      return fenceHostWork(host);
     });
   } };
 }

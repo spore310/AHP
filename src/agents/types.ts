@@ -2,6 +2,7 @@ import type { AgentRegistrationRecord, AgentRegistrationRepository } from "@pers
 
 /** A trusted subject derived from the transport handshake, never `clientId`. */
 export interface AuthenticatedPrincipal {
+  readonly domainId?: string;
   readonly subject: string;
 }
 
@@ -57,6 +58,7 @@ export interface AgentDirectory {
   /** Clears only bindings owned by that exact connection. */
   releaseConnection(connectionId: string): void;
   getOnline(agentId: string): PresenceBinding | undefined;
+  capturePresenceFence?(binding: PresenceBinding, epoch: string): () => boolean;
   getByConnection(connectionId: string): PresenceBinding | undefined;
   getRegistration(agentId: string): Promise<AgentRegistrationRecord | undefined>;
 }

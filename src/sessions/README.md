@@ -146,8 +146,12 @@ or host acquisition. Separate equivalent compilers reject. All captured type
 admissions are installed as one canonical `installAdmissions` cohort, including
 aggregate new-entry capacity, conflict and per-call input validation before mutation.
 A failed construction cannot leave a partial admission cohort or stale prior stamps. Each trusted type has
-an optional private `policy` registration: exact rules, creation capability/callback
-and fixed creator-bootstrap template. Catalogue definitions/manifests contain none
+an optional private `policy` registration containing exact rules, a creation capability
+and callback, a fixed creator-bootstrap template, and optional restoration and work policies.
+`policy.work.operations` assigns a purpose and exact policy references to each enabled
+work operation. The factory validates them against the same compiler and rejects
+unknown references and statically required challenges. A captured `policy.work.prepare`
+callback can further restrict a canonically permitted operation. Catalogue definitions/manifests contain none
 of that executable policy/template inventory. Policy-bearing types without security,
 and protected global `role`/`authorizedTools` configurations, reject at construction.
 Provider, parser, schema, registration and callback properties are captured once.

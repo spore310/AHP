@@ -17,6 +17,7 @@ Portable authority contracts, a per-host reference evaluator and bounded grant i
 | `helpers/context/index.ts` | Context exports. |
 | `helpers/resources/types.ts` | Resource registration, application operations and issued tickets. |
 | `helpers/resources/helpers.ts` | Canonical instance lookup and authorized owning-service operations. Owner identity is not a role. |
+| `helpers/resources/workRestriction.ts` | Captures a private work guard for the exact operation input and route and releases it when its owner retires. |
 | `helpers/resources/index.ts` | Resource exports. |
 | `helpers/bindings/types.ts` | Installation ownership, canonical lineage and scoped snapshot contracts. |
 | `helpers/bindings/helpers.ts` | Exact policy membership and expiry. |
@@ -222,6 +223,8 @@ and supported operation on each, and evaluates a complete positive grant plus al
 mandatory restrictions. It returns a handle: `ticket` settles with a private issued ticket or undefined,
 and `settled` waits for actual underlying work. Required external proofs come from providers. A new action challenge denies; an invocation
 challenge cannot approve a distinct resource action.
+
+A trusted owner can configure `prepareWork` and supply `work` on an operation request. Tagged requests require both canonical operation authority and a current guard for the declared targets (the origin when the route has no targets). The owner receives the captured payload and token-free context. The write admission rechecks the guard synchronously before mutation.
 
 `commit(ticket, admission)` consumes once and calls the registered owning operation.
 That operation validates payloads and must invoke the supplied synchronous admission

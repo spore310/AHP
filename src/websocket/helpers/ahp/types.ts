@@ -81,10 +81,13 @@ export interface AHPConnectionModuleOptions {
 
 /** Optional authenticated agent/work extension wiring for an AHP binding. */
 export interface AHPBindingOptions {
+  readonly protectedWork?: import("./agentWork").ProtectedWorkBinding;
   readonly nativeWrites?: NativeSessionWrites;
   readonly protectedViews?: ResourceViewOptions;
   readonly toolExecution?: ClientToolBrokerOptions;
   readonly serverToolExecution?: ServerToolBrokerOptions;
+  readonly prepareToolWork?: (context: WebSocketConnectionContext, ...args: Parameters<import("@toolExecution").ToolWorkPreparation>)
+  => ReturnType<import("@toolExecution").ToolWorkPreparation>;
   readonly maxInitialSubscriptions?: number;
   readonly agents?: AgentDirectory;
   readonly work?: WorkReadPort;

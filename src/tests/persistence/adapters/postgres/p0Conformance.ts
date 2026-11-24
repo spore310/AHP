@@ -1,6 +1,7 @@
 import { assertDurableResourceConformance } from "../../conformance/helpers";
 import { createPostgresDurableStorage } from "@persistence/helpers/adapters/postgres";
 import { testPublicLifecycle } from "./publicLifecycle";
+import { testWorkAuthorityStorage } from "./p2Work";
 import { testWorkSettlement } from "./p1Work";
 import { testP1Schema } from "./p1Schema";
 import { assertWorkDataConformance } from "../../conformance/work";
@@ -277,6 +278,7 @@ export const runP0PostgresConformance = async (input: string): Promise<void> => 
           await assertWorkDataConformance(host);
           await assertWorkGraphRevisions(host);
           await testWorkSettlement(host, first);
+          await testWorkAuthorityStorage(host, first, waitForBlocker);
           const registration = await provider.registrations.register({ domainId: "test", principalSubject: "conformance", agentKey: "worker" });
           const other = await provider.registrations.register({ domainId: "other", principalSubject: "conformance", agentKey: "worker" });
           assert.notEqual(other.id, registration.id);

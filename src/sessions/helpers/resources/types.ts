@@ -36,6 +36,6 @@ export interface SessionResourceLifecycle {
     readonly data?: JsonObject;
   }): Promise<ResourceRef>;
   readData(resource: ResourceRef): Promise<DataSnapshot>;
-  replaceData(resource: ResourceRef, change: ReplaceData): Promise<ReplaceDataResult>;
+  replaceData(resource: ResourceRef, change: ReplaceData, admission?: () => boolean): Promise<ReplaceDataResult>;
   retire(resource: ResourceRef): Promise<void>;
 }

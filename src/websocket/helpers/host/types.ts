@@ -18,7 +18,12 @@ import type { WebSocketTransportLimits } from "../../types";
  * methods are not registered.
  */
 export interface AHPServerAgentWorkOptions {
-  readonly authenticator: ConnectionAuthenticator;
+  readonly authenticator?: ConnectionAuthenticator;
+  readonly ceiling?: import("@authorization").PolicyScopeRules;
+  readonly hooks?: import("@work/helpers/authorityLoss/types").WorkServiceHooks;
+  readonly hookDeadlineMs?: number;
+  readonly maxPendingHooks?: number;
+  readonly agentMappings?: readonly { readonly domainId: string; readonly subject: string; readonly actorAgentId: string; readonly agentKey: string }[];
   readonly registrations: AgentRegistrationRepository;
   readonly work: WorkRepository;
   /** Work kinds that may be submitted or claimed. */
@@ -55,6 +60,10 @@ export interface AHPServerOptions {
  * `sessions` is not usable to revive the host after `stop()`.
  */
 export interface AHPServerHandle {
+  /** Trusted in-process commands sharing the host's canonical session policy and durable store. */
+  readonly work?: import("@work").WorkService;
+  /** Restricts an owning resource operation to the current protected connection's exact work lease. */
+  readonly prepareResourceWork?: import("@toolExecution").ToolWorkPreparation;
   /** Includes unresolved remote work after bounded shutdown; not a termination guarantee. */
   toolExecutionStats(): { readonly active: number; readonly draining: number; readonly retainedOutputBytes: number };
   start(): Promise<AddressInfo>;

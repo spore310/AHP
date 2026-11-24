@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createMemoryDurableStorage } from "@persistence";
 import type { ProviderSessionInput, RuntimeResourceDriver, SessionProvider } from "@sessions";
 import { mockProvider } from "@sessions/mock";
-import { actorFor, channel, createReviewHost } from "../../../examples/advanced/host";
+import { actorFor, channel, createReviewHost, reviewWorkerKey } from "../../../examples/advanced/host";
 import { approveRestore, observableStorage, sessionHost } from "./durableFixture";
 
 describe("session recovery", () => {
@@ -103,9 +103,9 @@ describe("session recovery", () => {
     config.capture = unexpected;
     try {
       const address = await one.host.start();
-      const oldPeer = await openWorkClient("ws://127.0.0.1:" + String(address.port), "senior", "old-peer");
+      const oldPeer = await openWorkClient("ws://127.0.0.1:" + String(address.port), "junior", "old-peer");
       clients.push(oldPeer);
-      expect(await oldPeer.request("x-ahp/agents/register", { agentKey: "restart-agent" })).toHaveProperty("agentId");
+      expect(await oldPeer.request("x-ahp/agents/register", { agentKey: reviewWorkerKey })).toHaveProperty("agentId");
       await one.provision(["file:///approved"]);
       assert.ok(input?.resources);
       const child = await input.resources.create({ kind: "chat", id: "chat", driver, parent: one.origin() });
@@ -125,8 +125,8 @@ describe("session recovery", () => {
       expect(one.host.sessions.getSessionSnapshot(channel)?.state.activeClients[0]?.tools).toHaveLength(1);
       await one.stop();
       const recoveredAddress = await two.host.start();
-      expect(() => one.connection("senior")).toThrow();
-      const newPeer = await openWorkClient("ws://127.0.0.1:" + String(recoveredAddress.port), "senior", "new-peer");
+      expect(() => one.connection("junior")).toThrow();
+      const newPeer = await openWorkClient("ws://127.0.0.1:" + String(recoveredAddress.port), "junior", "new-peer");
       clients.push(newPeer);
       await expect(newPeer.request("x-ahp/agents/renew", {})).rejects.toThrow();
       expect(two.host.sessions.authorization?.getResource(channel)).toEqual(one.origin());

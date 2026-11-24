@@ -46,7 +46,15 @@ export interface WorkGraph {
 }
 export type WorkReplayKey = Pick<WorkIntent, "kind" | "requestKey" | "submitter">;
 
+/** Captured under session and work locks, after any earlier mutation has settled. */
+export interface WorkInspection extends WorkGraph {
+  readonly row: StoredWork;
+  readonly databaseTime: number;
+  readonly registration?: { readonly id: string; readonly subject: string; readonly key: string; readonly epoch: string; readonly enabled: boolean };
+}
+
 export interface WorkFence {
+  readonly graphRevision?: Revision;
   readonly session: ResourceRef<"session">;
   readonly id: string;
   readonly revision: Revision;
@@ -57,12 +65,19 @@ export type WorkSettlement
   = | { readonly status: "completed"; readonly result: JsonObject; readonly data?: ReplaceData }
     | { readonly status: "failed"; readonly retryable: boolean; readonly code: string; readonly summary: string; readonly data?: ReplaceData };
 
+export type WorkDisposition = "cancel" | "requeue" | "fail";
+
 /** Exact-host work operations. Each write checks admission after obtaining its durable locks. */
 export interface DurableWorkRepository {
+  observe?(session: ResourceRef<"session">, id: string): { current(): boolean; release(): void };
+  inspect(domainId: string, id: string): Promise<WorkInspection | undefined>;
+  leased(after: string | undefined, limit: number): Promise<readonly { readonly domainId: string; readonly id: string }[]>;
+  disposition(fence: WorkFence, action: WorkDisposition, admit: Admission): Promise<StoredWork>;
   graph(domainId: string, locator: ResourceLocator, replay?: WorkReplayKey): Promise<WorkGraph | undefined>;
   get(domainId: string, id: string): Promise<StoredWork | undefined>;
+  /** Admit a fresh key with null, or a replay with its locked identity and current revision. */
   submit(intent: WorkIntent, graphRevision: Revision, limits: { readonly session: number; readonly host: number },
-    admit: Admission): Promise<{ readonly id: string; readonly created: boolean }>;
+    admit: (previous: Readonly<Pick<StoredWork, "id" | "revision">> | null) => unknown): Promise<{ readonly id: string; readonly created: boolean }>;
   replaceData(fence: WorkFence, change: ReplaceData, admit: Admission): Promise<DataSnapshot>;
   settle(fence: WorkFence, command: WorkSettlement, admit: Admission): Promise<StoredWork>;
 }

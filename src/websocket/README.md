@@ -31,9 +31,9 @@ creation and whole bootstrap-template approval remain separate requirements.
 
 Success returns native `null` only. There is no legacy factory-create fallback,
 no implicit snapshot/subscription/count/tool permission and no raw kernel export. Protected
-binding rejects a competing mutable owner registry. Work consumes a read-only lookup
-of current full resource ref -> canonical owner -> subject in the configured domain;
-private kernel mutable hooks remain legacy/internal only. Exact-instance disposal
+binding rejects a competing mutable owner registry. Protected work reads use the
+current actor, captured session policy, scoped bindings and the acquired durable store.
+Exact-instance disposal
 captures before work awaits; protected lifecycle exclusion uses the factory's separate
 owner-free settle marker, not an owner-cache heuristic. Protected host stop cancels
 in-process preparations synchronously as well as closing network requests; terminal
@@ -57,6 +57,8 @@ host fences prevent reuse even though standalone factories may be reused.
 | `helpers/security/helpers.ts` | Captured limits, scoped read preparation, identity/actor/resource/binding validation, bounded snapshot freshness and release. |
 | `helpers/security/index.ts` | Internal security orchestration and type exports. |
 | `helpers/ahp/agentWork.ts` | Authenticated agent registration/presence and work request handlers, schemas, and error mapping. |
+| `helpers/ahp/workContext.ts` | Captures a protected caller with its connection lifetime and current setup. |
+| `helpers/host/work.ts` | Composes work authorization, exact agent mappings, lease loss handling and private tool guards. |
 | `helpers/ahp/toolInvocation.ts` | Namespaced client-executed tool calls, accepted executor ownership, contract validation, and settlement. |
 | `helpers/ahp/types.ts` | AHP peer, adapter, parameter schemas, and `AHPBindingOptions`. |
 | `helpers/ahp/constants.ts` | Method kinds, authenticated extension method inventory, baseline action inventory, and pending-delivery limit. |
@@ -232,21 +234,18 @@ const server = createWebSocketServer({
   legacy tools remain closed.
   Empty initialize/ping remain supported only after
   the explicit live global-sequence permission gate. The
-  explicit agent/work extension still requires its own principal/owner/presence
-  checks; configured security additionally requires current setup.
-- **Authentication has one source.** Security-only composition has no DB/work
-  requirement. Mixed security/agentWork requires the explicit agents bridge over
-  the exact same authenticator instance and matching workDomainId. A subject-only
-  principal is projected only in that configured domain; arbitrary domains are
-  not collapsed. clientId/kind/role are never identity. Static bearer tokens are
-  POC-grade, not production identity.
+  protected work extension uses the same verified actor and connection setup.
+- **Authentication has one source.** A protected host uses its security composition.
+  When a legacy authenticator is also provided, the identity adapter must reference
+  the same authenticator and configured domain. Agent registration checks the canonical
+  agent identity or the domain- and principal-specific mapping.
 - **Work reads.** `x-ahp/work/get` reads a durable row from the session host's
-  acquired store. Its owner can read the exact session ref, priority, state,
+  acquired store. A caller with current work-read authority can read the exact session ref, priority, state,
   input, current data, revisions, and selectors. The serializer omits the
   submitted-data baseline, request key, and lease credentials. Missing work or
   an unavailable incarnation returns `work: null`. Protected replies recheck
-  the connection and the original session's ownership and readiness at send.
-  Hosts without session durability use their configured legacy work reader.
+  the connection, captured work policy and original session at send.
+  A protected host without a canonical work configuration returns an empty read.
   Remote work mutation methods stay closed through P2.
   `durableWorkRead.test.ts` checks the projected reply on a real connection,
   cross-owner denial, stale session replacement and zero remote work writes.
@@ -302,8 +301,7 @@ actual identity/connection generation and canonical state after binding reads.
 See the [composition contract](../authorization/README.md#public-host-composition)
 and [executable fixture](../tests/authorization/freshness.test.ts). The host forwards
 captured registry/readiness capabilities and keeps readiness false after terminal
-stop. Its work-owner projection checks the same owned resource before and after
-canonical owner lookup.
+stop. Protected work disclosure holds a current policy receipt until its reply settles.
 
 Setup samples the finite deadline clock before the final source-currentness
 predicate. No application clock runs after that canonical comparison; only SDK

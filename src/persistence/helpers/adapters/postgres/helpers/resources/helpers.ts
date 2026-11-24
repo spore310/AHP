@@ -1,5 +1,6 @@
 import { DatabaseError } from "pg";
 import { createPostgresDurableWork } from "../durableWork/helpers";
+import { fenceHostWork } from "@persistence/helpers/durability/workFences";
 import type { ResourceRef } from "@authorization";
 import { sameResource } from "@authorization/helpers/context";
 import { canRetrySessionStart, captureRef, captureData } from "@persistence/helpers/durability/helpers";
@@ -276,8 +277,9 @@ export function createOwnedPostgresStorage(
           finishRetirement: retire.finish,
         },
       };
-      acquired?.(owner, host);
-      return host;
+      const guarded = fenceHostWork(host);
+      acquired?.(owner, guarded);
+      return guarded;
     },
   };
 }

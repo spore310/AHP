@@ -233,6 +233,31 @@ describe("client host proxy dispatcher", () => {
     }
   });
 
+  it("requires a current work restriction before sending to a different executor", async () => {
+    const resolver = vi.fn<import("@toolExecution/helpers/client/helpers/broker").ClientToolBrokerOptions["resolve"]>(
+      (request) => ({ route: { origin: request.origin, targets: [request.origin] } }));
+    const f = setup({ resolve: resolver });
+    const work = { workId: "bbbbbbbb-aaaa-4444-8888-eeeeeeeeeeee", attempt: 2, leaseToken: "aaaaaaaa-bbbb-4444-8888-eeeeeeeeeeee" };
+    const send = vi.fn<(_input: unknown, _context: unknown) => Promise<{ value: string }>>(() => Promise.resolve({ value: "private" }));
+    const tagged = { ...f.request, work, send };
+    expect(await f.dispatcher.dispatch(tagged).settled).toMatchObject({ status: "failed" });
+    expect(send).not.toHaveBeenCalled();
+    let active = true;
+    const release = vi.fn();
+    const prepareWork = vi.fn(() => Promise.resolve({ current: () => active, fence: () => active, release }));
+    const handle = f.dispatcher.dispatch({ ...tagged, prepareWork });
+    expect(await handle.settled).toMatchObject({ status: "succeeded" });
+    expect(prepareWork).toHaveBeenCalledWith(f.caller, work, f.route, f.request.input, expect.any(AbortSignal));
+    expect(JSON.stringify(resolver.mock.calls)).not.toContain(work.leaseToken);
+    expect(JSON.stringify(send.mock.calls)).not.toContain(work.leaseToken);
+    active = false;
+    expect(handle.current()).toBe(false);
+    expect(await handle.refresh()).toBeUndefined();
+    handle.release();
+    expect(release).toHaveBeenCalledOnce();
+    await f.dispatcher.shutdown();
+  });
+
   it("uses the P08 lifecycle and returns only schema-validated remote output", async () => {
     const f = setup();
     const send = vi.fn((input: unknown) => Promise.resolve({ value: typeof input === "object" ? "result-canary" : "invalid" }));

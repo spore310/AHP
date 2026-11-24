@@ -334,6 +334,13 @@ const captureBinding = (
   if (!session.success || !provider.success) {
     throw new ToolPolicyFactoryError("invalid-definition", "Invalid policy configuration.");
   }
+  return { key: session.data.name, version: session.data.revision, providerId: provider.data.name,
+    rules: captureScopeRules(input, limits, policies, namespaces) };
+};
+
+const captureScopeRules = (input: PolicyScopeRules, limits: PolicyLimits, policies: Map<string, Map<number, CompiledToolPolicy>>,
+  namespaces: Map<string, Map<number, StoredNamespace>>): PolicyScopeRules => {
+  const schemas = createToolPolicySchemas(limits);
   if (input.admitted.policies.length > limits.maxPolicyRefs
     || input.admitted.namespaces.length > limits.maxNamespaceIncludes
     || input.mandatory.length > limits.maxPolicyRefs) {
@@ -361,18 +368,13 @@ const captureBinding = (
       throw new ToolPolicyFactoryError("unknown-reference", "Unknown policy or namespace reference.");
     }
   }
-  return {
-    key: session.data.name,
-    version: session.data.revision,
-    providerId: provider.data.name,
-    rules: freezeDeep({
-      admitted: {
-        policies: input.admitted.policies.map((item) => copyRef(item)),
-        namespaces: input.admitted.namespaces.map((item) => freezeDeep({ name: item.name, revision: item.revision })),
-      },
-      mandatory: input.mandatory.map((item) => copyRef(item)),
-    }),
-  };
+  return freezeDeep({
+    admitted: {
+      policies: input.admitted.policies.map((item) => copyRef(item)),
+      namespaces: input.admitted.namespaces.map((item) => freezeDeep({ name: item.name, revision: item.revision })),
+    },
+    mandatory: input.mandatory.map((item) => copyRef(item)),
+  });
 };
 
 const deny = (code: string): PolicySelectionResult => freezeDeep({ effect: "deny", code });
@@ -491,6 +493,58 @@ export const createToolPolicyFactory = (options: ToolPolicyFactoryOptions): Tool
     return admitted;
   };
 
+  const selectRules = async (rules: PolicyScopeRules, context: PolicyResolutionContext): Promise<PolicySelectionResult> => {
+    const admitted = admissionSet(rules);
+    const mandatory = rules.mandatory.map((item) => copyRef(item));
+    if (rules.admitted.namespaces.length === 0) {
+      return freezeDeep({
+        effect: "selected",
+        alternatives: rules.admitted.policies.map((item) => copyRef(item)),
+        mandatory,
+      });
+    }
+    const alternatives: PolicyRef[] = rules.admitted.policies.map((item) => copyRef(item));
+    const seen = new Set<string>(alternatives.map((item) => refKey(item)));
+    for (const include of rules.admitted.namespaces) {
+      const node = namespaces.get(include.name)?.get(include.revision);
+      if (node === undefined) {
+        return deny("out-of-admission");
+      }
+      const called = await callResolver(node.resolve, context, limits.asyncHookDeadlineMs);
+      if (called.kind === "timeout") {
+        return deny("resolver-timeout");
+      }
+      if (called.kind === "failed" || !Array.isArray(called.value)) {
+        return deny(called.kind === "failed" ? "resolver-failed" : "resolver-output");
+      }
+      try {
+        if (!capturePlainJson(called.value, refArrayPlainLimits(limits))) {
+          return deny("resolver-output");
+        }
+        if (called.value.length > limits.maxPolicyRefs) {
+          return deny("resolver-output");
+        }
+        for (const item of called.value) {
+          const exact = readExactRef(item);
+          if (exact === undefined) {
+            return deny("resolver-output");
+          }
+          if (!admitted.has(refKey(exact))) {
+            return deny("out-of-admission");
+          }
+          const key = refKey(exact);
+          if (!seen.has(key)) {
+            seen.add(key);
+            alternatives.push(copyRef(exact));
+          }
+        }
+      } catch {
+        return deny("resolver-output");
+      }
+    }
+    return freezeDeep({ effect: "selected", alternatives, mandatory });
+  };
+
   return {
     getPolicy: (ref) => {
       const found = getPolicy(policies, ref);
@@ -499,58 +553,8 @@ export const createToolPolicyFactory = (options: ToolPolicyFactoryOptions): Tool
     forSessionType: (sessionType, providerId) => freezeDeep(
       clonePlain(findBinding(sessionType.key, sessionType.version, providerId)) as PolicyScopeRules,
     ),
-    select: async ({ sessionType, providerId, context }) => {
-      const rules = findBinding(sessionType.key, sessionType.version, providerId);
-      const admitted = admissionSet(rules);
-      const mandatory = rules.mandatory.map((item) => copyRef(item));
-      if (rules.admitted.namespaces.length === 0) {
-        return freezeDeep({
-          effect: "selected",
-          alternatives: rules.admitted.policies.map((item) => copyRef(item)),
-          mandatory,
-        });
-      }
-      const alternatives: PolicyRef[] = rules.admitted.policies.map((item) => copyRef(item));
-      const seen = new Set<string>(alternatives.map((item) => refKey(item)));
-      for (const include of rules.admitted.namespaces) {
-        const node = namespaces.get(include.name)?.get(include.revision);
-        if (node === undefined) {
-          return deny("out-of-admission");
-        }
-        const called = await callResolver(node.resolve, context, limits.asyncHookDeadlineMs);
-        if (called.kind === "timeout") {
-          return deny("resolver-timeout");
-        }
-        if (called.kind === "failed" || !Array.isArray(called.value)) {
-          return deny(called.kind === "failed" ? "resolver-failed" : "resolver-output");
-        }
-        try {
-          if (!capturePlainJson(called.value, refArrayPlainLimits(limits))) {
-            return deny("resolver-output");
-          }
-          if (called.value.length > limits.maxPolicyRefs) {
-            return deny("resolver-output");
-          }
-          for (const item of called.value) {
-            const exact = readExactRef(item);
-            if (exact === undefined) {
-              return deny("resolver-output");
-            }
-            if (!admitted.has(refKey(exact))) {
-              return deny("out-of-admission");
-            }
-            const key = refKey(exact);
-            if (!seen.has(key)) {
-              seen.add(key);
-              alternatives.push(copyRef(exact));
-            }
-          }
-        } catch {
-          return deny("resolver-output");
-        }
-      }
-      return freezeDeep({ effect: "selected", alternatives, mandatory });
-    },
+    selectRules: async (rules, context) => selectRules(captureScopeRules(rules, limits, policies, namespaces), context),
+    select: async ({ sessionType, providerId, context }) => selectRules(findBinding(sessionType.key, sessionType.version, providerId), context),
     inspect: () => freezeDeep({
       policies: [...policies.values()].flatMap((revisions) => [...revisions.values()])
         .sort((left, right) => left.id.localeCompare(right.id) || left.revision - right.revision)

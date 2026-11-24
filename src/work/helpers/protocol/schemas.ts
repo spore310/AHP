@@ -1,10 +1,11 @@
 import { z } from "zod";
+import { executionSchema, workUuid } from "./execution";
+export { executionSchema, workUuid } from "./execution";
 import { captureValue } from "@jsonrpc/helpers/value/helpers";
 import type { JsonObject } from "@persistence/helpers/durability/types";
 import { isPortableText } from "@persistence/helpers/text";
 
 const nonblank = (max: number) => z.string().min(1).max(max).refine((text) => text.trim().length > 0 && isPortableText(text));
-export const workUuid = z.uuid().transform((id) => id.toLowerCase());
 const locator = z.strictObject({ id: nonblank(2048), kind: nonblank(128), instanceId: nonblank(2048).optional() });
 const session = locator.extend({ kind: z.literal("session") });
 const rule = z.strictObject({ resource: locator, include: z.boolean(), includeDescendants: z.boolean().optional() });
@@ -25,7 +26,6 @@ export const submissionSchema = z.strictObject({ session: session.optional(), ki
   priority: z.int32().optional(), targetAgentId: workUuid.optional(), scope: z.array(rule).min(1).max(128).refine((rules) => rules.some((r) => r.include)),
   announce: z.array(rule).max(128).optional(), data: jsonObject(65536).optional() });
 export const replacementSchema = z.strictObject({ expectedDataRevision: revision, data: jsonObject(65536) });
-export const executionSchema = z.strictObject({ workId: workUuid, attempt: z.int().min(1).max(100), leaseToken: workUuid });
 export const completionSchema = z.strictObject({ result: jsonObject(262144), data: replacementSchema.optional() });
 export const failureSchema = z.strictObject({ retryable: z.boolean(), code: nonblank(64).optional(), message: nonblank(512).optional(), data: replacementSchema.optional() });
 

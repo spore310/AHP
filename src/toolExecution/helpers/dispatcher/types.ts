@@ -24,7 +24,7 @@ export interface ToolDispatchPorts {
   /** Must retain the complete invocation-specific freshness evidence privately. */
   current(context: ToolActionContext): boolean;
   /** Final joint invocation/resource authority check, using the same canonical registry. */
-  admitProjection?(context: ToolActionContext, authority: ResourceOperationAuthority): boolean;
+  admitProjection?(context: ToolActionContext, authority: ResourceOperationAuthority, target?: import("@authorization").ResourceRef): boolean;
 }
 
 export interface ToolDispatchLimits {

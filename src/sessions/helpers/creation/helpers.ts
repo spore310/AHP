@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { captureWorkPolicy, validateWorkRegistration } from "@work/helpers/authorization/registration";
 import { JsonRpcErrorCodes } from "@microsoft/agent-host-protocol";
 import { z } from "zod";
 
@@ -96,6 +97,7 @@ export const captureCreationPolicy = (policy: SessionTypePolicyRegistration): Se
     ...(policy.creatorBootstrap === undefined ? {} : { creatorBootstrap: policy.creatorBootstrap }),
   }));
   return freezeCreation({ rules: data.rules, ...(data.creatorBootstrap === undefined ? {} : { creatorBootstrap: data.creatorBootstrap }),
+    ...(policy.work === undefined ? {} : { work: captureWorkPolicy(policy.work) }),
     ...(policy.restoration === undefined ? {} : { restoration: { prepare: policy.restoration.prepare.bind(policy.restoration) } }),
     creation: { capability: data.capability, prepare: policy.creation.prepare.bind(policy.creation) },
   });
@@ -134,6 +136,7 @@ export const validateCreationRegistrations = (security: CapturedCreationSecurity
     if (policy === undefined) continue;
     const actual = security.policies.forSessionType(definition, definition.providerId);
     if (JSON.stringify(policy.rules) !== JSON.stringify(actual)) throw new Error("Creation admission mismatch.");
+    if (policy.work !== undefined) validateWorkRegistration(policy.work, security.policies, actual);
     const ceiling = [...actual.admitted.policies];
     for (const namespace of actual.admitted.namespaces) {
       const found = security.policies.inspect().namespaces.find((item) => item.name === namespace.name && item.revision === namespace.revision);
@@ -231,6 +234,11 @@ export const createSessionAuthorization = (dependencies: SessionsDependencies, s
   };
   const authorization: SessionFactoryAuthorization = Object.freeze({
     usesRegistry: (registry: ReferenceAuthorizer) => registry === security.originalRegistry,
+    resolveWorkType: (type: import("@persistence").StoredSession["type"]) => {
+      const resolved = dependencies.application?.catalogue.resolveExisting(type);
+      if (!resolved || resolved.definition.id !== type.id) return unavailable();
+      return resolved;
+    },
     isReady: (expected: ResourceRef<"session">) => {
       const record = dependencies.sessions.get(expected.id);
       const lifecycle: string | undefined = record?.state.lifecycle;

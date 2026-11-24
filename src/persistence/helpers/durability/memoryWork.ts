@@ -20,9 +20,14 @@ export function createMemoryWorkRepository(
   resources: ReadonlyMap<string, ResourceRecord>, session: (ref: ResourceRef<"session">) => StoredSession | undefined,
   guard: (admit?: Admission) => void,
 ): DurableWorkRepository {
+  // SQL serializes fresh work inserts under the host quota lock. A synchronous
+  // admission callback can reenter this adapter before the outer insert lands.
+  let inserting = false;
   function fenced(fence: WorkFence): StoredWork {
     const row = jobs.get(fence.id);
-    if (!row || !sameResource(fence.session, row.session) || session(row.session)?.lifecycle !== "active" || row.revision !== fence.revision) conflict();
+    const root = row && session(row.session);
+    if (!row || !sameResource(fence.session, row.session) || root?.lifecycle !== "active" || row.revision !== fence.revision
+      || (fence.graphRevision !== undefined && root.graphRevision !== fence.graphRevision)) conflict();
     if (fence.execution) {
       const { lease } = row;
       const check = fence.execution;
@@ -38,6 +43,54 @@ export function createMemoryWorkRepository(
     return { data: captureData(change.data), dataRevision: advance(row.dataRevision) };
   }
   return {
+    leased(after, limit) {
+      return atomic(() => {
+        guard();
+        if (!Number.isInteger(limit) || limit < 1 || limit > 128) return conflict();
+        return [...jobs.values()].filter((r) => r.status === "leased" && (!after || r.id > after))
+          .sort((a, b) => a.id < b.id ? -1 : 1).slice(0, limit).map((r) => ({ domainId: r.session.domainId, id: r.id }));
+      });
+    },
+    disposition(fence, action, admit) {
+      return atomic(() => {
+        guard();
+        const row = jobs.get(fence.id);
+        if (!row || !active(row) || row.revision !== fence.revision || !sameResource(row.session, fence.session)) return conflict();
+        const lease = row.lease;
+        const proof = fence.execution;
+        if (proof && (!lease || row.status !== "leased" || lease.registrationId !== proof.registrationId || lease.executionEpoch !== proof.executionEpoch
+          || lease.attempt !== proof.attempt || lease.leaseToken !== proof.leaseToken)) return conflict();
+        if (action !== "cancel" && !proof) return conflict();
+        const root = session(row.session);
+        if (!root || root.lifecycle === "retired" || root.lifecycle === "retiring") return conflict();
+        const graph = createWorkSelectionGraph(row.session.domainId, root, [...resources.values()].filter((r) => sameResource(r.session, row.session)));
+        const canRetry = action === "requeue" && row.attemptCount < row.maxAttempts && root.lifecycle === "active"
+          && graph.hasActivePositiveScope(row.scope, root.graphRevision);
+        const status = action === "cancel" ? "cancelled" : canRetry ? "queued" : "failed";
+        const stamp = new Date().toISOString();
+        const next: StoredWork = { ...row, lease: undefined, status, revision: advance(row.revision), updatedAt: stamp,
+          ...(status === "failed" && { failure: { code: "authority_lost", summary: "Work authority changed.", occurredAt: stamp } }) };
+        guard(admit);
+        if (jobs.get(row.id) !== row || session(row.session)?.graphRevision !== root.graphRevision) conflict();
+        jobs.set(row.id, next);
+        return structuredClone(next);
+      });
+    },
+    inspect(domainId, id) {
+      return atomic(() => {
+        guard();
+        const row = jobs.get(id);
+        if (!row || row.session.domainId !== domainId) return undefined;
+        const root = session(row.session);
+        if (!root || root.lifecycle === "retired" || root.lifecycle === "retiring") return undefined;
+        const agent = row.lease && registrations.get(row.lease.registrationId);
+        const registration = agent?.domainId === domainId && agent.executionEpoch !== undefined
+          ? { id: agent.id, subject: agent.principalSubject, key: agent.agentKey, enabled: agent.enabled, epoch: agent.executionEpoch }
+          : undefined;
+        return structuredClone({ session: root, resources: [...resources.values()].filter((r) => sameResource(r.session, row.session)),
+          row, databaseTime: Date.now(), registration });
+      });
+    },
     graph(domainId, locator, replay) {
       return atomic(() => {
         guard();
@@ -87,16 +140,20 @@ export function createMemoryWorkRepository(
         const existing = [...jobs.values()].find((row) => sameResource(row.session, root.ref) && row.kind === intent.kind && row.requestKey === intent.requestKey);
         if (existing) {
           if (!sameWorkIntent(existing, intent)) conflict();
-          guard(admit);
+          guard(() => admit({ id: existing.id, revision: existing.revision }));
+          if (jobs.get(existing.id) !== existing || session(root.ref)?.graphRevision !== graphRevision) conflict();
           return { id: existing.id, created: false };
         }
+        if (inserting) return conflict();
         const graph = createWorkSelectionGraph(root.ref.domainId, root, [...resources.values()].filter((row) => sameResource(row.session, root.ref)));
         if ([...intent.scope, ...intent.announce].some(({ resource }) =>
           !graph.selected(resource, [{ resource, include: true, includeDescendants: false }], graphRevision))) conflict();
-        if (intent.targetAgentId !== null) {
+        const targetCurrent = () => {
+          if (intent.targetAgentId === null) return true;
           const agent = registrations.get(intent.targetAgentId);
-          if (!agent?.enabled || agent.domainId !== root.ref.domainId) conflict();
-        }
+          return agent?.enabled && agent.domainId === root.ref.domainId;
+        };
+        if (!targetCurrent()) conflict();
         const occupied = [...jobs.values()].filter(active);
         if (occupied.length >= limits.host || occupied.filter((row) => sameResource(row.session, root.ref)).length >= limits.session) conflict();
         const stamp = new Date().toISOString();
@@ -104,8 +161,16 @@ export function createMemoryWorkRepository(
         const data = captureData(intent.submittedData);
         const row: StoredWork = { ...intent, input: captureData(intent.input), submittedData: data, data, id, owner: root.owner, status: "queued", attemptCount: 0,
           revision: "1", dataRevision: "1", createdAt: stamp, updatedAt: stamp };
-        guard(admit);
-        jobs.set(id, row);
+        inserting = true;
+        try {
+          guard(() => admit(null));
+          // An admission callback may synchronously retire an anchor or disable the target.
+          // Every lifecycle transition advances the owning session's graph revision.
+          if (session(root.ref)?.graphRevision !== graphRevision || !targetCurrent()) conflict();
+          jobs.set(id, row);
+        } finally {
+          inserting = false;
+        }
         return { id, created: true };
       });
     },
@@ -115,6 +180,7 @@ export function createMemoryWorkRepository(
         const row = fenced(fence);
         const value = changeData(row, change);
         guard(admit);
+        fenced(fence);
         jobs.set(row.id, { ...row, ...value, revision: advance(row.revision), updatedAt: new Date().toISOString() });
         return structuredClone(value);
       });
@@ -131,6 +197,7 @@ export function createMemoryWorkRepository(
           : { ...update, status: command.retryable && row.attemptCount < row.maxAttempts ? "queued" : "failed",
               failure: { code: command.code, summary: command.summary, occurredAt: stamp } };
         guard(admit);
+        fenced(fence);
         jobs.set(row.id, next);
         return structuredClone(next);
       });

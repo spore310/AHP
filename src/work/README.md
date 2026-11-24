@@ -6,6 +6,10 @@ Work submissions resolve an exact session and its canonical resources. The servi
 
 | File | Responsibility |
 | ---- | -------------- |
+| `helpers/authorization/types.ts` | Work operations, registered policies, callback facts, restrictions, and host ceilings. |
+| `helpers/authorization/registration.ts` | Capture operation policy maps and validate compiler references at session registration. |
+| `helpers/authorization/helpers.ts` | Prepare scoped canonical decisions, bound consumer restrictions, and check fresh approval cohorts. |
+| `helpers/authorization/index.ts` | Work authorization factory and registration types. |
 | `helpers/definitions/types.ts` | Work-kind descriptors, application parsers, and the captured kind contract. |
 | `helpers/definitions/helpers.ts` | Capture registrations, validate declared manifests, and normalize input, result, and data. |
 | `helpers/definitions/index.ts` | Work-kind registration and resolution exports. |
@@ -20,6 +24,10 @@ Work submissions resolve an exact session and its canonical resources. The servi
 | `helpers/commands/types.ts` | Trusted contexts, commands, service ports and projections. |
 | `helpers/commands/helpers.ts` | Strict capture, type resolution, submission, data updates and settlement. |
 | `helpers/commands/views.ts` | Detail and summary serializers. |
+| `helpers/executionGuard/helpers.ts` | Invalidates private work proofs before a mutation, including while its acknowledgement is pending. |
+| `helpers/authorityLoss/types.ts` | Consumer decisions and captured facts for the affected attempt. |
+| `helpers/authorityLoss/helpers.ts` | Paged authority checks, callback deadlines, retained capacity and fenced disposition. |
+| `helpers/protocol/execution.ts` | Portable work ID, attempt and lease-token schema shared by private dispatch and work requests. |
 | `helpers/protocol/schemas.ts` | Strict V1 request shapes, canonical UUID capture, retry and data revisions, and bounded JSON. |
 | `index.ts` | Public surface for the module. |
 
@@ -61,7 +69,12 @@ Pass an acquired work repository, an exact session-type resolver and a trusted a
 
 - `submit` resolves the scope and pins the actor, type configuration and signed 32-bit priority. An identical retry returns the original ID in every status, including after data changes or a lost commit acknowledgement. The unique key includes the session incarnation, kind and request key.
 - `get` returns an authorized detail projection. The list summary contains identity, priority, status, revision and timestamps. Lease secrets and immutable submitted data are private storage fields.
+- `cancel` requires the operation's explicit scoped policy. The durable update checks the exact session and work revision.
 - `updateData` replaces the whole data object at the expected revision. The work revision and data revision advance together. A stale command changes neither.
 - `complete` and `fail` check the registration epoch, attempt, lease token, deadline and exact session before settlement. An optional final data update commits atomically. A failure records a generic summary. Direct execution requests must come from a matching trusted agent context.
 
 The [durable lifecycle example](../../examples/durable-lifecycle.ts) submits work scoped to one child, updates its data and retries the original submission. The [shared work contract](../tests/persistence/conformance/work.ts) runs on both storage adapters. The [service](../tests/work/workService.test.ts), [settlement](../tests/work/data.test.ts) and [selection](../tests/work/selections.test.ts) suites cover the in-process entry points.
+
+Tagged execution requires an active lease bound to the caller's registration and epoch. The host checks each resolved target against the captured scope, using the origin for an empty target list. It converts the remaining database lease lifetime into a conservative local monotonic deadline. Application permissions and the work guard are rechecked before effects and disclosure.
+
+An observed authority change schedules a bounded scan of active leases. Consumers can retain, requeue, fail or cancel the affected attempt. A missing decision, failure or timeout retains the lease until expiry. A timed-out callback occupies its slot through settlement. Every modifying decision checks the current revision, attempt and lease, and requeue also checks lifecycle, positive anchors and retry budget.

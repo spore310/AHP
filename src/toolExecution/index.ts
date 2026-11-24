@@ -25,6 +25,7 @@ export type {
   ToolDispatchRequest, ToolDispatcherOptions, ToolDispatcher,
 } from "./helpers/dispatcher";
 
+export type { WorkOperationGuard as ToolWorkGuard, PrepareWorkOperation as ToolWorkPreparation } from "@authorization/helpers/resources/types";
 export type { ToolChallengeOptions, ToolChallengeLimits } from "./helpers/challenge";
 
 export { createToolResultProjection } from "./helpers/projection";

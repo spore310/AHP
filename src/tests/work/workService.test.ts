@@ -147,17 +147,19 @@ describe("protected work reads and legacy session disposal", () => {
   });
 
   it("guards canonical replies by exact instance and live connection and redacts the stored lease", async () => {
-    const f = await workFixture();
+    let instance: string | undefined;
+    const f = await workFixture({ prepare: (_caller, _operation, intent) => Promise.resolve({
+      isCurrent: () => instance === intent.session.instanceId, release() {} }) });
+    instance = f.ref.instanceId;
     try {
       const { id } = await f.service.submit(f.caller, f.request);
       const { execution } = f.lease(id);
       const principal = { subject: f.session.owner };
       const repository = { get: vi.fn(), hasDependentWork: vi.fn() };
-      let instance = f.ref.instanceId;
       let connected = true;
       const port = createWorkReadPort({ sessions: createSessionOwnerRegistry(), repository, canonicalGet: f.host.work.get.bind(f.host.work),
         currentInstance: (uri, exact, subject, domain) => uri === f.ref.id && exact === instance && subject === principal.subject && domain === f.ref.domainId });
-      const handler = createAgentWorkExtension({ work: port }).handlers["x-ahp/work/get"];
+      const handler = createAgentWorkExtension({ work: port, protectedWork: { agentKey: () => undefined, get: f.service.get.bind(f.service) } }).handlers["x-ahp/work/get"];
       if (!handler) throw new Error("Missing work read handler.");
       const guard = vi.fn<(check: () => boolean) => void>();
       const call = (read: typeof handler) => read({ version: 1, workId: id }, {
@@ -183,7 +185,8 @@ describe("protected work reads and legacy session disposal", () => {
       connected = false;
       expect(check?.()).toBe(false);
       connected = true;
-      const wrapped = createAgentWorkExtension({ work: { get: (actor, workId, domain) => port.get(actor, workId, domain) } }).handlers["x-ahp/work/get"];
+      const wrapped = createAgentWorkExtension({ protectedWork: { agentKey: () => undefined,
+        get: (caller, workId) => f.service.get({ ...caller, retainReply: undefined }, workId) } }).handlers["x-ahp/work/get"];
       if (!wrapped) throw new Error("Missing wrapped work read handler.");
       await expect(call(wrapped)).rejects.toThrow();
     } finally {

@@ -17,7 +17,7 @@ import { createPrivateToolProtocol, type PrivateAssignmentTicket } from "./helpe
 import type { ConnectionSecuritySnapshot } from "@websocket/helpers/security/types";
 import type { JsonRpcInvocation, WebSocketConnectionContext } from "../../types";
 import { TOOL_INVOCATION_METHOD } from "./constants";
-import type { AHPPeer } from "./types";
+import type { AHPBindingOptions, AHPPeer } from "./types";
 
 const toolCallParamsSchema = z.strictObject({ channel: z.string().min(1).max(2048), key: z.string().min(1).max(256), version: z.int().positive(), input: z.unknown() });
 const toolCompletionParamsSchema = z.strictObject({ callId: z.uuid(), channel: z.string().min(1).max(2048), key: z.string().min(1).max(256), version: z.int().positive(), output: z.unknown().optional(), error: z.string().max(4096).optional() })
@@ -73,7 +73,8 @@ interface PendingCompletion {
 
 /** Sole transport correlation adapter. Missing canonical policy wiring fails closed. */
 export function createToolInvocationBroker(factory: SessionsFactory, peers: ReadonlyMap<string, AHPPeer>,
-  requirePeer: (context: WebSocketConnectionContext) => AHPPeer, options?: ClientToolBrokerOptions, serverOptions?: ServerToolBrokerOptions) {
+  requirePeer: (context: WebSocketConnectionContext) => AHPPeer, options?: ClientToolBrokerOptions, serverOptions?: ServerToolBrokerOptions,
+  prepareWork?: AHPBindingOptions["prepareToolWork"]) {
   const authorization = factory.authorization;
   if (options !== undefined && (authorization === undefined || !authorization.usesRegistry(options.registry))) {
     throw new Error("Tool broker requires the canonical session registry.");
@@ -396,11 +397,13 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
     }
   };
 
-  const startCall = (request: z.infer<typeof toolCallParamsSchema>, context: WebSocketConnectionContext, callId: string, expectedContractId?: string) => {
+  const startCall = (request: z.infer<typeof toolCallParamsSchema>, context: WebSocketConnectionContext, callId: string, expectedContractId?: string,
+    work?: import("@work").WorkExecutionRef) => {
     const caller = requirePeer(context);
     const setup = context.security;
     if (lifecycle === undefined || setup === undefined || !livePeer(caller, setup) || !caller.subscriptions.has(request.channel)
       || admissions + lifecycle.stats().active >= 64) return unavailable();
+    const restriction = work === undefined ? {} : { work, prepareWork: prepareWork?.bind(undefined, context) };
     admissions += 1;
     let admitting = true;
     try {
@@ -414,7 +417,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
           && manifestRevision(facts.origin) === facts.manifestRevision;
         const fence = () => ownedPeer(caller, setup) && caller.subscriptions.has(request.channel) && sessionTokens.get(request.channel) === facts.origin
           && manifestRevision(facts.origin) === facts.manifestRevision;
-        const handle = serverDispatcher.dispatch({ caller: setup.context, origin: facts.origin, sessionType: facts.sessionType, providerId: facts.providerId,
+        const handle = serverDispatcher.dispatch({ ...restriction, caller: setup.context, origin: facts.origin, sessionType: facts.sessionType, providerId: facts.providerId,
           registration: serverRegistration, input: request.input, signal: controller.signal, callId, current, fence });
         calls.set(callId, { caller: context, channel: request.channel, handle });
         void handle.settled.then(() => {
@@ -449,7 +452,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
         && caller.subscriptions.has(request.channel) && selected.peer.subscriptions.has(request.channel)
         && advertisements.get(selected.peer.context.connectionId)?.get(request.channel) === selected.ad
         && sessionTokens.get(request.channel) === facts.origin && (enqueued || advertisementReady(selected.ad));
-      const handle = dispatcher.dispatch({ caller: setup.context, origin: facts.origin, sessionType: facts.sessionType,
+      const handle = dispatcher.dispatch({ ...restriction, caller: setup.context, origin: facts.origin, sessionType: facts.sessionType,
         providerId: facts.providerId, registration: selected.registration, input: request.input,
         signal: controller.signal, callId, executor: selected.executor, executorContext: selected.ad.setup.context, current, fence,
         send: (input, actionContext, onEnqueued) => new Promise<unknown>((resolve, reject) => {
@@ -559,7 +562,7 @@ export function createToolInvocationBroker(factory: SessionsFactory, peers: Read
         },
         assignment,
         dispatch: (context, request, callId) => startCall({ channel: request.channel,
-          key: request.contract.key, version: request.contract.version, input: request.input }, context, callId, request.contract.id),
+          key: request.contract.key, version: request.contract.version, input: request.input }, context, callId, request.contract.id, request.work),
         onInvalidate: (listener) => configuration.registry.onInvalidate(() => {
           privateAdvertisementEpoch = {};
           lifecycle?.invalidateChallenges();

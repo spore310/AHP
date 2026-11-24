@@ -2,6 +2,8 @@ import type { ToolDispatchAdmission, ToolDispatchHandle } from "@toolExecution/h
 import type { ToolStatusReply } from "@toolExecution/helpers/client/helpers/protocol";
 
 export interface PrivateToolCallHandle extends ToolDispatchHandle<unknown> {
+  /** Releases private retained disclosure authority on eviction. */
+  release?(): void;
   /** Structured initial receipt; ready requires actual enqueue, challenge keeps the call waiting. */
   readonly admitted: Promise<ToolDispatchAdmission>;
 }

@@ -26,7 +26,7 @@ export function createToolResultProjection(options: ToolProjectionOptions): Tool
           ticket = await operation.ticket;
           if (ticket === undefined) return false;
           if (aborted() || !current()) return false;
-          return await resources.commitDurable(ticket, admission);
+          return await resources.commitDurable(ticket, (authority) => admission(authority, request.target));
         } finally {
           if (ticket !== undefined) resources.cancel(ticket);
           await operation.settled;

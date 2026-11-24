@@ -39,6 +39,7 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
     clearTimeout(entry.timer);
     entry.admission.resolve({ status: "denied" });
     if (!entry.finished) cancelWork(entry);
+    entry.handle?.release?.();
   };
   const retireDenied = (entry: Entry): void => {
     if (entry.finished && entry.deniedBeforeAdmission) remove(entry);
@@ -124,7 +125,10 @@ export function createPrivateToolCalls(options: PrivateToolCallOptions = {}): Pr
       try {
         const handle = start(callId);
         entry.handle = handle;
-        if (!owned(entry)) cancelWork(entry);
+        if (!owned(entry)) {
+          cancelWork(entry);
+          handle.release?.();
+        }
         void handle.admitted.then((allowed) => {
           if (allowed.status === "denied") {
             denyAdmission(entry);

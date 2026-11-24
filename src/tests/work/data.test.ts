@@ -3,6 +3,122 @@ import { createMemoryDurableStorage, type AgentRegistrationRecord } from "@persi
 import { assertWorkDataConformance, assertTargetReplayConformance } from "../persistence/conformance/work";
 import { workFixture } from "./commandsFixture";
 import { workSummary } from "@work";
+import type { WorkApproval } from "@work";
+import type { WorkIntent } from "@persistence/helpers/durability/workTypes";
+
+it.each(["changed", "appeared"] as const)("reauthorizes a row that %s during submit preparation", async (race) => {
+  const entered = Promise.withResolvers<undefined>(), resume = Promise.withResolvers<undefined>();
+  const decisions: Array<string | undefined> = [];
+  let park = false;
+  const f = await workFixture({ async prepare(_caller, op, _intent, row) {
+    if (op === "submit") decisions.push(row?.revision);
+    if (park) {
+      park = false;
+      entered.resolve(undefined);
+      await resume.promise;
+    }
+    return { isCurrent: () => row?.data.hidden !== true, release() {} };
+  } });
+  try {
+    let existing = race === "changed" ? await f.service.submit(f.caller, f.request) : undefined;
+    decisions.length = 0;
+    park = true;
+    const pending = f.service.submit(f.caller, f.request);
+    await entered.promise;
+    existing ??= await f.service.submit(f.caller, f.request);
+    await f.host.work.replaceData({ session: f.ref, id: existing.id, revision: "1" },
+      { expectedDataRevision: "1", data: { hidden: true } }, () => true);
+    resume.resolve(undefined);
+    await expect(pending).rejects.toMatchObject({ code: "unauthorized" });
+    expect(decisions.at(-1)).toBe("2");
+    expect(f.rows.size).toBe(1);
+  } finally {
+    resume.resolve(undefined);
+    await f.host.release();
+  }
+});
+
+it("fences a replay receipt until delivery when the current row determines submit permission", async () => {
+  const f = await workFixture({ prepare: (_caller, _op, _intent, row) => Promise.resolve({
+    isCurrent: () => row?.data.hidden !== true, release() {} }) });
+  const receipts: WorkApproval[] = [];
+  const caller = { ...f.caller, retainReply: (approval: WorkApproval) => {
+    receipts.push(approval);
+  } };
+  try {
+    const { id } = await f.service.submit(caller, f.request);
+    expect(receipts[0]?.isCurrent()).toBe(true);
+    expect(await f.service.submit(caller, f.request)).toEqual({ id });
+    expect(receipts[1]?.isCurrent()).toBe(true);
+    await f.host.work.replaceData({ session: f.ref, id, revision: "1" }, { expectedDataRevision: "1", data: { hidden: true } }, () => true);
+    expect(receipts[1]?.isCurrent()).toBe(false);
+    await expect(f.service.submit(caller, f.request)).rejects.toMatchObject({ code: "unauthorized" });
+    expect(receipts).toHaveLength(2);
+  } finally {
+    for (const receipt of receipts) receipt.release();
+    await f.host.release();
+  }
+});
+
+it("reserves a new memory key across reentrant admission", async () => {
+  const f = await workFixture();
+  try {
+    const intent: WorkIntent = { session: f.ref, kind: "review", requestKey: "same", submitter: f.caller.context.actor, priority: 0, targetAgentId: null,
+      input: {}, submittedData: {}, maxAttempts: 2, scope: [{ resource: f.ref, include: true, includeDescendants: false }], announce: [] };
+    const graph = await f.host.work.graph(f.ref.domainId, f.ref);
+    expect(graph).toBeDefined();
+    const submit = (admit: () => boolean) => f.host.work.submit(intent, graph?.session.graphRevision ?? "", { session: 1, host: 1 }, admit);
+    let inner: Promise<unknown> | undefined;
+    const outer = await submit(() => {
+      inner = submit(() => true);
+      return true;
+    });
+    await expect(inner).rejects.toMatchObject({ code: "conflict" });
+    expect(f.rows.size).toBe(1);
+    expect(f.rows.has(outer.id)).toBe(true);
+  } finally {
+    await f.host.release();
+  }
+});
+
+it("rejects an insert when the session retires during final memory admission", async () => {
+  const f = await workFixture();
+  try {
+    const intent: WorkIntent = { session: f.ref, kind: "review", requestKey: "retire", submitter: f.caller.context.actor, priority: 0,
+      targetAgentId: null, input: {}, submittedData: {}, maxAttempts: 2, scope: [{ resource: f.ref, include: true, includeDescendants: false }], announce: [] };
+    const graph = await f.host.work.graph(f.ref.domainId, f.ref);
+    let retirement: Promise<unknown> | undefined;
+    if (!graph) throw new Error("Missing test session.");
+    await expect(f.host.work.submit(intent, graph.session.graphRevision, { session: 1, host: 1 }, () => {
+      retirement = f.host.sessions.beginRetirement(f.ref, () => true);
+      return true;
+    })).rejects.toMatchObject({ code: "conflict" });
+    await retirement;
+    expect(f.rows.size).toBe(0);
+  } finally { await f.host.release(); }
+});
+
+it.each(["replace", "complete", "cancel"] as const)("preserves the winning memory write during final %s admission", async (operation) => {
+  const f = await workFixture();
+  try {
+    const { id } = await f.service.submit(f.caller, f.request);
+    f.lease(id);
+    const row = f.rows.get(id);
+    if (!row?.lease) throw new Error("Missing test lease.");
+    const fence = { session: f.ref, id, revision: row.revision, execution: row.lease };
+    let winner: Promise<unknown> | undefined;
+    const admit = () => {
+      winner = f.host.work.replaceData(fence, { expectedDataRevision: row.dataRevision, data: { winner: true } }, () => true);
+      return true;
+    };
+    const outer = operation === "replace"
+      ? f.host.work.replaceData(fence, { expectedDataRevision: row.dataRevision, data: { winner: false } }, admit)
+      : operation === "complete" ? f.host.work.settle(fence, { status: "completed", result: {} }, admit) : f.host.work.disposition(fence, "cancel", admit);
+    await expect(outer).rejects.toMatchObject({ code: "conflict" });
+    await winner;
+    expect(f.rows.get(id)).toMatchObject({ status: "leased", data: { winner: true }, revision: "3", dataRevision: "2" });
+  } finally { await f.host.release(); }
+});
 
 it("admits exact-instance work, replays immutable intent and serializes data CAS", async () => {
   const registrations = new Map<string, AgentRegistrationRecord>();
@@ -118,5 +234,18 @@ it("recovers cancelled work through its retired chat and cannot submit a new job
     await expect(f.service.submit(foreign, command)).rejects.toThrow();
     expect(f.rows.get(created.id)).toEqual(cancelled);
     expect(f.rows.size).toBe(1);
+  } finally { await f.host.release(); }
+});
+it("rechecks cancellation authority and preserves a terminal work revision on retry", async () => {
+  let available = true;
+  const f = await workFixture({ prepare: () => Promise.resolve({ isCurrent: () => available, release() {} }) });
+  try {
+    const { id } = await f.service.submit(f.caller, f.request);
+    await f.service.cancel(f.caller, id);
+    const before = f.rows.get(id);
+    await f.service.cancel(f.caller, id);
+    expect(f.rows.get(id)).toEqual(before);
+    available = false;
+    await expect(f.service.cancel(f.caller, id)).rejects.toMatchObject({ code: "unauthorized" });
   } finally { await f.host.release(); }
 });

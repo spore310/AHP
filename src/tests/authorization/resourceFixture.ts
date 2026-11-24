@@ -8,7 +8,7 @@ export const operationNames = ["read", "write", "input", "terminate", "mutate"] 
 export const operationRef = (name: string) => ({ id: "resource." + name, revision: 1 });
 export const operationActor: TrustedRequestContext = { actor: { kind: "user", principal: { domainId: "local", subject: "caller" } }, connectionId: "connection-caller", authRevision: "auth-1" };
 export const operationResource = (kind: string, id: string): ResourceRef => ({ domainId: "local", kind, id, instanceId: id + "-instance" });
-export function resourceFixture(options: { targetKind?: string; challengeOperation?: string; mandatory?: boolean; evaluator?: boolean; external?: boolean; timeoutMs?: number; maxPending?: number; ttl?: number; commit?: ResourceOperation["commit"]; commitDurable?: ResourceOperation["commitDurable"] } = {}) {
+export function resourceFixture(options: { prepareWork?: import("@toolExecution").ToolWorkPreparation; targetKind?: string; challengeOperation?: string; mandatory?: boolean; evaluator?: boolean; external?: boolean; timeoutMs?: number; maxPending?: number; ttl?: number; commit?: ResourceOperation["commit"]; commitDurable?: ResourceOperation["commitDurable"] } = {}) {
   let time = 0;
   let providerAllowed = true;
   let currentHook = () => {};
@@ -49,7 +49,7 @@ export function resourceFixture(options: { targetKind?: string; challengeOperati
     fence: (ref) => instances.get(ref.id) === ref.instanceId,
     proof: (ref) => proofEnabled ? { resource: ref, revision: "external-1", validUntil: proofDeadline } : undefined }));
   const types = kinds.map(({ kind }) => ({ kind, type: { key: "test." + kind, version: 1 }, providerId: "provider", operations: operationNames.filter((name) => kind !== "terminal" || ["read", "input", "terminate"].includes(name)).map((name): ResourceOperation => ({ name, purpose: "invoke", policies: [operationRef(name)], validate: (payload) => typeof payload === "object" && payload !== null && "value" in payload && typeof payload.value === "string", ...(options.commitDurable === undefined ? { commit } : { commitDurable: options.commitDurable }) })) }));
-  const resources = createResourceOperations({ registry, policies, kinds, types, timeoutMs: options.timeoutMs, maxPending: options.maxPending });
+  const resources = createResourceOperations({ registry, policies, kinds, types, prepareWork: options.prepareWork, timeoutMs: options.timeoutMs, maxPending: options.maxPending });
   for (const ref of refs) resources.install({ resource: ref, owner: { domainId: "local", subject: "owner" }, route: ref === second || ref === otherChat ? otherRoute : route,
     ...(ref === target && targetKind !== "session" ? { allowedRoutes: [otherRoute] } : {}), externalAuthority: options.external === true ? "required" : "none", admission: { sessionType: { key: "test." + ref.kind, version: 1 }, providerId: "provider" } });
   const revisions = new Map<string, number>();

@@ -3,6 +3,7 @@ import type { SessionConfigSchema } from "@microsoft/agent-host-protocol";
 import type { ApplicationSessionType } from "@sessions/helpers/sessionTypes";
 import type { SessionConfigContract } from "@sessions/types";
 import type { SessionTypePolicyRegistration } from "@sessions/helpers/creation/types";
+import { captureCreationPolicy } from "@sessions/helpers/creation";
 
 import type { AuthorizedToolGrant } from "./types";
 import { captureWorkKinds, type WorkKindRegistration } from "@work/helpers/definitions";
@@ -44,7 +45,7 @@ export function defineApplicationSession(input: {
       },
       config: input.config,
       ...(work && { work: work.work }),
-      ...(input.policy === undefined ? {} : { policy: input.policy }),
+      ...(input.policy === undefined ? {} : { policy: captureCreationPolicy(input.policy) }),
       enabledForCreation: input.enabledForCreation ?? true,
     },
     grants: input.tools.map((grant) => ({

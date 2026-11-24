@@ -476,7 +476,7 @@ describe("P04 public initialization boundary", () => {
     });
   }
 
-  it("I04 real public host invokes one exact legacy bridge and preserves work principals despite spoofed client labels", async () => {
+  it("I04 real public host authenticates each principal once and denies work without a canonical policy", async () => {
     const r = setupFixture();
     const memory = createMemoryPersistenceFixture();
     const base = createStaticTokenAuthenticator(new Map([["ada-token", "ada"], ["bob-token", "bob"]]));
@@ -492,38 +492,36 @@ describe("P04 public initialization boundary", () => {
       const client = await connect(host, `${subject}-token`);
       expect(await client.rpc("initialize", { ...initialize, clientId: "same-admin", kind: "user", role: "admin" })).toMatchObject({ result: { snapshots: [] } });
       expect(await client.rpc("x-ahp/work/get", { version: 1, workId: "11111111-1111-4111-8111-111111111111" })).toMatchObject({ result: { version: 1, work: null } });
-      expect(get).toHaveBeenLastCalledWith({ workId: "11111111-1111-4111-8111-111111111111", principalSubject: subject, domainId: "domain" });
+      expect(get).not.toHaveBeenCalled();
     }
     expect(authenticate).toHaveBeenCalledTimes(2);
     const bad = await connect(host, "bad-token");
     await onClosed(bad.socket);
-    expect(get).toHaveBeenCalledTimes(2);
+    expect(get).not.toHaveBeenCalled();
   });
 
   it("I05 revocation during a real deferred work read prevents protected result egress at the final send", async () => {
     const r = setupFixture();
-    const memory = createMemoryPersistenceFixture();
-    const authenticator = createStaticTokenAuthenticator(new Map([["token", "ada"]]));
-    const identity = createLegacyConnectionIdentityAdapter({ authenticator, domainId: "domain" });
-    const created = await memory.provider.work.submit({ session: {
-      sessionUri: "ahp-session:/owned", ownerPrincipalSubject: "ada", providerId: "mock",
-      createdAt: new Date().toISOString(), modifiedAt: new Date().toISOString(), lastServerSeq: 0, durableState: {},
-    }, requestKey: "private", kind: "test.kind", input: { secret: "private-sentinel" } });
-    const host = createAHPServer({ host: "127.0.0.1", port: 0, sessions: { providers: [mockProvider] },
-      security: { ...r.options, composition: { ...r.composition, identity }, workDomainId: "domain" },
-      agentWork: { authenticator, registrations: memory.provider.registrations, work: memory.provider.work, allowedKinds: new Set(["test.kind"]), dispose: () => memory.provider.dispose() },
-    });
-    const client = await connect(host, "token");
-    expect(await client.rpc("initialize", initialize)).toMatchObject({ result: { snapshots: [] } });
-    expect(await client.rpc("x-ahp/work/get", { version: 1, workId: created.id })).toMatchObject({ result: { work: { input: { secret: "private-sentinel" } } } });
+    const { createAgentWorkExtension } = await import("@websocket/helpers/ahp/agentWork");
+    const { createConnectionSetupAdapter } = await import("@websocket/helpers/security");
     const entered = signal();
     const parked = signal();
-    const original = memory.provider.work.get.bind(memory.provider.work);
-    vi.spyOn(memory.provider.work, "get").mockImplementation(async (query) => {
-      entered.resolve();
-      await parked.promise;
-      return original(query);
-    });
+    const id = "11111111-1111-4111-8111-111111111111";
+    let delayed = false;
+    const extension = createAgentWorkExtension({ protectedWork: { agentKey: () => undefined,
+      async get(caller) {
+        caller.retainReply?.({ isCurrent: caller.isCurrent.bind(caller), release() {} });
+        if (delayed) {
+          entered.resolve();
+          await parked.promise;
+        }
+        return { id, session: { ...r.binding.scope, kind: "session" }, kind: "test.kind", status: "queued", revision: "1",
+          priority: 0, createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(), input: { secret: "private-sentinel" } };
+      } } });
+    const client = await connect(createWebSocketServer({ host: "127.0.0.1", port: 0,
+      connectionSetup: createConnectionSetupAdapter(r.options), handlers: extension.handlers, onConnection() {} }));
+    expect(await client.rpc("x-ahp/work/get", { version: 1, workId: id })).toMatchObject({ result: { work: { input: { secret: "private-sentinel" } } } });
+    delayed = true;
     const outcome = Promise.race([
       onClosed(client.socket).then(() => "closed"),
       new Promise<string>((resolve) => {
@@ -532,7 +530,7 @@ describe("P04 public initialization boundary", () => {
         });
       }),
     ]);
-    client.socket.send(JSON.stringify({ jsonrpc: "2.0", id: 99, method: "x-ahp/work/get", params: { version: 1, workId: created.id } }));
+    client.socket.send(JSON.stringify({ jsonrpc: "2.0", id: 99, method: "x-ahp/work/get", params: { version: 1, workId: id } }));
     await entered.promise;
     r.revoke();
     parked.resolve();
@@ -689,7 +687,9 @@ describe("P05 real public create-only boundary", () => {
     expect(submit).not.toHaveBeenCalled();
     expect(await alice.rpc("x-ahp/work/submit", { version: 1, sessionUri: uri, requestKey: "ada-request", kind: "test.kind", input: {} })).toMatchObject({ error: { code: -32601 } });
     expect(submit).not.toHaveBeenCalled();
-    expect(await alice.rpc("x-ahp/agents/register", { version: 1, agentKey: "owner-worker" })).toMatchObject({ result: { version: 1 } });
+    const register = vi.spyOn(f.memory.provider.registrations, "register");
+    expect(await alice.rpc("x-ahp/agents/register", { version: 1, agentKey: "owner-worker" })).toMatchObject({ error: { code: -32602 } });
+    expect(register).not.toHaveBeenCalled();
     const workId = "11111111-1111-4111-8111-111111111111";
     const lease = { workId, leaseToken: "22222222-2222-4222-8222-222222222222" };
     const commands = [

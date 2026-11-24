@@ -3,8 +3,9 @@ import { resourceKey } from "@authorization/helpers/resources";
 import { captureData } from "@persistence/helpers/durability/helpers";
 import { captureWorkIntent, sameWorkIntent } from "@persistence/helpers/durability/workIntent";
 import type { Admission } from "@persistence/helpers/durability/types";
-import type { DurableWorkRepository, WorkFence } from "@persistence/helpers/durability/workTypes";
+import type { DurableWorkRepository, WorkFence, WorkInspection } from "@persistence/helpers/durability/workTypes";
 import type { WorkResourceSelection } from "@work/helpers/selections/types";
+import { createWorkSelectionGraph } from "@work/helpers/selections";
 import type { PoolClientLike } from "../connection";
 import { reject, resourceRows, sessionRow } from "../resources/rows/helpers";
 import type { DurableTransaction, ResourceRow } from "../resources/types";
@@ -29,7 +30,7 @@ function anchors(rules: readonly WorkResourceSelection[], rows: readonly Resourc
 // Session lifecycle/graph writers take the session row exclusively. Agent rebinding takes the registration row.
 async function lockWork(client: PoolClientLike, fence: WorkFence): Promise<void> {
   const session = await sessionRow(client, fence.session, "share");
-  if (session?.lifecycle !== "active") reject();
+  if (session?.lifecycle !== "active" || (fence.graphRevision !== undefined && session.graphRevision !== fence.graphRevision)) reject();
   const execution = fence.execution;
   if (execution) {
     const registration = await client.query(`SELECT id FROM agent_registrations WHERE domain_id=$1 AND id=$2
@@ -45,6 +46,65 @@ async function lockWork(client: PoolClientLike, fence: WorkFence): Promise<void>
 
 export function createPostgresDurableWork(tx: DurableTransaction, authorize: (check: Admission) => void): DurableWorkRepository {
   return {
+    leased(after, limit) {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 128) return reject();
+      return tx(async (client) => (await client.query<{ domainId: string; id: string }>(
+        "SELECT domain_id AS \"domainId\", id FROM work_items WHERE status='leased' AND ($1::uuid IS NULL OR id>$1) ORDER BY id LIMIT $2",
+        [after ?? null, limit])).rows);
+    },
+    disposition(input, action, admit) {
+      const fence = structuredClone(input);
+      return tx(async (client) => {
+        const root = await sessionRow(client, fence.session, "share");
+        if (!root || root.lifecycle === "retired" || root.lifecycle === "retiring") return reject();
+        await client.query("SELECT id FROM work_items WHERE id=$1 AND session_instance_id=$2 FOR UPDATE", [fence.id, root.ref.instanceId]);
+        const row = await workRow(client, root.ref.domainId, fence.id);
+        if (!row || row.session.instanceId !== root.ref.instanceId || row.revision !== fence.revision || !["queued", "leased"].includes(row.status)) return reject();
+        const lease = row.lease;
+        const proof = fence.execution;
+        if (proof && (!lease || row.status !== "leased" || lease.registrationId !== proof.registrationId || lease.executionEpoch !== proof.executionEpoch
+          || lease.attempt !== proof.attempt || lease.leaseToken !== proof.leaseToken)) return reject();
+        if (action !== "cancel" && !proof) return reject();
+        let status = action === "cancel" ? "cancelled" : "failed";
+        if (action === "requeue" && root.lifecycle === "active" && row.attemptCount < row.maxAttempts) {
+          const resources = (await resourceRows(client, root.ref)).map((r) => r.record);
+          if (createWorkSelectionGraph(root.ref.domainId, root, resources).hasActivePositiveScope(row.scope, root.graphRevision)) status = "queued";
+        }
+        authorize(admit);
+        await client.query(`UPDATE work_items SET status=$2,revision=revision+1,updated_at=clock_timestamp(),
+          lease_agent_id=NULL,lease_execution_epoch=NULL,lease_token=NULL,lease_expires_at=NULL,
+          last_failure_code=CASE WHEN $2='failed' THEN 'authority_lost' ELSE last_failure_code END,
+          last_failure_message=CASE WHEN $2='failed' THEN 'Work authority changed.' ELSE last_failure_message END,
+          last_failed_at=CASE WHEN $2='failed' THEN clock_timestamp() ELSE last_failed_at END WHERE id=$1`, [row.id, status]);
+        return await workRow(client, root.ref.domainId, row.id) ?? reject();
+      });
+    },
+    async inspect(domain, id) {
+      // A concurrent lease rotation can change the registration while we await the work row.
+      // Release the old locks before taking a new registration lock in canonical order.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const snapshot = await tx(async (client) => {
+          const candidate = await workRow(client, domain, id);
+          if (!candidate) return undefined;
+          const session = await sessionRow(client, candidate.session, "share");
+          if (!session || session.lifecycle === "retired" || session.lifecycle === "retiring") return undefined;
+          const lease = candidate.lease;
+          const registration = lease && (await client.query<NonNullable<WorkInspection["registration"]>>(
+            "SELECT id,principal_subject AS subject,agent_key AS key,enabled,execution_epoch::text AS epoch FROM agent_registrations WHERE domain_id=$1 AND id=$2 FOR SHARE",
+            [domain, lease.registrationId])).rows[0];
+          await client.query("SELECT id FROM work_items WHERE domain_id=$1 AND id=$2 FOR SHARE", [domain, id]);
+          const row = await workRow(client, domain, id);
+          if (!row) return undefined;
+          if (row.lease?.registrationId !== lease?.registrationId) return "retry" as const;
+          const resources = (await resourceRows(client, session.ref)).map((r) => r.record);
+          const clock = await client.query<{ milliseconds: number }>("SELECT ceil(extract(epoch FROM clock_timestamp())*1000)::double precision AS milliseconds");
+          const databaseTime = clock.rows[0]?.milliseconds ?? reject();
+          return { session, row, resources, registration, databaseTime };
+        });
+        if (snapshot !== "retry") return snapshot;
+      }
+      return reject();
+    },
     graph(domainId, input, replay) {
       const { kind, id, instanceId } = input;
       const actor = replay?.submitter;
@@ -99,13 +159,13 @@ export function createPostgresDurableWork(tx: DurableTransaction, authorize: (ch
         const session = await sessionRow(client, intent.session, "share");
         if (!session || session.lifecycle !== "active" || session.graphRevision !== revision || intent.submitter.principal.domainId !== session.ref.domainId) return reject();
         const domain = session.ref.domainId;
-        const existing = await client.query<{ id: string }>("SELECT id FROM work_items WHERE session_instance_id=$1 AND kind=$2 AND request_key=$3",
+        const existing = await client.query<{ id: string }>("SELECT id FROM work_items WHERE session_instance_id=$1 AND kind=$2 AND request_key=$3 FOR SHARE",
           [session.ref.instanceId, intent.kind, intent.requestKey]);
         const previous = existing.rows[0];
         if (previous) {
           const row = await workRow(client, domain, previous.id);
           if (!row || !sameWorkIntent(row, intent)) reject();
-          authorize(admit);
+          authorize(() => admit({ id: row.id, revision: row.revision }));
           return { id: previous.id, created: false };
         }
         const rows = await resourceRows(client, session.ref);
@@ -117,7 +177,7 @@ export function createPostgresDurableWork(tx: DurableTransaction, authorize: (ch
           OR EXISTS(SELECT FROM work_items WHERE session_instance_id=$2 AND status IN ('queued','leased') LIMIT 1 OFFSET $3) AS full`,
         [hostLimit - 1, session.ref.instanceId, sessionLimit - 1]);
         if (full.rows[0]?.full !== false) reject();
-        authorize(admit);
+        authorize(() => admit(null));
         const inserted = await client.query<{ id: string }>(`INSERT INTO work_items(session_instance_id,domain_id,kind,request_key,priority,input,
           submitted_data,data,max_attempts,submitted_by_kind,submitted_by_subject,submitted_by_agent_id,target_agent_id)
           VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$7::jsonb,$8,$9,$10,$11,$12) RETURNING id`,

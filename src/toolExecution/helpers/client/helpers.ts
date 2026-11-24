@@ -1,3 +1,4 @@
+import { executionSchema } from "@work/helpers/protocol/execution";
 import { AhpClient } from "@microsoft/agent-host-protocol/client";
 import { SESSION_URI_PREFIX } from "@sessions/constants";
 import { canonicalJsonEqual, toAhpToolDefinition } from "@tools/helpers/protocol";
@@ -130,9 +131,10 @@ export async function connectToolClient(connection: string | URL | ToolClientCon
     if (implementation === undefined || !current()) throw new Error("Approved tool could not be verified.");
     await advertise(view, captureLocal([implementation]), tool);
   });
-  const dispatchTool: ToolClient["dispatchTool"] = async (channel, contract, input) => {
+  const dispatchTool: ToolClient["dispatchTool"] = async (channel, contract, input, options) => {
     assertOpen();
-    const request = parseToolWire(toolDispatchRequestSchema, { version: 2, channel, contract, input });
+    const work = options?.work;
+    const request = parseToolWire(toolDispatchRequestSchema, { version: 2, channel, contract, input, ...(work === undefined ? {} : { work }) });
     return parseToolWire(toolDispatchReplySchema, await transport.request("x-ahp/tools/dispatch", request));
   };
   const readStatus = async (method: "status" | "cancel", callId: string, timeoutMs = 5000) => {
@@ -163,11 +165,12 @@ export async function connectToolClient(connection: string | URL | ToolClientCon
       const request = parseToolWire(toolResumeRequestSchema, { version: 2, continuationId, proofRef });
       return parseToolWire(toolDispatchReplySchema, await transport.request("x-ahp/tools/resume", request));
     },
-    callTool: async (channel, ref, input) => {
+    callTool: async (channel, ref, input, options) => {
       assertOpen();
       if (callCount >= 64) throw new Error("Tool call capacity unavailable.");
       callCount += 1;
       try {
+        const work = executionSchema.optional().parse(options?.work);
         const started = performance.now();
         const assigned = parseToolWire(toolAssignedReplySchema, await transport.request("x-ahp/tools/assigned", { version: 2, channel }));
         if (assigned.channel !== channel) throw new Error("Server returned a different assignment.");
@@ -175,7 +178,7 @@ export async function connectToolClient(connection: string | URL | ToolClientCon
           && (ref.id === undefined || tool.contract.id === ref.id) && tool.purposes.includes("invoke"));
         const selected = candidates[0];
         if (selected === undefined || candidates.length !== 1) throw new Error("Tool contract unavailable.");
-        const receipt = await dispatchTool(channel, selected.contract, input);
+        const receipt = await dispatchTool(channel, selected.contract, input, { work });
         if (receipt.status === "challenge-required") throw new ToolChallengeRequiredError(receipt);
         if (receipt.status !== "accepted") throw new Error("Tool operation unavailable.");
         let interval = 25;

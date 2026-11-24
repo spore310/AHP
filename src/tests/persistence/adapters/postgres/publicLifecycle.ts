@@ -61,7 +61,7 @@ export async function testPublicLifecycle(connectionString: string, db: Pool): P
     assert.equal(events.length, count);
     assert.deepEqual((await db.query("SELECT state_revision,last_server_seq,durable_state FROM sessions WHERE session_instance_id=$1", [ref.instanceId])).rows, saved.rows);
     const work = await db.query<{ id: string }>(`WITH added AS (INSERT INTO work_items(session_instance_id,domain_id,request_key,kind,input,submitted_by_kind,submitted_by_subject)
-      VALUES ($1,$2,'public-read','test','{}','user','senior') RETURNING id)
+      VALUES ($1,$2,'public-read','code.review','{}','user','senior') RETURNING id)
       INSERT INTO work_resource_selections(work_id,session_instance_id,domain_id,purpose,resource_pk,include)
       SELECT added.id,$1,$2,'scope',r.resource_pk,true FROM added,canonical_resources r WHERE r.session_instance_id=$1 AND r.kind='session'
       RETURNING work_id AS id`, [ref.instanceId, ref.domainId]);

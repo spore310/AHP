@@ -107,6 +107,15 @@ const installedFor = (f: ReturnType<typeof fixture>, ref: ResourceRef) => {
   if (grant === undefined) throw new Error("Missing genuine materialized bootstrap");
   return grant;
 };
+it("resolves hosted work through the protected factory's captured type catalogue", () => {
+  const f = fixture();
+  const exact = f.registration.definition;
+  vi.spyOn(f.catalogue, "resolveExisting").mockImplementation(() => {
+    throw new Error("Caller replaced catalogue");
+  });
+  expect(f.auth.resolveWorkType(exact).definition).toEqual(exact);
+  expect(() => f.auth.resolveWorkType({ ...exact, id: crypto.randomUUID() })).toThrow();
+});
 const evaluate = (registry: ReferenceAuthorizer, scope: ResourceRef, bindingId: string, subject = "alice", policyRef = creator) => registry.evaluate({
   actor: caller(subject).context, operation: "invoke", scope, route: { origin: scope, targets: [scope] }, bindingId, policyRef,
 });

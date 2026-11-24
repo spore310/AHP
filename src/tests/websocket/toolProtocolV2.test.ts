@@ -8,11 +8,14 @@ import { contract } from "../toolExecution/fixtures";
 import { parseToolWire, toolAssignedReplySchema, toolAdvertiseReplySchema, toolDispatchReplySchema, toolInvokeSchema, toolStatusReplySchema } from "@toolExecution/helpers/client/helpers/protocol";
 
 // Real supported public binding. No kernel substitution or policy mocks.
+const restrictions = vi.hoisted((): { adapter?: import("@websocket/helpers/ahp/types").AHPBindingOptions["prepareToolWork"] } => ({}));
 const contexts = vi.hoisted(() => new Map<string, WebSocketConnectionContext>());
 vi.mock("@websocket/helpers/ahp", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@websocket/helpers/ahp")>();
   return { ...actual, createAHPBinding: (...args: Parameters<typeof actual.createAHPBinding>) => {
-    const binding = actual.createAHPBinding(...args);
+    const binding = restrictions.adapter === undefined
+      ? actual.createAHPBinding(...args)
+      : actual.createAHPBinding(args[0], args[1], { ...args[2], prepareToolWork: restrictions.adapter });
     return { ...binding, onConnection: (context: WebSocketConnectionContext) => {
       contexts.set(context.connectionId, context);
       binding.onConnection(context);
@@ -26,6 +29,7 @@ afterEach(async () => {
   await Promise.all(clients.splice(0).map((client) => client.shutdown()));
   for (const socket of sockets.splice(0)) socket.close();
   await Promise.all(hosts.splice(0).map((host) => host.stop()));
+  delete restrictions.adapter;
   vi.restoreAllMocks();
 });
 
@@ -60,7 +64,20 @@ it("denies a call when two current executor advertisements match the contract", 
   expect(executeSecond).not.toHaveBeenCalled();
 });
 
-it.each(["completed", "cancelled", "revoked"] as const)("W04/W05 public SDK local execution has a %s result without releasing forbidden output", async (outcome) => {
+it.each(["completed", "cancelled", "revoked", "work-scoped"] as const)("W04/W05 public SDK local execution has a %s result without releasing forbidden output", async (outcome) => {
+  const work = { workId: "bbbbbbbb-aaaa-4444-8888-eeeeeeeeeeee", attempt: 1, leaseToken: "aaaaaaaa-bbbb-4444-8888-eeeeeeeeeeee" };
+  let current = true;
+  const release = vi.fn();
+  if (outcome === "work-scoped") {
+    restrictions.adapter = (connection, caller, execution, route, input) => {
+      expect(connection.security?.context).toEqual(caller);
+      expect(caller.actor.principal.subject).toBe("caller");
+      expect(execution).toEqual(work);
+      expect(route.origin.id).toBe(channel);
+      expect(input).toEqual({ path: "SDK-INPUT-CANARY" });
+      return Promise.resolve({ current: () => current, fence: () => current, release });
+    };
+  }
   const f = await createToolPolicyHost([contract], { protectedViews: true, toolDiscovery: ["caller", "executor"],
     roles: { caller: ["discover", "invoke"], executor: ["discover", "advertise", "execute"] } });
   hosts.push(f.host);
@@ -93,9 +110,13 @@ it.each(["completed", "cancelled", "revoked"] as const)("W04/W05 public SDK loca
   });
   await executor.joinSession(channel, [{ definition: contract, execute }]);
   if (outcome === "completed") {
+    const selector = { id: contract.id, key: contract.key, version: contract.version };
+    await expect(caller.dispatchTool(channel, selector, { path: "SDK-INPUT-CANARY" }, { work })).resolves.toMatchObject({ status: "denied" });
+    await expect(caller.callTool(channel, contract, { path: "SDK-INPUT-CANARY" }, { work })).rejects.toThrow();
+    expect(execute).not.toHaveBeenCalled();
     await expect(caller.callTool(channel, contract, { path: "SDK-INPUT-CANARY" })).resolves.toEqual({ value: "SDK-RESULT-CANARY" });
   } else {
-    const receipt = await caller.dispatchTool(channel, { id: contract.id, key: contract.key, version: contract.version }, { path: "SDK-INPUT-CANARY" });
+    const receipt = await caller.dispatchTool(channel, { id: contract.id, key: contract.key, version: contract.version }, { path: "SDK-INPUT-CANARY" }, outcome === "work-scoped" ? { work } : undefined);
     if (receipt.status !== "accepted") throw new Error("Missing SDK receipt");
     const context = await entered.promise;
     if (outcome === "cancelled") {
@@ -103,6 +124,10 @@ it.each(["completed", "cancelled", "revoked"] as const)("W04/W05 public SDK loca
       await executor.client.ping();
       expect(context.signal.aborted).toBe(true);
       expect(await caller.statusTool(receipt.callId)).toMatchObject({ status: "draining" });
+    } else if (outcome === "work-scoped") {
+      expect(JSON.stringify(context)).not.toContain(work.leaseToken);
+      expect(incoming.get("executor")?.join("")).not.toContain(work.leaseToken);
+      current = false;
     } else {
       const scope = f.host.sessions.authorization?.getResource(channel);
       if (scope === undefined) throw new Error("Missing scope");
@@ -114,6 +139,12 @@ it.each(["completed", "cancelled", "revoked"] as const)("W04/W05 public SDK loca
     if (outcome === "cancelled") {
       await vi.waitFor(async () => {
         expect(await caller.statusTool(receipt.callId)).toMatchObject({ status: "cancelled" });
+      });
+    } else if (outcome === "work-scoped") {
+      expect(await caller.statusTool(receipt.callId)).toMatchObject({ status: "unavailable" });
+      await caller.shutdown();
+      await vi.waitFor(() => {
+        expect(release).toHaveBeenCalledOnce();
       });
     } else {
       // Revoking the binding also revokes native resource-read access; P10 closes that view.

@@ -1,4 +1,5 @@
 import { createAuthorizationSchemas, POLICY_LIMIT_ABSOLUTE } from "@authorization";
+import { captureWorkRestriction } from "@authorization/helpers/resources/workRestriction";
 import { sameRoute } from "@authorization/helpers/context";
 import { captureToolValue } from "@toolExecution/helpers/action/helpers";
 import { ToolDispatchFailure } from "@toolExecution/helpers/dispatcher/types";
@@ -35,6 +36,7 @@ export function createClientToolDispatcher(options: ClientToolBrokerOptions, sha
         caller: schemas.trustedRequestContextSchema.parse(captureToolValue(raw.caller, limits).value),
         executor: schemas.executorRevisionSchema.parse(captureToolValue(raw.executor, limits).value),
         executorContext: schemas.trustedRequestContextSchema.parse(captureToolValue(raw.executorContext, limits).value) };
+      const restriction = captureWorkRestriction(raw, request.caller);
       let proofs: readonly ClientToolProof[] = [];
       let challengeRequired = false;
       const admission = Promise.withResolvers<ToolDispatchAdmission>();
@@ -43,25 +45,26 @@ export function createClientToolDispatcher(options: ClientToolBrokerOptions, sha
       const proofsCurrent = (cohort: readonly ClientToolProof[], resourceAuthority?: ResourceOperationAuthority): boolean => {
         try {
           const live: unknown = current();
-          if (live !== true) {
+          if (live !== true || !restriction.current()) {
             void Promise.resolve(live).catch(() => undefined);
             return false;
           }
           const owned: unknown = policy.current(cohort, resourceAuthority) && fence();
           if (owned !== true) void Promise.resolve(owned).catch(() => undefined);
-          return owned === true;
+          return owned === true && restriction.fence();
         } catch {
           return false;
         }
       };
       const isCurrent = (): boolean => proofsCurrent(proofs);
-      const resolveAuthorization = async (input: unknown, signal: AbortSignal) => {
+      const resolveAuthorization = async (input: unknown, signal: AbortSignal, refresh = false) => {
         const base = { ...request, input, signal };
         const resolution = await policy.resolve(base);
         const invoke = await policy.authorize({ ...base, resolution, operation: "invoke", executor: undefined, executorContext: undefined });
         const advertisement = await policy.authorize({ ...base, caller: request.executorContext, resolution, operation: "advertise", executor: undefined, executorContext: undefined });
         const execute = await policy.authorize({ ...base, resolution, operation: "execute" });
         const cohort = [invoke, advertisement, execute];
+        await restriction.prepare(resolution.route, input, signal, refresh);
         if (!proofsCurrent(cohort)) throw new ToolDispatchFailure("stale");
         const facts = { caller: request.caller, executor: request.executor, resources: resolution.route,
           contract: { id: request.registration.definition.id, revision: request.registration.definition.version },
@@ -99,7 +102,7 @@ export function createClientToolDispatcher(options: ClientToolBrokerOptions, sha
             return { decision: { effect: "allow", reveal: false, challengeRequired }, authority: facts.authority };
           },
           current: isCurrent,
-          admitProjection: (_context, authority) => proofsCurrent(proofs, authority),
+          admitProjection: (_context, authority, target) => restriction.admitsTarget(target) && proofsCurrent(proofs, authority),
         },
       });
       void handle.admission.then((receipt) => {
@@ -109,7 +112,7 @@ export function createClientToolDispatcher(options: ClientToolBrokerOptions, sha
         admission.resolve({ status: "denied" });
         enqueued.resolve(false);
       });
-      return Object.freeze({ ...handle, current: isCurrent, admitted: admission.promise,
+      return Object.freeze({ ...handle, release: restriction.release, current: isCurrent, admitted: admission.promise,
         async resume(proofRef: string): Promise<boolean> {
           if (!await handle.resume(proofRef)) return false;
           return enqueued.promise;
@@ -117,7 +120,7 @@ export function createClientToolDispatcher(options: ClientToolBrokerOptions, sha
         async refresh(signal: AbortSignal = request.signal): Promise<(() => boolean) | undefined> {
           if (executedRoute === undefined || signal.aborted) return undefined;
           try {
-            const authorized = await resolveAuthorization(request.input, signal);
+            const authorized = await resolveAuthorization(request.input, signal, true);
             if (!sameRoute(authorized.facts.resources, executedRoute)) return undefined;
             return () => !signal.aborted && proofsCurrent(authorized.cohort);
           } catch {

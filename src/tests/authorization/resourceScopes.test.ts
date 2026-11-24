@@ -19,6 +19,28 @@ afterEach(() => {
 });
 
 describe("resource operation authority", () => {
+  it("requires the tagged work guard and exact declared target at the synchronous owner mutation", async () => {
+    const work = { workId: "bbbbbbbb-aaaa-4444-8888-eeeeeeeeeeee", attempt: 2, leaseToken: "aaaaaaaa-bbbb-4444-8888-eeeeeeeeeeee" };
+    const noGuard = fixture();
+    expect(await noGuard.resources.authorize({ ...noGuard.request(), work }).ticket).toBeUndefined();
+    expect(noGuard.commits).toEqual([]);
+    const release = vi.fn();
+    let live = true;
+    const f = fixture({ prepareWork: () => Promise.resolve({ current: () => live, fence: () => live, release }) });
+    const request = { ...f.request(), work };
+    expect(await f.resources.authorize({ ...request, target: f.first }).ticket).toBeUndefined();
+    const ticket = required(await f.resources.authorize(request).ticket);
+    expect(f.resources.commit(ticket, (authority) => {
+      live = false;
+      return f.admission(authority);
+    })).toBe(false);
+    expect(f.commits).toEqual([]);
+    live = true;
+    expect(f.resources.commit(required(await f.resources.authorize(request).ticket), f.admission)).toBe(true);
+    expect(f.commits).toEqual([request.payload]);
+    expect(JSON.stringify(f.commit.mock.calls)).not.toContain(work.leaseToken);
+    expect(release).toHaveBeenCalled();
+  });
   it("retains capacity and denies late admission when a durable write is cancelled", async () => {
     const release = Promise.withResolvers<undefined>();
     let retained: (() => boolean) | undefined;

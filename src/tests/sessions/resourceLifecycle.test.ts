@@ -344,6 +344,8 @@ describe("durable lifecycle", () => {
       const events = vi.fn();
       demo.host.sessions.onSessionEnvelope(events);
       const change = { expectedDataRevision: "1", data: { list: ["雪", {}] } };
+      await expect(resources.replaceData(nested, change, () => false)).rejects.toThrow();
+      expect((await resources.readData(nested)).dataRevision).toBe("1");
       const first = resources.replaceData(nested, change);
       change.data.list.length = 0;
       const second = resources.replaceData(nested, { expectedDataRevision: "1", data: {} });

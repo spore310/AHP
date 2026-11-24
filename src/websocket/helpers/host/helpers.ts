@@ -7,7 +7,8 @@ import { createAgentDirectory } from "@agents";
 import { legacyIdentitySource } from "@agents/helpers/policyIdentity/helpers";
 import { createActionSequence, createSessionsFactory } from "@sessions";
 import type { SessionsFactory } from "@sessions/types";
-import type { DurableWorkRepository } from "@persistence/helpers/durability/workTypes";
+import type { DurableHost } from "@persistence";
+import { createHostedWork } from "./work";
 import { createSessionOwnerRegistry, createWorkReadPort } from "@work";
 
 import { createAHPBinding } from "../ahp";
@@ -49,13 +50,14 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
   }
   const canonicalOwner = creationConfig?.registry.owner.bind(creationConfig.registry);
   const workDomain = security?.workDomainId;
-  if (security !== undefined && options.agentWork !== undefined) {
+  if (security !== undefined && options.agentWork?.authenticator !== undefined) {
     const source = legacyIdentitySource(security.composition.identity);
     if (source === undefined || source.authenticator !== options.agentWork.authenticator
       || source.domainId !== security.workDomainId) {
       throw new Error("Conflicting security and work identity sources.");
     }
   }
+  if (options.agentWork && !security && !options.agentWork.authenticator) throw new TypeError("A work identity source is required.");
   // Validate/capture before creating sessions, listeners, directory or work services.
   const connectionSetup = security === undefined ? undefined : createConnectionSetupAdapter(security);
   const transportLimits = captureTransportLimits(options.transportLimits);
@@ -63,12 +65,12 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
   const maxInitialSubscriptions = setupCount(security?.maxInitialSubscriptions);
   const sequence = options.sessions.sequence ?? createActionSequence();
   let durability = options.sessions.durability;
-  let canonicalRead: { get: DurableWorkRepository["get"]; isOpen(): boolean } | undefined;
+  let currentLease: DurableHost | undefined;
   if (durability && options.agentWork) {
     const acquire = durability.storage.acquire.bind(durability.storage);
     durability = { ...durability, storage: { async acquire(id, onLost) {
       const lease = await acquire(id, onLost);
-      canonicalRead = { get: lease.work.get.bind(lease.work), isOpen: lease.isOpen.bind(lease) };
+      currentLease = lease;
       return lease;
     } } };
   }
@@ -103,23 +105,13 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
           : {}),
         ...(options.agentWork.now !== undefined ? { now: options.agentWork.now } : {}),
       });
+  const hostedWork = agents && createHostedWork(options, sessions, agents, () => currentLease, isStopped);
   const work = options.agentWork === undefined || agents === undefined
     ? undefined
     : createWorkReadPort({
         repository: options.agentWork.work,
         sessions: ownerLookup,
-        ...(sessions.durability
-          ? {
-              canonicalGet: (domainId, id) => canonicalRead?.isOpen() ? canonicalRead.get(domainId, id) : Promise.resolve(undefined),
-              currentInstance: (uri, instanceId, subject, domainId) => {
-                const ref = capturedGetResource?.(uri);
-                if (!ref || stopped || ref.instanceId !== instanceId || ref.domainId !== domainId) return false;
-                const owner = canonicalOwner?.(ref);
-                return owner?.domainId === domainId && owner.subject === subject && capturedIsReady?.(ref) === true
-                  && capturedGetResource?.(uri) === ref && canonicalRead?.isOpen() === true && !isStopped();
-              },
-            }
-          : { legacyReadCurrent: () => !stopped }),
+        legacyReadCurrent: () => !stopped && !security,
       });
   const binding = createAHPBinding(
     sessions,
@@ -135,6 +127,8 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
           ...(options.serverToolExecution === undefined ? {} : { serverToolExecution: options.serverToolExecution }),
           agents,
           work,
+          protectedWork: hostedWork?.binding,
+          prepareToolWork: hostedWork?.prepareToolWork,
           ...(sessionOwners === undefined ? {} : { sessionOwners }),
         },
   );
@@ -152,6 +146,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
         ? { authenticator: options.agentWork.authenticator }
         : {}),
     onConnection: (context) => {
+      hostedWork?.connected(context);
       binding.onConnection(context);
     },
     beforeDispatch: (dispatch) => {
@@ -179,6 +174,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
   const hostedAuthorization: SessionFactoryAuthorization | undefined = actualAuthorization === undefined
     ? undefined
     : Object.freeze({
+        resolveWorkType: actualAuthorization.resolveWorkType.bind(actualAuthorization),
         usesRegistry: (registry: ReferenceAuthorizer) => capturedUsesRegistry?.(registry) === true,
         isReady: (expected: ResourceRef<"session">) => !stopped && capturedIsReady?.(expected) === true && !stopped,
         createSession: (params: unknown, caller: SessionCreationContext) => {
@@ -303,6 +299,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     const completion = Promise.withResolvers<undefined>();
     shutdown = completion.promise;
     stopped = true;
+    hostedWork?.close();
     void performStop().then(() => {
       completion.resolve(undefined);
     }, completion.reject);
@@ -310,6 +307,8 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
   };
 
   return {
+    work: hostedWork?.service,
+    prepareResourceWork: hostedWork?.prepareResourceWork,
     toolExecutionStats: binding.toolStats.bind(binding),
     sessions: hostedSessions,
     start: async (): Promise<AddressInfo> => {
@@ -321,6 +320,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
           void stop().catch(() => undefined);
         });
         if (isStopped()) throw new Error(HOST_STOPPED);
+        hostedWork?.start();
         return await transport.start();
       } catch (error) {
         await stop();

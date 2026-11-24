@@ -5,6 +5,8 @@ import { WebSocketTransport } from "@microsoft/agent-host-protocol/ws";
 import { connectToolClient, type ToolClient } from "@toolExecution/client";
 import { channel, clientTool, createReviewHost, demoProof, selector, type Subject } from "./host";
 import { showWorkBoundary } from "./work";
+import { createExamplePersistence } from "./persistence";
+import { mockProvider } from "@sessions/mock";
 
 async function connect(url: string, subject: Subject): Promise<ToolClient> {
   const transport = await WebSocketTransport.connect(url, { protocols: "demo-" + subject });
@@ -31,19 +33,24 @@ async function inspect(client: ToolClient, ran: () => number): Promise<void> {
 }
 
 const mode = process.argv.includes("--direct") ? "direct" : "namespace";
-const demo = createReviewHost(mode);
+const { provider } = createExamplePersistence();
+assert.ok(provider.durability);
+const demo = createReviewHost(mode, { durability: { storage: provider.durability, hostId: "advanced-review" }, provider: mockProvider, persistence: provider });
 const clients: ToolClient[] = [];
 try {
-  await demo.provision();
   const address = await demo.host.start();
+  await demo.provision();
   const url = `ws://127.0.0.1:${String(address.port)}/`;
   const peer = async (subject: Subject): Promise<ToolClient> => {
     const client = await connect(url, subject);
     clients.push(client);
     return client;
   };
-  const senior = await peer("senior"), junior = await peer("junior"), pm = await peer("pm"), observer = await peer("observer");
-  demo.allowJuniorExecutor(clientTool);
+  const senior = await peer("senior");
+  const pm = await peer("pm");
+  await showWorkBoundary(url, demo);
+  const junior = await peer("junior"), observer = await peer("observer");
+  demo.allowClientExecutor("junior", clientTool);
   const projected = (await observer.client.subscribe(channel)).result.snapshot;
   assert.ok(projected && "lifecycle" in projected.state);
   assert.equal(projected.state.lifecycle, "ready");
@@ -77,8 +84,6 @@ try {
   assert.equal(demo.host.sessions.getSessionSnapshot(channel)?.state.title, "Review ready");
   process.stdout.write("The host action returned a result and the authorized projector set the title to Review ready.\n");
 
-  await showWorkBoundary(url);
-
   const proposed = { ...clientTool, id: "10000000-0000-4000-8000-000000000002", key: "review.summarize", name: "summarize" };
   const contract = selector(proposed);
   const proposal = await senior.proposeTool(channel, proposed);
@@ -103,7 +108,7 @@ try {
   assert.equal(activation?.revision, 1);
   demo.allowTool("junior", proposed, ["discover", "advertise", "invoke"]);
   const artifactExecutor = await peer("junior");
-  demo.allowJuniorExecutor(proposed, { location: "client", suppliedBy: "server", implementation: "approved-artifact", artifactRef: descriptor.artifactId }, 2);
+  demo.allowClientExecutor("junior", proposed, { location: "client", suppliedBy: "server", implementation: "approved-artifact", artifactRef: descriptor.artifactId }, 2);
   await artifactExecutor.loadApprovedTool(channel, contract, { runtime: "node", platform: "local",
     verify: ({ descriptor: candidate }, bytes) => candidate.publisherId === "demo-publisher" && Buffer.from(bytes).equals(Buffer.from(demo.bytes)),
     load: () => ({ definition: proposed, execute: () => ({ value: "Sample artifact summarized the review" }) }),

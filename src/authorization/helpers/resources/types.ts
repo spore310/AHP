@@ -54,6 +54,14 @@ export interface ResourceTypeRegistration {
   readonly providerId: string;
   readonly operations: readonly ResourceOperation[];
 }
+/** Host-owned restrictive authority. The fence samples only local owned state. */
+export interface WorkOperationGuard { current(): boolean; fence(): boolean; release(): void }
+export type PrepareWorkOperation = (caller: import("../../types").TrustedRequestContext, work: import("@work").WorkExecutionRef,
+  route: ResourceRoute, input: unknown, signal: AbortSignal) => Promise<WorkOperationGuard>;
+export interface WorkOperationRestriction {
+  readonly work?: import("@work").WorkExecutionRef;
+  readonly prepareWork?: PrepareWorkOperation;
+}
 export interface ResourceOperationRequest {
   readonly actor: import("../../types").TrustedRequestContext;
   readonly route: ResourceRoute;
@@ -73,6 +81,7 @@ export interface ResourceOperationHandle {
   readonly settled: Promise<undefined>;
 }
 export interface ResourceOperationsOptions {
+  readonly prepareWork?: PrepareWorkOperation;
   readonly registry: import("../evaluate/types").ReferenceAuthorizer;
   readonly policies: import("@toolPolicy").ToolPolicyFactory;
   readonly kinds: readonly ResourceKindAdapter[];
@@ -82,7 +91,7 @@ export interface ResourceOperationsOptions {
 }
 export interface ResourceOperations {
   install(registration: ResourceRegistration): void;
-  authorize(request: ResourceOperationRequest): ResourceOperationHandle;
+  authorize(request: ResourceOperationRequest & Pick<WorkOperationRestriction, "work">): ResourceOperationHandle;
   /** The trusted guard must aggregate original invocation proofs with these operation proofs. */
   commit(ticket: ResourceOperationTicket, admission: (authority: ResourceOperationAuthority) => boolean): boolean;
   /** Waits for the registered owner's mutation, retaining its capacity slot until settlement. */

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { createMemoryDurableStorage, type DurableStorage, type DurableHost } from "@persistence";
-import { createWorkService } from "@work";
 import type { ProviderSessionInput, RuntimeResourceDriver } from "@sessions";
 import { mockProvider } from "@sessions/mock";
 import { actorFor, channel, createReviewHost } from "./advanced/host";
@@ -57,9 +56,11 @@ try {
   const child = await input.resources.create({ kind: "chat", id: "chat:/durable", parent: original, driver });
   const caller = { context: { actor: actorFor("senior"), connectionId: "local-example", authRevision: "1" },
     signal: new AbortController().signal, isCurrent: () => lease.isOpen() };
-  const service = createWorkService({ repository: () => lease.work, resolveType: (ref) => first.catalogue.resolveExisting(ref),
-    prepare: (request, _operation, intent) => Promise.resolve({ isCurrent: () => first.registry.owner(intent.session)?.subject === request.context.actor.principal.subject
-      && first.host.sessions.authorization?.isReady(intent.session) === true, release() {} }) });
+  const service = first.host.work;
+  assert.ok(service);
+  const grant = first.registry.readBindings({ actor: caller.context.actor, scope: original }).bindings.find((binding) => binding.id === "demo-senior");
+  assert.ok(grant);
+  first.registry.installBinding({ ...grant, id: "review-durable-child", scope: child });
   const command = { kind: "code.review", requestKey: "review-1", input: { artifact: "draft" }, priority: 10,
     scope: [{ resource: { kind: child.kind, id: child.id, instanceId: child.instanceId }, include: true }], data: { reviewed: false } };
   const job = await service.submit(caller, command);

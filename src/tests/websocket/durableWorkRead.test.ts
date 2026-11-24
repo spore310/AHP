@@ -24,8 +24,8 @@ it("reads the canonical work detail only for the ready incarnation's owner and k
         mutations("settle");
         return host.work.settle(...args);
       },
-      async get(domain, id) {
-        const row = await host.work.get(domain, id);
+      async inspect(domain, id) {
+        const row = await host.work.inspect(domain, id);
         if (park) {
           pending.resolve(undefined);
           await deliver.promise;

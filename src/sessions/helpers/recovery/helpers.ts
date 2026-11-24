@@ -308,14 +308,18 @@ export function createDurableLifecycle(options: NonNullable<SessionsFactoryOptio
         const row = await owned(ref);
         return { data: row.data, dataRevision: row.dataRevision };
       },
-      async replaceData(input, change) {
+      async replaceData(input, change, admission = () => true) {
         const ref = captureRef(input);
         const expectedDataRevision = change.expectedDataRevision;
         const data = captureData(change.data);
         const row = await owned(ref);
         const contract = row.ref.kind !== "session" ? driverFor(record, row).data : undefined;
         return store().resources.replaceData(root.session, ref, { data: contract ? captureData(contract.parse(data)) : data, expectedDataRevision },
-          () => current() && canRead(row));
+          () => {
+            const allowed: unknown = admission();
+            if (allowed !== true) void Promise.resolve(allowed).catch(() => undefined);
+            return allowed === true && current() && canRead(row);
+          });
       },
       async retire(input) {
         const ref = captureRef(input);

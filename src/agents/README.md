@@ -27,8 +27,9 @@ registration and a live presence binding are separate concepts.
 - `createLegacyConnectionIdentityAdapter({ authenticator, domainId })` — explicit
   adapter for the accepted authorization identity port, over one exact legacy
   authenticator. Captures domain/source once; maps only valid subjects and never
-  classifies a user/agent. Mixed host security/work composition verifies its private
-  provenance and exact authenticator instance, plus the same configured work domain.
+  classifies a user/agent. A protected work host uses its security composition's
+  actor resolver. If a legacy authenticator is supplied alongside it, the host
+  verifies the adapter's provenance, exact authenticator and configured domain.
 - `createStaticTokenAuthenticator(tokens: ReadonlyMap<string, string>)` — maps an
   exact token to a principal subject. Missing, malformed, repeated, or unknown
   credentials resolve to `undefined`; tokens are never logged or echoed.

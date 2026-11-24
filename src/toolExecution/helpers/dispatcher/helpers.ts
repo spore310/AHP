@@ -396,9 +396,9 @@ export function createToolDispatcher(options: ToolDispatcherOptions = {}): ToolD
               const projected: unknown = await project(success.output, context, () => {
                 deliveryGuard();
                 return true;
-              }, (authority) => {
+              }, (authority, target) => {
                 live();
-                const allowed: unknown = context === undefined ? false : projectionPort(context, authority);
+                const allowed: unknown = context === undefined ? false : projectionPort(context, authority, target);
                 if (allowed !== true) {
                   void Promise.resolve(allowed).catch(() => undefined);
                   return false;

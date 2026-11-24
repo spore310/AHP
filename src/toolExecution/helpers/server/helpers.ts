@@ -1,6 +1,8 @@
 import { createAuthorizationSchemas, POLICY_LIMIT_ABSOLUTE } from "@authorization";
 import type { ResourceOperationAuthority, ResourceRoute, TrustedRequestContext } from "@authorization";
+import { captureWorkRestriction } from "@authorization/helpers/resources/workRestriction";
 import { sameRoute } from "@authorization/helpers/context";
+import { isDeepStrictEqual } from "node:util";
 import { canonicalJsonEqual } from "@tools";
 import { createToolActionRegistration } from "../action";
 import { captureToolValue } from "../action/helpers";
@@ -62,23 +64,25 @@ export function createServerToolDispatcher(options: ServerToolBrokerOptions, sha
       const request = { ...raw, input: captureToolValue(raw.input, captureLimits).value,
         caller: schemas.trustedRequestContextSchema.parse(captureToolValue(raw.caller, captureLimits).value) };
       const executor = executorFor(raw.registration);
+      const restriction = captureWorkRestriction(raw, request.caller);
       let proofs: readonly ToolExecutorProof[] = [];
       let canonical: { readonly input: unknown; readonly route: ResourceRoute } | undefined;
       const proofsCurrent = (cohort: readonly ToolExecutorProof[], resourceAuthority?: ResourceOperationAuthority): boolean => {
         try {
-          return exactlyTrue(current()) && exactlyTrue(executorCurrent()) && policy.current(cohort, resourceAuthority)
-            && exactlyTrue(fence()) && exactlyTrue(executorFence());
+          return exactlyTrue(current()) && exactlyTrue(executorCurrent()) && restriction.current() && policy.current(cohort, resourceAuthority)
+            && exactlyTrue(fence()) && exactlyTrue(executorFence()) && restriction.fence();
         } catch {
           return false;
         }
       };
       const isCurrent = () => proofsCurrent(proofs);
-      const resolveAuthorization = async (input: unknown, signal: AbortSignal) => {
+      const resolveAuthorization = async (input: unknown, signal: AbortSignal, refresh = false) => {
         const base = { ...request, input, signal };
         const resolution = await policy.resolve(base);
         const invoke = await policy.authorize({ ...base, resolution, operation: "invoke" });
         const execute = await policy.authorize({ ...base, resolution, operation: "execute", executor, executorContext });
         const cohort = [invoke, execute];
+        await restriction.prepare(resolution.route, input, signal, refresh);
         if (!proofsCurrent(cohort)) throw new ToolDispatchFailure("stale");
         const facts = { caller: request.caller, executor, resources: resolution.route, contract: { id: request.registration.definition.id, revision: request.registration.definition.version },
           implementation: request.registration.implementation, callId: request.callId, authority: execute.authority };
@@ -88,7 +92,7 @@ export function createServerToolDispatcher(options: ServerToolBrokerOptions, sha
         ports: {
           resolve: async (input, signal) => {
             const resolved = await resolveAuthorization(input, signal);
-            if (canonical !== undefined && (!canonicalJsonEqual(input, canonical.input) || !sameRoute(resolved.facts.resources, canonical.route))) throw new ToolDispatchFailure("stale");
+            if (canonical !== undefined && (!isDeepStrictEqual(input, canonical.input) || !sameRoute(resolved.facts.resources, canonical.route))) throw new ToolDispatchFailure("stale");
             proofs = resolved.cohort;
             return resolved.facts;
           },
@@ -96,20 +100,20 @@ export function createServerToolDispatcher(options: ServerToolBrokerOptions, sha
           authorize: async (context, input) => {
             const authorized = await resolveAuthorization(input, context.signal);
             if (!sameRoute(context.resources, authorized.facts.resources)
-              || (canonical !== undefined && (!canonicalJsonEqual(input, canonical.input) || !sameRoute(canonical.route, authorized.facts.resources)))) throw new ToolDispatchFailure("stale");
+              || (canonical !== undefined && (!isDeepStrictEqual(input, canonical.input) || !sameRoute(canonical.route, authorized.facts.resources)))) throw new ToolDispatchFailure("stale");
             canonical = Object.freeze({ input: captureToolValue(input, captureLimits).value, route: authorized.facts.resources });
             proofs = authorized.cohort;
             return { decision: { effect: "allow", reveal: false, challengeRequired: authorized.challengeRequired }, authority: authorized.facts.authority };
           },
           current: isCurrent,
-          admitProjection: (_context, authority) => proofsCurrent(proofs, authority),
+          admitProjection: (_context, authority, target) => restriction.admitsTarget(target) && proofsCurrent(proofs, authority),
         } });
-      return Object.freeze({ ...handle, current: isCurrent, admitted: handle.admission,
+      return Object.freeze({ ...handle, release: restriction.release, current: isCurrent, admitted: handle.admission,
         async refresh(signal: AbortSignal = request.signal): Promise<(() => boolean) | undefined> {
           const captured = canonical;
           if (captured === undefined || signal.aborted) return undefined;
           try {
-            const authorized = await resolveAuthorization(captured.input, signal);
+            const authorized = await resolveAuthorization(captured.input, signal, true);
             if (!sameRoute(authorized.facts.resources, captured.route)) return undefined;
             return () => !signal.aborted && canonical === captured && proofsCurrent(authorized.cohort);
           } catch {

@@ -1,3 +1,4 @@
+import { executionSchema } from "@work/helpers/protocol/execution";
 import { z } from "zod";
 import { resourceRefSchema, identifierSchema } from "@authorization/helpers/validation";
 import { toolExecutionBindingSchema } from "@toolPolicy/helpers/validation";
@@ -47,7 +48,7 @@ export const toolAdvertiseRequestSchema = z.strictObject({ version, channel, vie
   contracts: z.array(toolContractSelectorSchema).max(128) });
 export const toolAdvertiseReplySchema = z.strictObject({ ...view, advertisementId: revision,
   tools: z.array(assignedToolSchema).max(128) });
-export const toolDispatchRequestSchema = z.strictObject({ version, channel, contract: toolContractSelectorSchema, input: json });
+export const toolDispatchRequestSchema = z.strictObject({ version, channel, contract: toolContractSelectorSchema, input: json, work: executionSchema.optional() });
 export const toolCallSelectorSchema = z.strictObject({ version, callId: z.uuid() });
 export const toolResumeRequestSchema = z.strictObject({ version, continuationId: revision, proofRef: identifierSchema });
 export const toolDispatchReplySchema = z.discriminatedUnion("status", [

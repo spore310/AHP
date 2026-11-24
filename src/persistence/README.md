@@ -11,6 +11,7 @@ PostgreSQL implements the production storage adapter.
 | ---- | -------------- |
 | `helpers/durability/types.ts` | Exact session/resource records, data CAS, lifecycle operations and host lease. |
 | `helpers/durability/workTypes.ts` | Work intent, internal records, lease fences and the owned repository. |
+| `helpers/durability/workFences.ts` | Synchronous readers tied to the acquired host, exact session lifecycle and work revision. |
 | `helpers/durability/workIntent.ts` | Canonical work capture and structural replay equality. |
 | `helpers/durability/memoryWork.ts` | Work admission, quotas, data CAS and settlement over the same records used for retirement. |
 | `helpers/durability/helpers.ts` | Bounded data capture, resource identities and graph order. |

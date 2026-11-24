@@ -3,6 +3,7 @@ import { capturePlainJson, identifierSchema, policyRefSchema, resourceRefSchema,
 import type { PresentedExternalProof } from "../evaluate/types";
 import type { ResourceKindAdapter, ResourceTypeRegistration, ResourceRegistration, ResourceOperationsOptions, ResourceOperations, ResourceOperationRequest, ResourceOperationAuthority, ResourceOperationTicket, ResourceOperation, ResourceOperationHandle } from "./types";
 import type { ResourceRef, SecuritySubjectRef } from "../../types";
+import { captureWorkRestriction } from "./workRestriction";
 import { sameResource, sameRoute } from "../context";
 import type { RegisteredResource } from "./types";
 
@@ -81,6 +82,7 @@ const typeKey = (kind: string, type: { readonly key: string; readonly version: n
 /** Bounded policy adapter. All ownership and grants remain in the canonical registry. */
 export function createResourceOperations(options: ResourceOperationsOptions): ResourceOperations {
   const registry = options.registry;
+  const prepareWork = options.prepareWork?.bind(options);
   const policies = options.policies;
   const maxPending = options.maxPending ?? 64;
   const timeoutMs = options.timeoutMs ?? 5000;
@@ -149,10 +151,11 @@ export function createResourceOperations(options: ResourceOperationsOptions): Re
       if (closed || captured.admission === undefined || !types.has(typeKey(captured.resource.kind, captured.admission.sessionType, captured.admission.providerId))) throw new TypeError("Unsupported resource type.");
       registry.installResource(captured);
     },
-    authorize(raw: ResourceOperationRequest): ResourceOperationHandle {
+    authorize(raw: Parameters<ResourceOperations["authorize"]>[0]): ResourceOperationHandle {
       const denied: ResourceOperationHandle = Object.freeze({ ticket: Promise.resolve(undefined), settled: Promise.resolve(undefined) });
       if (unavailable() || raw.signal.aborted) return denied;
       let request: ResourceOperationRequest;
+      let restriction: ReturnType<typeof captureWorkRestriction>;
       try {
         const data = operationCopy({ actor: raw.actor, route: raw.route, target: raw.target, operation: raw.operation, payload: raw.payload });
         trustedRequestContextSchema.parse(data.actor);
@@ -162,6 +165,7 @@ export function createResourceOperations(options: ResourceOperationsOptions): Re
         if (refs.length > 64 || !refs.some((ref) => sameResource(ref, data.target)) || refs.some((ref) => ref.domainId !== data.actor.actor.principal.domainId)) return denied;
         for (const ref of refs) resourceRefSchema.parse(ref);
         request = Object.freeze({ ...data, signal: raw.signal });
+        restriction = captureWorkRestriction({ work: raw.work, prepareWork }, request.actor);
       } catch {
         return denied;
       }
@@ -179,6 +183,7 @@ export function createResourceOperations(options: ResourceOperationsOptions): Re
         stop: () => {
           clearTimeout(timer);
           request.signal.removeEventListener("abort", abort);
+          restriction.release();
         } };
       pending.add(state);
       request.signal.addEventListener("abort", abort, { once: true });
@@ -235,10 +240,12 @@ export function createResourceOperations(options: ResourceOperationsOptions): Re
           const commitDurable = target.operation.commitDurable?.bind(target.operation);
           if (commit === undefined && commitDurable === undefined) return undefined;
           state.durable = commitDurable !== undefined;
+          await restriction.prepare(request.route, request.payload, controller.signal);
+          if (!alive(state) || !restriction.admitsTarget(request.target) || !restriction.current()) return undefined;
           const authority: ResourceOperationAuthority = Object.freeze({ registry, decisions: Object.freeze(decisions) });
           const registryFence = state.fence;
           const fence = () => alive(state) && registryFence() && resolved.every((item) => exactlyTrue(item.adapter.fence(item.ref)));
-          if (!registry.validateAuthorityCohort([], decisions) || !fence()) return undefined;
+          if (!registry.validateAuthorityCohort([], decisions) || !fence() || !restriction.fence()) return undefined;
           state.commit = (admission) => {
             let attempted = false;
             let accepting = true;
@@ -249,7 +256,7 @@ export function createResourceOperations(options: ResourceOperationsOptions): Re
               if (!active() || attempted) return false;
               attempted = true;
               if (!alive(state) || !resolved.every((item) => exactlyTrue(item.adapter.current(item.ref)))) return false;
-              if (!exactlyTrue(admission(authority)) || !fence()) return false;
+              if (!restriction.current() || !exactlyTrue(admission(authority)) || !fence() || !restriction.fence()) return false;
               admitted = true;
               return true;
             };

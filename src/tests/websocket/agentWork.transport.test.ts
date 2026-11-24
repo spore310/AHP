@@ -46,6 +46,7 @@ const setup = async (authenticator: ConnectionAuthenticator) => {
   const clock = createTestClock();
   const registrations = createRegistrationFixture();
   const agents = createAgentDirectory({
+    domainId: "work-transport-test",
     registrations: registrations.repository,
     now: clock.now,
     presenceTtlMs: 90_000,
@@ -67,7 +68,8 @@ const setup = async (authenticator: ConnectionAuthenticator) => {
       identity: createLegacyConnectionIdentityAdapter({ authenticator, domainId }),
       actors: { resolve: (input) => {
         if (!verifiedUsers.has(input.principal.subject)) return Promise.reject(new Error("Unknown fixture actor"));
-        return Promise.resolve({ actor: { kind: "user" as const, principal: input.principal }, connectionId: input.connectionId, authRevision: input.authRevision });
+        return Promise.resolve({ actor: { kind: "agent" as const, agentId: "coding-worker", principal: input.principal },
+          agentGeneration: 1, connectionId: input.connectionId, authRevision: input.authRevision });
       } },
       bindings: { read: () => Promise.resolve([]) },
       resources: { resolve: () => Promise.reject(new Error("No initial resource expected")) },

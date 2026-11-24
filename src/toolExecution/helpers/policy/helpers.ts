@@ -50,7 +50,7 @@ export function createToolExecutorPolicy<TLocation extends ToolExecutionLocation
   const captureRequest = (request: ToolPolicyResolutionRequest<TLocation>): ToolPolicyResolutionRequest<TLocation> => {
     if (!validators.has(request.registration) || request.signal.aborted) return deny();
     return Object.freeze({
-      ...request,
+      registration: request.registration, signal: request.signal,
       caller: schemas.trustedRequestContextSchema.parse(captureToolValue(request.caller, limits).value),
       origin: schemas.resourceRefSchema.parse(captureToolValue(request.origin, limits).value),
       sessionType: Object.freeze({ key: schemas.identifierSchema.parse(request.sessionType.key), version: request.sessionType.version }),

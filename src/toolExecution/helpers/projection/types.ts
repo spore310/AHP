@@ -11,5 +11,5 @@ export interface ToolProjectionOptions {
   project(output: unknown, context: ToolActionContext): Awaitable<ToolProjectionRequest | undefined>;
 }
 export interface ToolResultProjection {
-  project(output: unknown, context: ToolActionContext, current: () => boolean, admission: (authority: ResourceOperationAuthority) => boolean): Promise<boolean>;
+  project(output: unknown, context: ToolActionContext, current: () => boolean, admission: (authority: ResourceOperationAuthority, target?: ResourceRef) => boolean): Promise<boolean>;
 }

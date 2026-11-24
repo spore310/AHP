@@ -1,5 +1,6 @@
 import type { ExecutorRevision, TrustedRequestContext } from "@authorization";
 import type { ToolActionContext } from "@toolExecution/types";
+import type { WorkOperationRestriction } from "@authorization/helpers/resources/types";
 import type { ToolDispatcherOptions } from "@toolExecution/helpers/dispatcher";
 import type { ToolPolicyRegistration, ToolPolicyRoute, ToolPolicyResolutionRequest, ToolExecutorPolicyOptions, ToolExecutorPolicyRequest, ToolExecutorProof } from "@toolExecution/helpers/policy";
 import type { ApprovedArtifactSource } from "@toolExecution/helpers/artifacts";
@@ -14,7 +15,7 @@ export interface ClientToolBrokerOptions extends ToolExecutorPolicyOptions<"clie
 export type ClientToolPolicyRequest = ToolExecutorPolicyRequest<"client">;
 export type ClientToolProof = ToolExecutorProof;
 
-export interface ClientToolDispatchRequest extends ClientToolResolutionRequest {
+export interface ClientToolDispatchRequest extends ClientToolResolutionRequest, WorkOperationRestriction {
   readonly callId: string;
   readonly executor: ExecutorRevision;
   readonly executorContext: TrustedRequestContext;
