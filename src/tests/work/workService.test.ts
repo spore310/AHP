@@ -1,558 +1,223 @@
+import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import { createSessionOwnerRegistry, createWorkReadPort, WorkError } from "@work";
+import type { JsonObject, JsonValue } from "@persistence/helpers/durability/types";
+import type { WorkItemRecord } from "@persistence/types";
+import { createAgentWorkExtension } from "@websocket/helpers/ahp/agentWork";
+import { workFixture } from "./commandsFixture";
 
-import type {
-  AgentRegistrationRecord,
-  AgentRegistrationRepository,
-  DurableSessionInput,
-  WorkItemRecord,
-  WorkLeaseRecord,
-  WorkRepository,
-} from "@persistence/types";
-import type { AuthenticatedPrincipal, PresenceBinding } from "@agents/types";
-import { WorkError, createSessionOwnerRegistry, createWorkService } from "@work";
-
-const principal: AuthenticatedPrincipal = { subject: "alice" };
-const session: DurableSessionInput = {
-  sessionUri: "ahp-session:/work-unit",
-  ownerPrincipalSubject: "alice",
-  providerId: "mock",
-  createdAt: "2026-10-20T00:00:00.000Z",
-  modifiedAt: "2026-10-20T00:00:00.000Z",
-  lastServerSeq: 1,
-  durableState: {},
-};
-
-const registration = (
-  overrides: Partial<AgentRegistrationRecord> = {},
-): AgentRegistrationRecord => ({
-  id: "11111111-1111-4111-8111-111111111111",
-  principalSubject: "alice",
-  agentKey: "worker",
-  enabled: true,
-  createdAt: "2026-10-20T00:00:00.000Z",
-  ...overrides,
-});
-
-const presence = (overrides: Partial<PresenceBinding> = {}): PresenceBinding => ({
-  agentId: "11111111-1111-4111-8111-111111111111",
-  principalSubject: "alice",
-  connectionId: "connection-a",
-  generation: 1,
-  expiresAt: Date.now() + 60_000,
-  ...overrides,
-});
-
-const workItem = (overrides: Partial<WorkItemRecord> = {}): WorkItemRecord => ({
-  id: "22222222-2222-4222-8222-222222222222",
-  sessionUri: session.sessionUri,
-  requestKey: "request-1",
-  kind: "code.patch",
-  input: { instruction: "change" },
-  status: "queued",
-  attemptCount: 0,
-  maxAttempts: 3,
-  createdAt: "2026-10-20T00:00:00.000Z",
-  updatedAt: "2026-10-20T00:00:00.000Z",
-  ...overrides,
-});
-
-const createFakes = (overrides: {
-  readonly describeSession?: (sessionUri: string) => DurableSessionInput | undefined;
-  readonly currentInstance?: (uri: string, instance: string, subject: string, domain: string) => boolean;
-} = {}) => {
-  const submit = vi.fn((): Promise<{ readonly id: string; readonly created: boolean }> => (
-    Promise.resolve({ id: "work-1", created: true })
-  ));
-  const claim = vi.fn((): Promise<WorkLeaseRecord | null> => Promise.resolve({
-    workId: "22222222-2222-4222-8222-222222222222",
-    sessionUri: session.sessionUri,
-    kind: "code.patch",
-    input: { instruction: "change" },
-    leaseToken: "33333333-3333-4333-8333-333333333333",
-    leaseExpiresAt: "2026-10-20T00:01:00.000Z",
-    attempt: 1,
-  }));
-  const renew = vi.fn((): Promise<{ readonly leaseExpiresAt: string }> => (
-    Promise.resolve({ leaseExpiresAt: "2026-10-20T00:02:00.000Z" })
-  ));
-  const complete = vi.fn((): Promise<boolean> => Promise.resolve(true));
-  const fail = vi.fn((): Promise<"queued" | "failed" | null> => Promise.resolve("queued"));
-  const cancel = vi.fn((): Promise<"queued" | "leased" | "completed" | "failed" | "cancelled" | null> => (
-    Promise.resolve("cancelled")
-  ));
-  const get = vi.fn((): Promise<WorkItemRecord | null> => (
-    Promise.resolve(workItem({ leaseAgentId: "agent", leaseToken: "secret" }))
-  ));
-  const reconcileExpired = vi.fn((): Promise<number> => Promise.resolve(0));
-  const hasDependentWork = vi.fn((): Promise<boolean> => Promise.resolve(false));
-  const repository: WorkRepository = {
-    submit,
-    claim,
-    renew,
-    complete,
-    fail,
-    cancel,
-    get,
-    reconcileExpired,
-    hasDependentWork,
-  };
-  const register = vi.fn(() => Promise.resolve(registration()));
-  const getById = vi.fn(() => Promise.resolve(registration()));
-  const registrations: AgentRegistrationRepository = {
-    register,
-    getById,
-  };
-  const bindings = new Map<string, PresenceBinding>([["connection-a", presence()]]);
-  const owners = createSessionOwnerRegistry();
-  owners.bind(session.sessionUri, principal.subject);
-  const service = createWorkService({
-    currentInstance: overrides.currentInstance,
-    repository,
-    sessions: owners,
-    presence: {
-      getByConnection: (connectionId) => bindings.get(connectionId),
-    },
-    registrations,
-    describeSession: overrides.describeSession
-      ?? ((sessionUri) => (sessionUri === session.sessionUri ? session : undefined)),
-    allowedKinds: new Set(["code.patch"]),
-    now: () => Date.now(),
-    maxInputBytes: 256,
-    maxResultBytes: 256,
-  });
-  return {
-    repository,
-    registrations,
-    bindings,
-    owners,
-    service,
-    submit,
-    cancel,
-    complete,
-    get,
-    hasDependentWork,
-    getById,
-  };
-};
-
-const agentContext = {
-  principal,
-  agentId: "11111111-1111-4111-8111-111111111111",
-  connectionId: "connection-a",
-  generation: 1,
-} as const;
-
-describe("work service", () => {
-  it("rechecks the original work incarnation and connection at protected reply delivery", async () => {
-    const { createAgentWorkExtension } = await import("@websocket/helpers/ahp/agentWork");
-    let instance = "first";
-    let connected = true;
-    const { get, service } = createFakes({ currentInstance: (_uri, id) => id === instance });
-    const item = workItem({ sessionInstanceId: instance });
-    get.mockResolvedValueOnce(item);
-    const handler = createAgentWorkExtension({ work: service }).handlers["x-ahp/work/get"];
-    if (!handler) throw new Error("Missing work read handler");
-    const guard = vi.fn<(check: () => boolean) => void>();
-    const call = (read: typeof handler) => read({ version: 1, workId: item.id }, {
-      connectionId: "reader", principal, isSecurityCurrent: () => connected,
-      security: { context: { connectionId: "reader", authRevision: "1", actor: { kind: "user", principal: { domainId: "domain", subject: principal.subject } } },
-        fence: { connectionId: "reader", connectionGeneration: 1 }, scopes: [], allowGlobalSequence: true, validUntil: Date.now() + 10000 },
-      send: () => true, onClose() {}, close() {},
-    }, { kind: "request", onReplySettled() {}, guardReply: guard });
-    const reply = await call(handler);
-    expect(reply).toMatchObject({ work: { id: item.id } });
-    expect(guard).toHaveBeenCalledOnce();
-    const check = guard.mock.calls[0]?.[0];
-    expect(check?.()).toBe(true);
-    instance = "replacement";
-    expect(check?.()).toBe(false);
-    instance = "first";
-    connected = false;
-    expect(check?.()).toBe(false);
-    connected = true;
-    get.mockResolvedValueOnce(item);
-    const wrapped = createAgentWorkExtension({ work: { get: (actor, id, domain) => service.get(actor, id, domain) } }).handlers["x-ahp/work/get"];
-    if (!wrapped) throw new Error("Missing wrapped work read handler");
-    await expect(call(wrapped)).rejects.toThrow();
-  });
-  it("submits only through an authenticated owned live session", async () => {
-    const { submit, service } = createFakes();
-    await expect(service.submit(principal, {
-      sessionUri: session.sessionUri,
-      requestKey: "request-1",
-      kind: "code.patch",
-      input: { instruction: "change" },
-    })).resolves.toEqual({ id: "work-1" });
-    expect(submit).toHaveBeenCalledWith(expect.objectContaining({
-      session,
-      requestKey: "request-1",
-      kind: "code.patch",
-    }));
-
-    await expect(service.submit({ subject: "bob" }, {
-      sessionUri: session.sessionUri,
-      requestKey: "request-2",
-      kind: "code.patch",
-      input: { instruction: "change" },
-    })).rejects.toMatchObject({ code: "unauthorized" });
-  });
-
-  it("rejects a target agent owned by another principal", async () => {
-    const { getById, service } = createFakes();
-    getById.mockResolvedValue(registration({ principalSubject: "bob" }));
-
-    await expect(service.submit(principal, {
-      sessionUri: session.sessionUri,
-      requestKey: "request-1",
-      kind: "code.patch",
-      input: { instruction: "change" },
-      targetAgentId: "11111111-1111-4111-8111-111111111111",
-    })).rejects.toMatchObject({ code: "unauthorized" });
-  });
-
-  it("rejects disallowed kinds, bad request keys and oversized input", async () => {
-    const { service } = createFakes();
-    await expect(service.submit(principal, {
-      sessionUri: session.sessionUri,
-      requestKey: "request-1",
-      kind: "code.review",
-      input: {},
-    })).rejects.toMatchObject({ code: "invalid" });
-    await expect(service.submit(principal, {
-      sessionUri: session.sessionUri,
-      requestKey: "",
-      kind: "code.patch",
-      input: {},
-    })).rejects.toMatchObject({ code: "invalid" });
-    await expect(service.submit(principal, {
-      sessionUri: session.sessionUri,
-      requestKey: "request-1",
-      kind: "code.patch",
-      input: { payload: "x".repeat(300) },
-    })).rejects.toMatchObject({ code: "invalid" });
-  });
-
-  it("rejects blank session URIs, oversized URIs, blank request keys and kinds", async () => {
-    const { service } = createFakes();
-    await expect(service.submit(principal, {
-      sessionUri: "ahp-session:/" + "x".repeat(2_049),
-      requestKey: "request-1",
-      kind: "code.patch",
-      input: {},
-    })).rejects.toMatchObject({ code: "invalid" });
-    await expect(service.submit(principal, {
-      sessionUri: session.sessionUri,
-      requestKey: "   ",
-      kind: "code.patch",
-      input: {},
-    })).rejects.toMatchObject({ code: "invalid" });
-    await expect(service.submit(principal, {
-      sessionUri: session.sessionUri,
-      requestKey: "request-1",
-      kind: " ",
-      input: {},
-    })).rejects.toMatchObject({ code: "invalid" });
-  });
-
-  it("rejects input carrying text outside the portable-text profile", async () => {
-    const { service } = createFakes();
-    await expect(service.submit(principal, {
-      sessionUri: session.sessionUri,
-      requestKey: "request-1",
-      kind: "code.patch",
-      input: { note: "a\u0000b" },
-    })).rejects.toMatchObject({ code: "invalid" });
-    await expect(service.submit(principal, {
-      sessionUri: session.sessionUri,
-      requestKey: "request-2",
-      kind: "code.patch",
-      input: { note: "\ud800" },
-    })).rejects.toMatchObject({ code: "invalid" });
-  });
-
-  it("refuses a submission that races a disposal and cancels the durable row", async () => {
-    const { cancel, owners, service, submit } = createFakes();
-    let release: () => void = (): void => undefined;
-    submit.mockImplementationOnce((): Promise<{ readonly id: string; readonly created: boolean }> => (
-      new Promise((resolve) => {
-        release = (): void => {
-          resolve({ id: "work-race", created: true });
-        };
-      })
-    ));
-    const pending = service.submit(principal, {
-      sessionUri: session.sessionUri,
-      requestKey: "request-race",
-      kind: "code.patch",
-      input: { instruction: "change" },
-    });
-    // The disposal removes the live session and its owner binding while the
-    // repository write is still in flight.
-    owners.unbind(session.sessionUri);
-    release();
-    await expect(pending).rejects.toMatchObject({ code: "conflict" });
-    expect(cancel).toHaveBeenCalledWith({
-      workId: "work-race",
-      principalSubject: "alice",
-    });
-  });
-
-  it("reports the reconciled conflict even when the cancel itself fails", async () => {
-    const { cancel, owners, service, submit } = createFakes();
-    let release: () => void = (): void => undefined;
-    submit.mockImplementationOnce((): Promise<{ readonly id: string; readonly created: boolean }> => (
-      new Promise((resolve) => {
-        release = (): void => {
-          resolve({ id: "work-race", created: true });
-        };
-      })
-    ));
-    const pending = service.submit(principal, {
-      sessionUri: session.sessionUri,
-      requestKey: "request-race-cancel-fails",
-      kind: "code.patch",
-      input: { instruction: "change" },
-    });
-    cancel.mockRejectedValueOnce(new Error("storage unavailable"));
-    owners.unbind(session.sessionUri);
-    release();
-    // The ownership problem outranks the reconciliation failure, and the typed
-    // conflict is exactly what the caller sees — never a false success.
-    await expect(pending).rejects.toMatchObject({ code: "conflict" });
-  });
-
-  it("exposes ownership conflicts as typed work-domain errors", () => {
-    const { owners } = createFakes();
-    expect(() => {
-      owners.bind(session.sessionUri, "bob");
-    }).toThrow(WorkError);
-    expect(() => {
-      owners.bind(session.sessionUri, "bob");
-    }).toThrow("The session already belongs to another principal.");
-    expect(() => {
-      owners.bind(session.sessionUri, principal.subject);
-    }).not.toThrow();
-  });
-
-  it("rejects unstorable text in scalar submission and claim fields", async () => {
-    const { service } = createFakes();
-    await expect(service.submit(principal, {
-      sessionUri: "ahp-session:/work\u0000-unit",
-      requestKey: "request-1",
-      kind: "code.patch",
-      input: { instruction: "change" },
-    })).rejects.toMatchObject({ code: "invalid", message: "A session URI is required." });
-
-    await expect(service.submit(principal, {
-      sessionUri: session.sessionUri,
-      requestKey: "request\u0000-1",
-      kind: "code.patch",
-      input: { instruction: "change" },
-    })).rejects.toMatchObject({ code: "invalid", message: "A bounded request key is required." });
-
-    await expect(service.claim(agentContext, "ahp-session:/work\u0000-unit"))
-      .rejects.toMatchObject({ code: "invalid" });
-  });
-
-  it("refuses a durable projection outside the portable-text profile", async () => {
-    const { service } = createFakes({
-      describeSession: (sessionUri) => (sessionUri === session.sessionUri
-        ? { ...session, durableState: { workingDirectories: ["a\u0000b"] } }
-        : undefined),
-    });
-    await expect(service.submit(principal, {
-      sessionUri: session.sessionUri,
-      requestKey: "request-projection",
-      kind: "code.patch",
-      input: { instruction: "change" },
-    })).rejects.toMatchObject({
-      code: "invalid",
-      message: "The session projection cannot be stored as JSON.",
-    });
-  });
-
-  it("refuses a replayed request key whose landed row is terminal", async () => {
-    const { cancel, get, service, submit } = createFakes();
-    submit.mockResolvedValue({ id: "work-1", created: false });
-    const submission = {
-      sessionUri: session.sessionUri,
-      requestKey: "request-1",
-      kind: "code.patch",
-      input: { instruction: "change" },
-    };
-
-    get.mockResolvedValue(workItem({ status: "cancelled" }));
-    await expect(service.submit(principal, submission)).rejects.toMatchObject({
-      code: "conflict",
-      message: "That request key is already terminal.",
-    });
-
-    get.mockResolvedValue(workItem({ status: "failed" }));
-    await expect(service.submit(principal, submission)).rejects.toMatchObject({ code: "conflict" });
-
-    expect(cancel).not.toHaveBeenCalled();
-    expect(get).toHaveBeenCalledWith({ workId: "work-1", principalSubject: "alice" });
-  });
-
-  it("keeps idempotent replay success for a non-terminal landed row", async () => {
-    const { get, service, submit } = createFakes();
-    submit.mockResolvedValue({ id: "work-1", created: false });
-    const result = await service.submit(principal, {
-      sessionUri: session.sessionUri,
-      requestKey: "request-1",
-      kind: "code.patch",
-      input: { instruction: "change" },
-    });
-    expect(result).toEqual({ id: "work-1" });
-    expect(get).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects a missing, expired, or mismatched presence binding", async () => {
-    const first = createFakes();
-    await expect(first.service.claim({ ...agentContext, generation: 2 }, session.sessionUri))
-      .rejects.toMatchObject({ code: "unauthorized" });
-
-    const second = createFakes();
-    second.bindings.set("connection-a", presence({ expiresAt: Date.now() - 1 }));
-    await expect(second.service.claim(agentContext, session.sessionUri))
-      .rejects.toMatchObject({ code: "unauthorized" });
-
-    const third = createFakes();
-    await expect(third.service.claim({ ...agentContext, connectionId: "missing" }, session.sessionUri))
-      .rejects.toMatchObject({ code: "unauthorized" });
-  });
-
-  it("rejects a disabled agent registration", async () => {
-    const { getById, service } = createFakes();
-    getById.mockResolvedValue(registration({ enabled: false }));
-    await expect(service.claim(agentContext, session.sessionUri))
-      .rejects.toMatchObject({ code: "unauthorized" });
-  });
-
-  it("returns the current fenced lease and maps renew", async () => {
-    const { service } = createFakes();
-    await expect(service.claim(agentContext, session.sessionUri)).resolves.toMatchObject({
-      workId: "22222222-2222-4222-8222-222222222222",
-      leaseToken: "33333333-3333-4333-8333-333333333333",
-      attempt: 1,
-    });
-    await expect(service.renew(
-      agentContext,
-      "22222222-2222-4222-8222-222222222222",
-      "33333333-3333-4333-8333-333333333333",
-    )).resolves.toEqual({ leaseExpiresAt: "2026-10-20T00:02:00.000Z" });
-  });
-
-  it("rejects non-object results and stale completions", async () => {
-    const { complete, service } = createFakes();
-    await expect(service.complete(
-      agentContext,
-      "22222222-2222-4222-8222-222222222222",
-      "33333333-3333-4333-8333-333333333333",
-      "not-an-object",
-    )).rejects.toMatchObject({ code: "invalid" });
-
-    complete.mockResolvedValue(false);
-    await expect(service.complete(
-      agentContext,
-      "22222222-2222-4222-8222-222222222222",
-      "33333333-3333-4333-8333-333333333333",
-      { ok: true },
-    )).rejects.toMatchObject({ code: "stale" });
-  });
-
-  it("does not expose lease tokens in work views", async () => {
-    const { service } = createFakes();
-    const view = await service.get(principal, "22222222-2222-4222-8222-222222222222");
-    expect(view).not.toHaveProperty("leaseToken");
-    expect(view).not.toHaveProperty("leaseAgentId");
-  });
-
-  it("rejects disposal while dependent work exists", async () => {
-    const { hasDependentWork, service } = createFakes();
-    hasDependentWork.mockResolvedValue(true);
-    await expect(service.assertSessionDisposable(session.sessionUri))
-      .rejects.toBeInstanceOf(WorkError);
-  });
-
-  it("refuses a dispose channel carrying text the work index cannot compare", async () => {
-    const { hasDependentWork, service } = createFakes();
-
-    await expect(service.assertSessionDisposable("ahp-session:/x\u0000"))
-      .rejects.toMatchObject({ code: "invalid", message: "A session URI is required." });
-    await expect(service.assertSessionDisposable("ahp-session:/\ud800"))
-      .rejects.toMatchObject({ code: "invalid" });
-    expect(hasDependentWork).not.toHaveBeenCalled();
-
-    // Comparable text still reaches the dependent-work lookup.
-    await expect(service.assertSessionDisposable(session.sessionUri)).resolves.toBeUndefined();
-    expect(hasDependentWork).toHaveBeenCalledWith(session.sessionUri);
-  });
-
-  it("refuses a durable projection nested beyond the portable-text depth budget", async () => {
-    let deep: Record<string, unknown> = { leaf: true };
-    for (let index = 0; index < 600; index += 1) {
-      deep = { a: deep };
-    }
-    const { service, submit } = createFakes({
-      describeSession: (sessionUri) => (sessionUri === session.sessionUri
-        ? { ...session, durableState: deep }
-        : undefined),
-    });
-
-    await expect(service.submit(principal, {
-      sessionUri: session.sessionUri,
-      requestKey: "deep-projection",
-      kind: "code.patch",
-      input: {},
-    })).rejects.toMatchObject({
-      code: "invalid",
-      message: "The session projection cannot be stored as JSON.",
-    });
-    expect(submit).not.toHaveBeenCalled();
-  });
-
-  it("pins the durable-projection depth boundary at 512 accepted and 513 refused", async () => {
-    // The literal boundary pins the text helper's budget: these assertions and
-    // the module READMEs' "512-level" wording must move together, so an
-    // off-by-one comparator or a changed budget cannot ship silently. The
-    // scalar seed makes the leaf land exactly at recursion depth `levels`
-    // (an object seed would add one more level).
-    const pinned = (levels: number): Record<string, unknown> => {
-      let value: unknown = "leaf";
-      for (let index = 0; index < levels; index += 1) {
-        value = { a: value };
+describe("exact-instance work commands", () => {
+  it("rejects invalid text, missing locators, disallowed kinds and invalid priorities without writing", async () => {
+    const f = await workFixture();
+    try {
+      const submit = vi.spyOn(f.host.work, "submit");
+      const invalid = [
+        { requestKey: " " }, { requestKey: "bad\u0000key" }, { requestKey: "x".repeat(257) },
+        { kind: " " }, { kind: "not-registered" }, { input: { nested: ["\ud800"] } }, { data: { "bad\u0000key": true } },
+        { session: { kind: "session", id: " " } }, { session: { kind: "session", id: "x".repeat(2049) } },
+        { scope: [] }, { priority: 1.5 }, { priority: 2147483648 },
+      ];
+      for (const change of invalid) {
+        await expect(f.service.submit(f.caller, { ...f.request, ...change })).rejects.toMatchObject({ code: "invalid" });
       }
-      return value as Record<string, unknown>;
-    };
+      expect(submit).not.toHaveBeenCalled();
+      expect(f.rows.size).toBe(0);
+    } finally {
+      await f.host.release();
+    }
+  });
 
-    const atBoundary = createFakes({
-      describeSession: (sessionUri) => (sessionUri === session.sessionUri
-        ? { ...session, durableState: pinned(512) }
-        : undefined),
-    });
-    await expect(atBoundary.service.submit(principal, {
-      sessionUri: session.sessionUri,
-      requestKey: "boundary-512",
-      kind: "code.patch",
-      input: {},
-    })).resolves.toMatchObject({ id: "work-1" });
-    expect(atBoundary.submit).toHaveBeenCalledTimes(1);
+  it("enforces the 64 KiB input budget in UTF-8 and the 16-level JSON depth limit", async () => {
+    const f = await workFixture();
+    try {
+      const envelopeBytes = Buffer.byteLength(JSON.stringify({ value: "" }));
+      const value = "x".repeat(65536 - envelopeBytes - Buffer.byteLength("雪")) + "雪";
+      const nested = (depth: number): JsonObject => {
+        let node: JsonValue = "leaf";
+        for (let i = 1; i < depth; i++) node = { child: node };
+        return { child: node };
+      };
+      const submit = vi.spyOn(f.host.work, "submit");
+      await expect(f.service.submit(f.caller, { ...f.request, input: { value: value + "x" } })).rejects.toMatchObject({ code: "invalid" });
+      await expect(f.service.submit(f.caller, { ...f.request, input: nested(17) })).rejects.toMatchObject({ code: "invalid" });
+      expect(submit).not.toHaveBeenCalled();
+      expect(f.rows.size).toBe(0);
+      await f.service.submit(f.caller, { ...f.request, input: { value } });
+      await f.service.submit(f.caller, { ...f.request, requestKey: "deep", input: nested(16) });
+      expect(f.rows.size).toBe(2);
+    } finally {
+      await f.host.release();
+    }
+  });
 
-    const oneBelow = createFakes({
-      describeSession: (sessionUri) => (sessionUri === session.sessionUri
-        ? { ...session, durableState: pinned(513) }
-        : undefined),
-    });
-    await expect(oneBelow.service.submit(principal, {
-      sessionUri: session.sessionUri,
-      requestKey: "boundary-513",
-      kind: "code.patch",
-      input: {},
-    })).rejects.toMatchObject({
-      code: "invalid",
-      message: "The session projection cannot be stored as JSON.",
-    });
-    expect(oneBelow.submit).not.toHaveBeenCalled();
+  it("checks target registration by domain and enabled state", async () => {
+    const f = await workFixture();
+    try {
+      const target = { id: randomUUID(), domainId: f.ref.domainId, principalSubject: "different-worker", agentKey: "worker",
+        createdAt: f.session.createdAt, enabled: true };
+      const request = { ...f.request, targetAgentId: target.id };
+      for (const record of [undefined, { ...target, enabled: false }, { ...target, domainId: "foreign" }]) {
+        if (record) f.agents.set(target.id, record);
+        await expect(f.service.submit(f.caller, request)).rejects.toMatchObject({ code: "conflict" });
+        expect(f.rows.size).toBe(0);
+      }
+      f.agents.set(target.id, target);
+      const { id } = await f.service.submit(f.caller, request);
+      expect(f.rows.get(id)?.targetAgentId).toBe(target.id);
+    } finally {
+      await f.host.release();
+    }
+  });
+
+  it("refuses a pending submission after the principal's admission expires or its exact session retires", async () => {
+    for (const retiring of [false, true]) {
+      const entered = Promise.withResolvers<undefined>();
+      const resume = Promise.withResolvers<undefined>();
+      const release = vi.fn();
+      let current = true;
+      const f = await workFixture({ prepare: async () => {
+        entered.resolve(undefined);
+        await resume.promise;
+        return { isCurrent: () => current, release };
+      } });
+      try {
+        const attempt = f.service.submit(f.caller, f.request);
+        await entered.promise;
+        if (retiring) await f.host.sessions.beginRetirement(f.ref, () => true);
+        else current = false;
+        resume.resolve(undefined);
+        await expect(attempt).rejects.toMatchObject({ code: retiring ? "conflict" : "unauthorized" });
+        expect(release).toHaveBeenCalledOnce();
+        expect(f.rows.size).toBe(0);
+      } finally {
+        resume.resolve(undefined);
+        await f.host.release();
+      }
+    }
+  });
+
+  it("keeps the leased row unchanged when result validation, registration, attempt or deadline checks fail", async () => {
+    const f = await workFixture();
+    try {
+      const { id } = await f.service.submit(f.caller, f.request);
+      const { worker, execution } = f.lease(id);
+      const row = f.rows.get(id);
+      const agent = f.agents.get(worker.agent.registrationId);
+      if (!row?.lease || !agent) throw new Error("Missing lease fixture.");
+      const settle = vi.spyOn(f.host.work, "settle");
+      await expect(f.service.complete(worker, execution, { result: [] as unknown as JsonObject })).rejects.toMatchObject({ code: "invalid" });
+      expect(settle).not.toHaveBeenCalled();
+      await expect(f.service.complete(worker, { ...execution, attempt: 2 }, { result: {} })).rejects.toMatchObject({ code: "conflict" });
+      await expect(f.service.complete({ ...worker, executionEpoch: "3" }, execution, { result: {} })).rejects.toMatchObject({ code: "conflict" });
+      f.agents.set(agent.id, { ...agent, enabled: false });
+      await expect(f.service.fail(worker, execution, { retryable: false })).rejects.toMatchObject({ code: "conflict" });
+      expect(f.rows.get(id)).toEqual(row);
+      f.agents.set(agent.id, agent);
+      const expired = { ...row, lease: { ...row.lease, expiresAt: new Date(0).toISOString() } };
+      f.rows.set(id, expired);
+      await expect(f.service.complete(worker, execution, { result: {} })).rejects.toMatchObject({ code: "conflict" });
+      expect(f.rows.get(id)).toEqual(expired);
+    } finally {
+      await f.host.release();
+    }
+  });
+});
+
+describe("protected work reads and legacy session disposal", () => {
+  it("checks the original instance at delivery for a repository-backed read and strips its private fields", async () => {
+    const uri = "ahp-session:/instance";
+    const original = randomUUID();
+    const item: WorkItemRecord = { id: randomUUID(), sessionUri: uri, sessionInstanceId: original, requestKey: "private-key", kind: "review",
+      input: {}, status: "leased", leaseAgentId: "private-agent", leaseToken: "private-token", attemptCount: 1, maxAttempts: 3,
+      createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() };
+    const get = vi.fn(() => Promise.resolve(item));
+    let current: string = original;
+    const port = createWorkReadPort({ sessions: createSessionOwnerRegistry(), repository: { get, hasDependentWork: vi.fn() },
+      currentInstance: (session, instance, owner, domain) => session === uri && instance === current && owner === "alice" && domain === "trusted" });
+    const guard = vi.fn<(check: () => boolean) => void>();
+    const actor = { subject: "alice" };
+    const reply = await port.get(actor, item.id, "trusted", guard);
+    expect(get).toHaveBeenCalledWith({ workId: item.id, domainId: "trusted", principalSubject: "alice" });
+    expect(reply).toMatchObject({ id: item.id, status: "leased" });
+    for (const secret of ["private-key", "private-agent", "private-token"]) expect(JSON.stringify(reply)).not.toContain(secret);
+    expect(guard.mock.calls[0]?.[0]()).toBe(true);
+    current = randomUUID();
+    expect(guard.mock.calls[0]?.[0]()).toBe(false);
+    await expect(port.get(actor, item.id, "trusted")).resolves.toBeNull();
+  });
+
+  it("guards canonical replies by exact instance and live connection and redacts the stored lease", async () => {
+    const f = await workFixture();
+    try {
+      const { id } = await f.service.submit(f.caller, f.request);
+      const { execution } = f.lease(id);
+      const principal = { subject: f.session.owner };
+      const repository = { get: vi.fn(), hasDependentWork: vi.fn() };
+      let instance = f.ref.instanceId;
+      let connected = true;
+      const port = createWorkReadPort({ sessions: createSessionOwnerRegistry(), repository, canonicalGet: f.host.work.get.bind(f.host.work),
+        currentInstance: (uri, exact, subject, domain) => uri === f.ref.id && exact === instance && subject === principal.subject && domain === f.ref.domainId });
+      const handler = createAgentWorkExtension({ work: port }).handlers["x-ahp/work/get"];
+      if (!handler) throw new Error("Missing work read handler.");
+      const guard = vi.fn<(check: () => boolean) => void>();
+      const call = (read: typeof handler) => read({ version: 1, workId: id }, {
+        connectionId: "reader", principal, isSecurityCurrent: () => connected,
+        security: { context: f.caller.context, fence: { connectionId: "reader", connectionGeneration: 1 }, scopes: [], allowGlobalSequence: true, validUntil: Date.now() + 10000 },
+        send: () => true, onClose() {}, close() {},
+      }, { kind: "request", onReplySettled() {}, guardReply: guard });
+      const reply = await call(handler);
+      expect(reply).toMatchObject({ work: { id, session: f.ref, status: "leased" } });
+      for (const secret of [execution.leaseToken, "leaseToken", "leaseAgentId", "executionEpoch", "submittedData"]) {
+        expect(JSON.stringify(reply)).not.toContain(secret);
+      }
+      expect(await port.get({ subject: "foreign" }, id, f.ref.domainId)).toBeNull();
+      expect(await port.get(principal, id, "foreign")).toBeNull();
+      expect(repository.get).not.toHaveBeenCalled();
+      expect(guard).toHaveBeenCalledOnce();
+      const check = guard.mock.calls[0]?.[0];
+      expect(check?.()).toBe(true);
+      instance = "replacement";
+      expect(check?.()).toBe(false);
+      expect(await port.get(principal, id, f.ref.domainId)).toBeNull();
+      instance = f.ref.instanceId;
+      connected = false;
+      expect(check?.()).toBe(false);
+      connected = true;
+      const wrapped = createAgentWorkExtension({ work: { get: (actor, workId, domain) => port.get(actor, workId, domain) } }).handlers["x-ahp/work/get"];
+      if (!wrapped) throw new Error("Missing wrapped work read handler.");
+      await expect(call(wrapped)).rejects.toThrow();
+    } finally {
+      await f.host.release();
+    }
+  });
+
+  it("validates disposal text before lookup and refuses a session with dependent work", async () => {
+    const hasDependentWork = vi.fn(() => Promise.resolve(false));
+    const port = createWorkReadPort({ sessions: createSessionOwnerRegistry(), repository: { get: vi.fn(), hasDependentWork } });
+    for (const uri of ["ahp-session:/bad\u0000", "ahp-session:/\ud800"]) {
+      await expect(port.assertSessionDisposable(uri)).rejects.toMatchObject({ code: "invalid" });
+    }
+    expect(hasDependentWork).not.toHaveBeenCalled();
+    const uri = "ahp-session:/work";
+    hasDependentWork.mockResolvedValueOnce(true);
+    await expect(port.assertSessionDisposable(uri)).rejects.toMatchObject({ code: "conflict" });
+    await expect(port.assertSessionDisposable(uri)).resolves.toBeUndefined();
+    expect(hasDependentWork.mock.calls).toEqual([[uri], [uri]]);
+  });
+
+  it("preserves the existing owner on a conflicting bind and releases ownership on unbind or clear", () => {
+    const owners = createSessionOwnerRegistry();
+    const uri = "ahp-session:/work";
+    owners.bind(uri, "alice");
+    owners.bind(uri, "alice");
+    expect(() => {
+      owners.bind(uri, "bob");
+    }).toThrow(WorkError);
+    expect(owners.owner(uri)).toBe("alice");
+    owners.unbind(uri);
+    expect(owners.owner(uri)).toBeUndefined();
+    owners.bind(uri, "bob");
+    owners.clear();
+    expect(owners.owner(uri)).toBeUndefined();
   });
 });

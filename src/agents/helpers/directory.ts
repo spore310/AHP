@@ -31,6 +31,7 @@ const registrationCapacity = (): AgentDirectoryError => new AgentDirectoryError(
  * generation. Closing an old connection cannot remove a newer generation.
  */
 export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirectory => {
+  const domainId = options.domainId;
   const registrations: AgentRegistrationRepository = options.registrations;
   const now = options.now ?? Date.now;
   const presenceTtlMs = options.presenceTtlMs ?? DEFAULT_PRESENCE_TTL_MS;
@@ -148,11 +149,12 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
       const admission = beginRegistration(`key:${key}`, known);
       try {
         const record = await registrations.register({
+          ...(domainId === undefined ? {} : { domainId }),
           principalSubject: subject,
           agentKey,
           ...(displayName !== undefined ? { displayName } : {}),
         });
-        if (record.principalSubject !== subject || record.agentKey !== agentKey) {
+        if ((record.domainId !== undefined && record.domainId !== domainId) || record.principalSubject !== subject || record.agentKey !== agentKey) {
           throw new AgentDirectoryError("conflict", "Agent registration identity changed.");
         }
         return admission.remember(record);
@@ -264,12 +266,12 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
       const known = retainedById.get(agentId);
       const admission = beginRegistration(`id:${agentId}`, known);
       try {
-        const record = await registrations.getById(agentId);
+        const record = await (domainId === undefined ? registrations.getById(agentId) : registrations.getById(agentId, domainId));
         if (record === undefined) {
           if (known !== undefined) known.record = undefined;
           return undefined;
         }
-        if (record.id !== agentId) throw new AgentDirectoryError("conflict", "Agent registration identity changed.");
+        if (record.id !== agentId || (record.domainId !== undefined && record.domainId !== domainId)) throw new AgentDirectoryError("conflict", "Agent registration identity changed.");
         return admission.remember(record);
       } finally {
         admission.release();

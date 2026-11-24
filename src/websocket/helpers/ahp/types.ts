@@ -8,7 +8,7 @@ import type { AgentDirectory } from "@agents";
 import type { ClientToolBrokerOptions } from "@toolExecution/helpers/client/helpers/broker";
 import type { ResourceViewOptions } from "@toolExecution/helpers/views";
 import type { JsonRpcMessage } from "@jsonrpc";
-import type { SessionOwnerRegistry, WorkService } from "@work";
+import type { SessionOwnerRegistry, WorkReadPort } from "@work";
 import type { WebSocketConnectionContext } from "../../types";
 import { CLIENT_SESSION_ACTION_NAMES } from "./constants";
 
@@ -87,6 +87,6 @@ export interface AHPBindingOptions {
   readonly serverToolExecution?: ServerToolBrokerOptions;
   readonly maxInitialSubscriptions?: number;
   readonly agents?: AgentDirectory;
-  readonly work?: WorkService;
+  readonly work?: WorkReadPort;
   readonly sessionOwners?: SessionOwnerRegistry;
 }

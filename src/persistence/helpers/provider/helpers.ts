@@ -20,6 +20,7 @@ export const createPersistence = (provider: PersistenceProvider): PersistencePro
         get epoch() { return lease.epoch; },
         get serverSeq() { return lease.serverSeq; },
         get sessions() { return lease.sessions; },
+        get work() { return lease.work; },
         get resources() { return lease.resources; },
         isOpen: () => lease.isOpen(),
         async release() {

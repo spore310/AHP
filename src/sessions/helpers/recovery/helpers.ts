@@ -430,7 +430,8 @@ export function createDurableLifecycle(options: NonNullable<SessionsFactoryOptio
       const ref = captureRef(record.resource ?? unavailable());
       const binding = record.application ?? unavailable();
       const recovery = record.provider.recovery ?? unavailable();
-      const type = { id: binding.typeId, key: binding.key, version: binding.version };
+      const definition = deps.application?.catalogue.resolveExisting(binding).definition ?? unavailable();
+      const type = { id: binding.typeId, key: binding.key, version: binding.version, workManifest: definition.work ?? [] };
       const root: ResourceRecord = { ref, session: ref, owner: registration.owner.subject, providerId: record.provider.providerId,
         registration: facts(registration), operationId: randomUUID(), driver: { key: record.provider.providerId, version: recovery.version }, lifecycle: "creating",
         data: {}, dataRevision: "1", resourceRevision: "1", recoveryInput: captureData(recovery.capture(prepared.config)), runtimeMetadata: {}, createdAt: record.createdAt, modifiedAt: record.modifiedAt };
@@ -498,7 +499,8 @@ export function createDurableLifecycle(options: NonNullable<SessionsFactoryOptio
           try {
             const type = deps.application?.catalogue.resolveExisting(s.type) ?? unavailable();
             const provider = deps.providers.get(s.providerId) ?? unavailable();
-            if (type.definition.id !== s.type.id || type.definition.providerId !== s.providerId || root.driver.key !== provider.providerId
+            if (type.definition.id !== s.type.id || !isDeepStrictEqual(type.definition.work ?? [], s.type.workManifest ?? [])
+              || type.definition.providerId !== s.providerId || root.driver.key !== provider.providerId
               || root.driver.version !== provider.recovery?.version || root.owner !== s.owner || root.providerId !== s.providerId) unavailable();
             const registration: ResourceRegistration = { resource: s.ref, owner: { domainId: s.ref.domainId, subject: s.owner }, route: { origin: s.ref, targets: [s.ref] }, externalAuthority: "none",
               admission: { sessionType: { key: s.type.key, version: s.type.version }, providerId: s.providerId } };

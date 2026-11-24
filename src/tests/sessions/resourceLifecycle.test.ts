@@ -324,7 +324,7 @@ describe("durable lifecycle", () => {
     }
   });
   it("P0-11/21 fences data CAS and cancels positive anchors across grant parents", async () => {
-    const work = new Map<string, import("@persistence/helpers/durability/memory").MemoryWorkAnchor>();
+    const work = new Map<string, import("@persistence/helpers/durability/workTypes").StoredWork>();
     const storage = createMemoryDurableStorage(work);
     let input: ProviderSessionInput | undefined;
     const driver = { key: "chat", version: 1, kind: "chat", captureRecoveryInput: () => ({}), ensure: () => Promise.resolve({ metadata: {}, release() {} }),
@@ -350,11 +350,15 @@ describe("durable lifecycle", () => {
       expect((await Promise.all([first, second])).map((x) => x.status)).toEqual(["updated", "conflict"]);
       expect(await resources.readData(nested)).toEqual({ dataRevision: "2", data: { list: ["雪", {}] } });
       expect(events).not.toHaveBeenCalled();
-      const job = { session: root, anchors: [{ resource: nested, purpose: "scope" as const, include: true }], status: "leased" as const,
-        lease: { agent: "test", token: "test", expiresAt: "2030-01-01" }, modifiedAt: "2020-01-01" };
+      const job = { id: "leased", session: root, requestKey: "review", kind: "review", input: {}, data: {}, submittedData: {}, priority: 0, targetAgentId: null,
+        maxAttempts: 3, attemptCount: 1, owner: "owner", submitter: { kind: "user" as const, principal: { domainId: root.domainId, subject: "owner" } },
+        revision: "2", dataRevision: "1", createdAt: "2020-01-01", updatedAt: "2020-01-01", announce: [],
+        scope: [{ resource: nested, include: true, includeDescendants: false }], status: "leased" as const,
+        lease: { registrationId: "test", executionEpoch: "1", attempt: 1, leaseToken: "test", expiresAt: "2030-01-01" } };
       work.set("leased", job);
-      work.set("dynamic", { ...job, status: "queued", anchors: [{ resource: root, purpose: "scope", include: true }] });
-      work.set("announce", { ...job, status: "queued", anchors: [{ resource: nested, purpose: "announce", include: true }] });
+      const dynamic = { ...job, id: "dynamic", lease: undefined, status: "queued" as const, scope: [{ resource: root, include: true, includeDescendants: true }] };
+      work.set("dynamic", dynamic);
+      work.set("announce", { ...dynamic, id: "announce", announce: [{ resource: nested, include: true, includeDescendants: false }] });
       await resources.retire(parent);
       expect(work.get("leased")?.status).toBe("cancelled");
       expect(work.get("leased")?.lease).toBeUndefined();

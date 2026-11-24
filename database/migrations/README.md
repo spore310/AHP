@@ -39,3 +39,11 @@ Migration 0003 takes exclusive locks on the old session, work and registration
 tables and refuses to continue if any contains rows. A populated installation
 requires its own reviewed identity mapping. The migration preserves existing
 catalogue records.
+
+`0004_work_policy_scheduling.sql` preserves existing session and resource
+incarnations and adds the serializable work manifest to each type. It requires
+an explicit application mapping for any populated P0 work or registration
+table. It installs domain-scoped registrations, execution epochs, work
+provenance and priorities, revisioned data and lease constraints. A deferred
+constraint checks positive scope at commit and serializes competing selector
+removals on their common work row.

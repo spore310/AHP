@@ -7,7 +7,8 @@ import { createAgentDirectory } from "@agents";
 import { legacyIdentitySource } from "@agents/helpers/policyIdentity/helpers";
 import { createActionSequence, createSessionsFactory } from "@sessions";
 import type { SessionsFactory } from "@sessions/types";
-import { createSessionOwnerRegistry, createWorkService } from "@work";
+import type { DurableWorkRepository } from "@persistence/helpers/durability/workTypes";
+import { createSessionOwnerRegistry, createWorkReadPort } from "@work";
 
 import { createAHPBinding } from "../ahp";
 import { TOOL_CALL_METHOD, TOOL_COMPLETE_METHOD } from "../ahp/constants";
@@ -61,8 +62,19 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
   const deadlineMs = setupDeadline(security?.setupDeadlineMs);
   const maxInitialSubscriptions = setupCount(security?.maxInitialSubscriptions);
   const sequence = options.sessions.sequence ?? createActionSequence();
+  let durability = options.sessions.durability;
+  let canonicalRead: { get: DurableWorkRepository["get"]; isOpen(): boolean } | undefined;
+  if (durability && options.agentWork) {
+    const acquire = durability.storage.acquire.bind(durability.storage);
+    durability = { ...durability, storage: { async acquire(id, onLost) {
+      const lease = await acquire(id, onLost);
+      canonicalRead = { get: lease.work.get.bind(lease.work), isOpen: lease.isOpen.bind(lease) };
+      return lease;
+    } } };
+  }
   const sessions: SessionsFactory = createSessionsFactory({
     ...options.sessions,
+    durability,
     sequence,
   });
   let stopped = false;
@@ -84,6 +96,7 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
     ? undefined
     : createAgentDirectory({
         registrations: options.agentWork.registrations,
+        domainId: workDomain,
         registrationLimits: options.agentWork.registrationLimits,
         ...(options.agentWork.presenceTtlMs !== undefined
           ? { presenceTtlMs: options.agentWork.presenceTtlMs }
@@ -92,21 +105,21 @@ export const createAHPServer = (options: AHPServerOptions): AHPServerHandle => {
       });
   const work = options.agentWork === undefined || agents === undefined
     ? undefined
-    : createWorkService({
+    : createWorkReadPort({
         repository: options.agentWork.work,
         sessions: ownerLookup,
         ...(sessions.durability
-          ? { currentInstance: (uri, instanceId, subject, domainId) => {
-              const ref = capturedGetResource?.(uri);
-              return ref !== undefined && !stopped && ref.instanceId === instanceId && ref.domainId === domainId && canonicalOwner?.(ref)?.subject === subject && capturedIsReady?.(ref) === true;
-            } }
+          ? {
+              canonicalGet: (domainId, id) => canonicalRead?.isOpen() ? canonicalRead.get(domainId, id) : Promise.resolve(undefined),
+              currentInstance: (uri, instanceId, subject, domainId) => {
+                const ref = capturedGetResource?.(uri);
+                if (!ref || stopped || ref.instanceId !== instanceId || ref.domainId !== domainId) return false;
+                const owner = canonicalOwner?.(ref);
+                return owner?.domainId === domainId && owner.subject === subject && capturedIsReady?.(ref) === true
+                  && capturedGetResource?.(uri) === ref && canonicalRead?.isOpen() === true && !isStopped();
+              },
+            }
           : { legacyReadCurrent: () => !stopped }),
-        presence: agents,
-        registrations: options.agentWork.registrations,
-        // Remote submission is closed through P2. A work caller cannot materialize a session projection.
-        describeSession: () => undefined,
-        allowedKinds: options.agentWork.allowedKinds,
-        ...(options.agentWork.now !== undefined ? { now: options.agentWork.now } : {}),
       });
   const binding = createAHPBinding(
     sessions,

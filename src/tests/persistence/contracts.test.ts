@@ -64,8 +64,8 @@ type NoIndexSignature = string extends keyof PersistenceProvider ? false : true;
 type RepositoryErrorCodes = RepositoryErrorCode;
 type ErrorCodeCheck = [
   RepositoryErrorCodes,
-] extends ["conflict" | "not_found" | "unauthorized" | "database"]
-  ? ["conflict" | "not_found" | "unauthorized" | "database"] extends [RepositoryErrorCodes]
+] extends ["conflict" | "not_found" | "unauthorized" | "database" | "outcome_unknown"]
+  ? ["conflict" | "not_found" | "unauthorized" | "database" | "outcome_unknown"] extends [RepositoryErrorCodes]
       ? true
       : false
   : false;
@@ -284,7 +284,7 @@ describe("persistence provider contract (P01 freeze)", () => {
   });
 
   it("keeps the single RepositoryError identity and its four codes", () => {
-    for (const code of ["conflict", "not_found", "unauthorized", "database"] as const) {
+    for (const code of ["conflict", "not_found", "unauthorized", "database", "outcome_unknown"] as const) {
       const error = new RepositoryError(code, "fixture");
       expect(error).toBeInstanceOf(Error);
       expect(error.name).toBe("RepositoryError");

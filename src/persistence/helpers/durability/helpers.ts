@@ -44,3 +44,12 @@ export function resourceOrder(records: readonly ResourceRecord[]): ResourceRecor
   for (const record of records) visit(record, new Set());
   return result;
 }
+
+/** Preserve synchronous memory transactions behind the asynchronous storage port. */
+export function atomic<T>(run: () => T): Promise<T> {
+  try {
+    return Promise.resolve(run());
+  } catch (error) {
+    return Promise.reject(error instanceof Error ? error : new Error("Durable operation failed."));
+  }
+}

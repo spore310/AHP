@@ -240,11 +240,16 @@ const server = createWebSocketServer({
   principal is projected only in that configured domain; arbitrary domains are
   not collapsed. clientId/kind/role are never identity. Static bearer tokens are
   POC-grade, not production identity.
-- **Work reads.** `x-ahp/work/get` returns an authorized view. Protected
-  replies recheck connection authority at send time. Durable reads also
-  recheck the original session incarnation, readiness and owner. The binding
-  omits remote work mutations through P2. Short-lived private tool calls use
-  `x-ahp/tools/*`.
+- **Work reads.** `x-ahp/work/get` reads a durable row from the session host's
+  acquired store. Its owner can read the exact session ref, priority, state,
+  input, current data, revisions, and selectors. The serializer omits the
+  submitted-data baseline, request key, and lease credentials. Missing work or
+  an unavailable incarnation returns `work: null`. Protected replies recheck
+  the connection and the original session's ownership and readiness at send.
+  Hosts without session durability use their configured legacy work reader.
+  Remote work mutation methods stay closed through P2.
+  `durableWorkRead.test.ts` checks the projected reply on a real connection,
+  cross-owner denial, stale session replacement and zero remote work writes.
 - **Trusted contextual creation owns exactly its creator.** Protected callers use
   `host.sessions.authorization.createSession(params, context)` (no native cursor
   prerequisite in-process); context-free create rejects. Public native create also

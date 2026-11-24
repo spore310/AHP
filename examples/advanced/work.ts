@@ -27,7 +27,8 @@ export async function showWorkBoundary(url: string): Promise<void> {
     const renewed = z.object({ agentId: z.uuid() }).parse(await worker.request("x-ahp/agents/renew", {}));
     assert.equal(renewed.agentId, agentId);
     await assert.rejects(worker.request("x-ahp/work/submit", {
-      sessionUri: channel, requestKey: "first-review", kind: "code.review", input: {},
+      requestKey: "first-review", kind: "code.review", input: {},
+      scope: [{ resource: { kind: "session", id: channel }, include: true }],
     }), /Tool operation unavailable/);
     assert.deepEqual(await worker.request("x-ahp/work/get", { workId: "11111111-1111-4111-8111-111111111111" }),
       { version: 1, work: null });

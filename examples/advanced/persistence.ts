@@ -16,6 +16,7 @@ export function createExampleRegistrationState(registrationLimits?: Partial<Agen
   const limits = captureAgentRegistrationLimits(registrationLimits);
   const registrations = new Map<string, AgentRegistrationRecord>();
   const registrationKeys = new Map<string, string>();
+  const registrationKey = (domain: string | undefined, subject: string, agentKey: string) => JSON.stringify([domain ?? null, subject, agentKey]);
   let sequence = 0;
   let disposed = false;
   const assertOpen = (): void => {
@@ -30,7 +31,7 @@ export function createExampleRegistrationState(registrationLimits?: Partial<Agen
   const repository: AgentRegistrationRepository = {
     register: operation((input) => {
       assertOpen();
-      const key = `${input.principalSubject}\u0000${input.agentKey}`;
+      const key = registrationKey(input.domainId, input.principalSubject, input.agentKey);
       const existingId = registrationKeys.get(key);
       if (existingId !== undefined) {
         const existing = registrations.get(existingId);
@@ -43,11 +44,12 @@ export function createExampleRegistrationState(registrationLimits?: Partial<Agen
         }
       }
       if (registrations.size >= limits.maxTotal
-        || [...registrations.values()].filter((record) => record.principalSubject === input.principalSubject).length >= limits.maxPerPrincipal) {
+        || [...registrations.values()].filter((record) => record.domainId === input.domainId && record.principalSubject === input.principalSubject).length >= limits.maxPerPrincipal) {
         throw new RepositoryError("conflict", "Agent registration capacity unavailable.");
       }
       const record: AgentRegistrationRecord = {
         id: nextId(),
+        ...(input.domainId === undefined ? {} : { domainId: input.domainId, executionEpoch: "0" }),
         principalSubject: input.principalSubject,
         agentKey: input.agentKey,
         ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
@@ -58,16 +60,17 @@ export function createExampleRegistrationState(registrationLimits?: Partial<Agen
       registrationKeys.set(key, record.id);
       return record;
     }),
-    getById: operation((id) => {
+    getById: operation((id, domainId) => {
       assertOpen();
-      return registrations.get(id);
+      const record = registrations.get(id);
+      return domainId === undefined || record?.domainId === domainId ? record : undefined;
     }),
   };
   return {
     repository, registrations, assertOpen, nextId,
     seedRegistration: (record: AgentRegistrationRecord) => {
       registrations.set(record.id, record);
-      registrationKeys.set(`${record.principalSubject}\u0000${record.agentKey}`, record.id);
+      registrationKeys.set(registrationKey(record.domainId, record.principalSubject, record.agentKey), record.id);
     },
     dispose: operation(() => { disposed = true; }),
     isDisposed: () => disposed,
@@ -82,7 +85,7 @@ export function createExamplePersistence(registrationLimits?: Partial<AgentRegis
     throw new RepositoryError("unauthorized", "This operation requires a durable exact-instance contract.");
   });
   const provider: PersistenceProvider = {
-    durability: createMemoryDurableStorage(),
+    durability: createMemoryDurableStorage(undefined, directory.registrations),
     registrations: directory.repository,
     sessions: { ensure: unavailable, get: unavailable, delete: unavailable },
     work: {

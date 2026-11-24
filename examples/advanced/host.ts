@@ -95,6 +95,7 @@ export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
   for (const tool of allTools) registry.installTool(tool);
   const schema = { type: "object", properties: {} } as const;
   const type = defineApplicationSession({ ...sessionType, id: "20000000-0000-4000-8000-000000000001", providerId: mockProvider.providerId,
+    work: [{ kind: "code.review", maxAttempts: 3 }],
     configSchema: schema, config: createSessionConfig({ schema, parser: z.object({}).strict() }),
     tools: allTools.map((ref) => ({ ref, access: ToolAccessLevel.Standard })), policy: { rules,
       ...(lifecycle?.restoration ? { restoration: lifecycle.restoration } : {}),
@@ -145,10 +146,11 @@ export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
     : undefined });
   const dispatcher = { challenge: { adapter: challenge }, projection };
 
+  const catalogue = createSessionTypeCatalogue({ tools: createToolCatalogue({ definitions: allTools }), types: [type.registration] });
   const host = createAHPServer({ host: "127.0.0.1", port: 0,
     ...(lifecycle?.nativeWrites ? { nativeWrites: lifecycle.nativeWrites } : {}),
     sessions: { ...(lifecycle ? { durability: lifecycle.durability } : {}), providers: [lifecycle?.provider ?? mockProvider], creationSecurity: { registry, policies }, toolAdmission: admission,
-      application: { catalogue: createSessionTypeCatalogue({ tools: createToolCatalogue({ definitions: allTools }), types: [type.registration] }), defaultType: sessionType } },
+      application: { catalogue, defaultType: sessionType } },
     protectedViews: { registry, policies, admitted: [policy], resolve: ({ resource }) => routeFor(resource) },
     toolExecution: { registry, policies, dispatcher, artifacts, resolve: ({ origin: resource }) => routeFor(resource),
       registrations: [{ definition: clientTool, source: { id: "demo-client", revision: 1 }, revision: 1, implementation: clientImplementation }] },
@@ -204,7 +206,7 @@ export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
       registrationRevision: serverTool.revision }, serverTool.implementation);
   };
 
-  return { host, artifacts, bytes, serverTool, connection, provision, registry, allowTool, allowJuniorExecutor,
+  return { host, catalogue, artifacts, bytes, serverTool, connection, provision, registry, allowTool, allowJuniorExecutor,
     origin: () => origin, consent: (allow: boolean): void => { providerAllowsInvoke = allow; },
     stop: async (): Promise<void> => {
       resources.dispose();

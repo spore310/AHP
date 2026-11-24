@@ -1,138 +1,67 @@
 # Work
 
-The work-application service: principal/session authorization, bounded input
-validation, presence revalidation, and lease lifecycle delegation. This module
-contains no SQL and no WebSocket types. It coordinates the frozen persistence
-ports and the live agent directory.
-
-Remote access through P2 is limited to `x-ahp/work/get`. Work mutation methods
-described below are in-process service calls.
+Work submissions resolve an exact session and its canonical resources. The service captures immutable intent, prepares trusted admission and commits through the acquired host’s work repository. Through P2 the remote binding exposes the protected detail read. The command service is available in process.
 
 ## Files
 
 | File | Responsibility |
 | ---- | -------------- |
-| `types.ts` | `WorkService`, `WorkSubmission`, `WorkLease`, `WorkView`, `WorkErrorCode`, `AuthorizedAgentContext`, `WorkPresence`, `SessionOwnerLookup`, and legacy `SessionOwnerRegistry`. |
+| `helpers/definitions/types.ts` | Work-kind descriptors, application parsers, and the captured kind contract. |
+| `helpers/definitions/helpers.ts` | Capture registrations, validate declared manifests, and normalize input, result, and data. |
+| `helpers/definitions/index.ts` | Work-kind registration and resolution exports. |
+| `helpers/selections/types.ts` | Public locators, selector inputs, exact selectors, and graph limits. |
+| `helpers/selections/helpers.ts` | Capture intent, resolve exact instances, and evaluate canonical containment membership. |
+| `helpers/selections/index.ts` | Selection contracts and graph construction exports. |
+| `helpers/reads/types.ts` | Trusted work read port, legacy view and session-owner contracts. |
+| `helpers/reads/helpers.ts` | Domain- and owner-scoped canonical detail reads, send-time incarnation checks, and legacy reads. |
+| `types.ts` | Public command, view, selector, status and error types. |
 | `helpers/errors.ts` | `WorkError`: sanitized `invalid`, `not_found`, `unauthorized`, `conflict`, `stale`, or `exhausted` failures. |
-| `helpers/helpers.ts` | `createSessionOwnerRegistry`, `createWorkService`, bounded validation, presence/registration revalidation, and repository-error mapping. |
+| `helpers/helpers.ts` | Command factory and projection exports. |
+| `helpers/commands/types.ts` | Trusted contexts, commands, service ports and projections. |
+| `helpers/commands/helpers.ts` | Strict capture, type resolution, submission, data updates and settlement. |
+| `helpers/commands/views.ts` | Detail and summary serializers. |
+| `helpers/protocol/schemas.ts` | Strict V1 request shapes, canonical UUID capture, retry and data revisions, and bounded JSON. |
 | `index.ts` | Public surface for the module. |
 
-## API
+## Work kinds
 
-`createWorkService(options)` returns:
+An exact session-type revision owns each work kind. The registration can provide
+synchronous input, result, data, and application-fact parsers. Declared input,
+result, and data schemas accompany their corresponding parsers. Input and data
+default to bounded JSON objects of up to 64 KiB, and results to 256 KiB. The
+host captures the payload before invoking a parser and captures its result
+before returning it. Retry budgets default to three attempts and accept 1–100.
 
-- `submit(principal, submission)` — requires a live session whose owner is the
-  authenticated principal. Validates kind, request key, JSON-object input, size,
-  and (when targeted) that the target registration belongs to the same principal.
-- `claim(agent, sessionUri)` — revalidates live presence and an enabled
-  registration, reconciles exhausted leases, then asks the repository for one
-  eligible lease.
-- `renew(agent, workId, token)` — fenced by agent, token, presence, registration,
-  and session owner.
-- `complete(agent, workId, token, result)` — requires a bounded JSON-object
-  result and the current unexpired lease.
-- `fail(agent, workId, token, reason)` — bounded reason; returns the repository's
-  `queued`/`failed` decision.
-- `cancel(principal, workId)` — terminalizes authorized queued or leased work.
-- `get(principal, workId, domainId?)` returns an authorized view with the lease
-  token and holder omitted. Durable reads require the trusted domain and a
-  current, ready session incarnation owned by the principal. An unavailable or
-  mismatched instance returns `null`.
-- `assertSessionDisposable(sessionUri)` checks the URI against the portable-text
-  profile before repository access. It rejects disposal while any work row
-  references that session.
+## Resource selections
 
-`WorkServiceOptions.sessions` requires only `SessionOwnerLookup.owner(uri)`.
-`SessionOwnerRegistry` extends that read-only interface with legacy bind/unbind/clear;
-`createSessionOwnerRegistry()` still provides the standalone trusted legacy store.
-Protected host composition never uses it as a competing owner authority: it reads
-current live session full ref -> canonical P03 owner -> subject only within the
-configured work domain. Failed-but-live records retain their canonical owner; no live
-record projects no owner, including while an owner-free disposal marker settles.
-Ownership alone is not readiness. Work owner equality, presence/lease enforcement,
-repositories and persistence semantics are unchanged; a junior scoped participant
-never substitutes the creator's principal for work.
+A locator names a kind and public ID and may pin an incarnation with
+`instanceId`. A positive scope entry can identify its session through its
+canonical parent. For a new submission, every scope and announcement entry must
+resolve to an active resource in that same domain and session. An authorized
+exact retry can recover the original work ID using its recorded retired anchor.
+Identical duplicates collapse.
+Conflicting rules for the same instance and purpose reject the submission.
 
-## Authorization
+Membership uses the nearest applicable containment rule. An exact match applies
+to the resource itself. An ancestor match requires `includeDescendants`. A
+nearer inclusion can reinclude a resource inside an excluded subtree. Grant
+parents also affect availability, while containment determines membership.
+Evaluating a stale graph revision returns false. An operation requiring the
+whole scope must also verify all positive anchors remain active and perform
+its ordinary authorization checks.
 
-The POC policy is **same principal as the session owner**. A principal is a
-server-derived handshake subject, not `clientId` or request JSON. Work is scoped
-to a session, and the repository independently checks the durable session owner.
+The default snapshot limits are 64 raw selectors per purpose, 256 resources,
+and a graph depth of 32. Duplicate inputs and exclusions consume the selector
+budget before normalization. Trusted overrides support up to 128 selectors,
+4,096 resources, and a depth of 64 within the limits of the underlying store.
 
-Identity used for a work mutation is always the live binding from the
-authenticated connection:
+## Commands
 
-```text
-principal -> connection -> agentId + generation -> enabled registration
-```
+Pass an acquired work repository, an exact session-type resolver and a trusted approval preparer to `createWorkService`. The preparer receives a detached, frozen copy of the facts. Its currentness check runs at storage admission and before the response returns. Each prepared approval has a release callback.
 
-A stale connection, expired presence, forged token, wrong principal, or disabled
-registration fails closed.
+- `submit` resolves the scope and pins the actor, type configuration and signed 32-bit priority. An identical retry returns the original ID in every status, including after data changes or a lost commit acknowledgement. The unique key includes the session incarnation, kind and request key.
+- `get` returns an authorized detail projection. The list summary contains identity, priority, status, revision and timestamps. Lease secrets and immutable submitted data are private storage fields.
+- `updateData` replaces the whole data object at the expected revision. The work revision and data revision advance together. A stale command changes neither.
+- `complete` and `fail` check the registration epoch, attempt, lease token, deadline and exact session before settlement. An optional final data update commits atomically. A failure records a generic summary. Direct execution requests must come from a matching trusted agent context.
 
-## Bounded input
-
-- Session URI and request key are non-empty and satisfy the portable-text
-  profile; the session URI is capped at 2,048 chars and the request key at 256.
-- Kind must be in the configured allowed set and at most 128 chars.
-- Input/result must be JSON objects nesting at most 512 levels — the
-  portable-text tree depth budget in `@persistence` — and default size limits
-  are 64 KiB input and 256 KiB result. The shared profile rejects NUL code
-  units and unpaired surrogates in payload *values or object keys*, scalar
-  session URIs and request keys, and the durable session projection. This is
-  an application interoperability rule, not a universal JSON requirement. The
-  agents directory applies it to `agentKey` and `displayName` before
-  registration.
-- Failure messages are 1–2,000 chars. The
-  message is validated and then dropped: the frozen v1 reply contract is
-  `{ status }` and no failure-message column exists, so the reason lives only in
-  the worker's own logs.
-- Work IDs and lease tokens must be UUID-shaped before repository access.
-
-## Testing
-
-| Test | Pins |
-| ---- | ---- |
-| [`src/tests/work/workService.test.ts`](../tests/work/workService.test.ts) | Owned-session submission, cross-principal and target-agent denial, bounded validation (including portable-text rejection, terminal-key replays, and a dispose channel refused outside the text profile), a durable projection rejected at the 512-level depth budget before repository access, missing/expired/mismatched presence, disabled registration, fenced renew/complete, stale completion, view redaction, and dependent-work disposal rejection. |
-| [`src/tests/websocket/agentWork.test.ts`](../tests/websocket/agentWork.test.ts) | Versioned reads, presence operations, strict request validation and closed work mutations. |
-| [`src/tests/websocket/agentWork.integration.test.ts`](../tests/websocket/agentWork.integration.test.ts) | Internal kernel host composition rejects owner and worker mutations, preserves authorized reads, and redacts lease secrets. |
-| [`src/tests/websocket/agentWork.disposal.test.ts`](../tests/websocket/agentWork.disposal.test.ts) | Backed-disposal races over the real binding: fail-closed recreates inside the settling window (owner and cross-principal), binding release exactly at settlement, post-settle rebind to the true creator, and stale detached starts answering conflict while binding nothing. |
-
-## Caveats
-
-- **No server-side execution.** A work row is coordination state; the server
-  never runs a model, process, or filesystem executor.
-- **At-least-once.** A worker may retry after a lease expires; completion is
-  fenced but side effects are not transactional with the database.
-- **No cross-principal grants.** Targeting another principal's agent is denied.
-- **No push guarantee.** v1 implements no work-available push; clients discover
-  work by claiming. Any future hint would be a best-effort signal, never proof of
-  assignment.
-- **Reconcile per claim.** Every claim first issues a global expired-lease
-  reconciliation statement. The claim CTE re-checks the DB clock itself, so
-  correctness never depends on the reconciler; the statement is accepted
-  overhead for refresh breadth on the claim path. A scheduler-based variant is a
-  possible follow-up, not a v1 contract change.
-- **Reserving `"exhausted"`.** The wire vocabulary maps `"exhausted"`, but v1
-  service code never produces it: budget-exhausted leases terminalize to
-  `failed` status instead of throwing a fresh observable error. Keep the mapping
-  as reserved behavior until a producer exists.
-- **One owner authority in the host wiring.** The live projection's owner is
-  sourced from the same read-only lookup the service checks: canonical full-ref
-  owner in a protected host, legacy registry otherwise. The submit pre-check thus
-  corroborates one fact rather than maintaining another owner map.
-- **Same-owner recreate residual.** The projection carries no stable
-  session-generation field (`createdAt` is the fetch time), so a same-owner
-  dispose→recreate landing inside a submission's write window is not detected by
-  the reconciliation; cross-principal and owner-removal cases are caught.
-  P05 fences protected session creation/disposal/backend cleanup with full refs,
-  but does not add an instance field to the frozen work/persistence write contract.
-  Durable write reconciliation therefore retains this v1 residual; it is not
-  claimed fixed by the new canonical read-only lookup.
-
-## Related Documentation
-
-- [`src/persistence/README.md`](../persistence/README.md) — SQL adapters and
-  lease invariants.
-- [`src/agents/README.md`](../agents/README.md) — identity and presence.
-- [`docs/architecture/agent-task-lifecycle.md`](../../docs/architecture/agent-task-lifecycle.md)
-  — end-to-end lifecycle.
+The [durable lifecycle example](../../examples/durable-lifecycle.ts) submits work scoped to one child, updates its data and retries the original submission. The [shared work contract](../tests/persistence/conformance/work.ts) runs on both storage adapters. The [service](../tests/work/workService.test.ts), [settlement](../tests/work/data.test.ts) and [selection](../tests/work/selections.test.ts) suites cover the in-process entry points.

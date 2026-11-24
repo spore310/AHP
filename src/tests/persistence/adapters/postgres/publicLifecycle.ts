@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { Client, type Pool } from "pg";
+import type { Pool } from "pg";
+import { loseCommitAcknowledgement } from "./commitAcknowledgement";
 import { AhpClient } from "@microsoft/agent-host-protocol/client";
 import { ToolInvocationTransport } from "@toolExecution/client/transport";
 import { WebSocketTransport } from "@microsoft/agent-host-protocol/ws";
@@ -59,7 +60,11 @@ export async function testPublicLifecycle(connectionString: string, db: Pool): P
     assert.deepEqual(demo.host.sessions.getSessionSnapshot(channel), previous);
     assert.equal(events.length, count);
     assert.deepEqual((await db.query("SELECT state_revision,last_server_seq,durable_state FROM sessions WHERE session_instance_id=$1", [ref.instanceId])).rows, saved.rows);
-    const work = await db.query<{ id: string }>("INSERT INTO work_items(session_instance_id,domain_id,request_key,kind,input) VALUES ($1,$2,'public-read','test','{}') RETURNING id", [ref.instanceId, ref.domainId]);
+    const work = await db.query<{ id: string }>(`WITH added AS (INSERT INTO work_items(session_instance_id,domain_id,request_key,kind,input,submitted_by_kind,submitted_by_subject)
+      VALUES ($1,$2,'public-read','test','{}','user','senior') RETURNING id)
+      INSERT INTO work_resource_selections(work_id,session_instance_id,domain_id,purpose,resource_pk,include)
+      SELECT added.id,$1,$2,'scope',r.resource_pk,true FROM added,canonical_resources r WHERE r.session_instance_id=$1 AND r.kind='session'
+      RETURNING work_id AS id`, [ref.instanceId, ref.domainId]);
     const workId = work.rows[0]?.id;
     assert.ok(workId);
     const transport = new ToolInvocationTransport(await WebSocketTransport.connect("ws://127.0.0.1:" + String(address.port), { protocols: "demo-senior" }));
@@ -96,33 +101,9 @@ async function testCommittedAcknowledgementLoss(connectionString: string, db: Po
       if (action.type === ACTION_TYPE_SESSION_TITLE_CHANGED) titles.push(action.title);
     });
 
-    // Drop only the acknowledgement for this exact state write after real PostgreSQL commits.
-    // eslint-disable-next-line @typescript-eslint/unbound-method -- Reflect.apply preserves each client as the receiver.
-    const query = Client.prototype.query;
-    let writer: unknown;
-    let injected = false;
-    Client.prototype.query = new Proxy(query, {
-      apply(original, client: unknown, args: unknown[]) {
-        const result: unknown = Reflect.apply(original, client, args);
-        if (typeof args[0] === "string" && args[0].startsWith("UPDATE sessions SET state_revision=")
-          && Array.isArray(args[1]) && args[1].includes(ref.instanceId)) writer = client;
-        if (!injected && writer === client && args[0] === "COMMIT" && result instanceof Promise) {
-          return result.then(() => {
-            injected = true;
-            throw Object.assign(new Error("Injected lost COMMIT acknowledgement"), { code: "EPIPE" });
-          });
-        }
-        return result;
-      },
-    });
-    try {
-      await assert.rejects(first.host.sessions.dispatchAction({ channel, clientId: "lost-ack", clientSeq: 1,
-        action: { type: "session/titleChanged", title } }),
-      (error: unknown) => error instanceof Error && error.name === "DurableCommitUncertain");
-    } finally {
-      Client.prototype.query = query;
-    }
-    assert.equal(injected, true);
+    await loseCommitAcknowledgement("UPDATE sessions SET state_revision=", ref.instanceId,
+      () => first.host.sessions.dispatchAction({ channel, clientId: "lost-ack", clientSeq: 1,
+        action: { type: "session/titleChanged", title } }));
     const stored = await db.query<{ title: string }>("SELECT durable_state->>'title' AS title FROM sessions WHERE session_instance_id=$1", [ref.instanceId]);
     assert.deepEqual(stored.rows, [{ title }]);
     assert.equal(first.host.sessions.getSessionSnapshot(channel), undefined);

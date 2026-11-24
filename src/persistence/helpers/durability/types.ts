@@ -1,4 +1,5 @@
 import type { ResourceRef } from "@authorization";
+import type { WorkKindDescriptor } from "@work/helpers/definitions/types";
 
 export type Revision = string;
 export type JsonValue = null | boolean | number | string | JsonObject | readonly JsonValue[];
@@ -27,7 +28,7 @@ export interface ResourceRecord extends DataSnapshot {
 }
 export interface StoredSession {
   readonly ref: ResourceRef<"session">;
-  readonly type: { readonly id: string; readonly key: string; readonly version: number };
+  readonly type: { readonly id: string; readonly key: string; readonly version: number; readonly workManifest?: readonly WorkKindDescriptor[] };
   readonly providerId: string;
   readonly owner: string;
   readonly lifecycle: Lifecycle;
@@ -73,6 +74,7 @@ export interface DurableResourceRepository {
   finishRetirement(session: ResourceRef<"session">, ref: ResourceRef): Promise<void>;
 }
 export interface DurableHost {
+  readonly work: import("./workTypes").DurableWorkRepository;
   readonly epoch: Revision;
   readonly serverSeq: number;
   readonly sessions: DurableSessionRepository;

@@ -21,7 +21,7 @@ powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File scripts/Invoke-Loc
 ```
 
 Each run uses a pinned PostgreSQL 17 image, a fresh named Docker volume, and a
-random loopback port. It applies migrations in filename order, including the working-tree 0003 migration during P0 development, and
+random loopback port. It applies migrations in filename order and
 checks their recorded versions over the published port before running
 conformance. The first run may download the image. The container has CPU,
 memory, process, and log limits. Keep synthetic fixtures small because the
@@ -86,13 +86,14 @@ checks.
 ## Prepare a disposable database
 
 Use a dedicated local PostgreSQL 17 database and `psql`. Set
-`AHP_TEST_DATABASE_URL` for that database in your shell. Apply the three migrations
-in order to the empty database. Each is a single-shot script. Migration 0003 refuses nonempty legacy sessions, work and registrations.
+`AHP_TEST_DATABASE_URL` for that database in your shell. Apply the four migrations
+in order to the empty database. Each is a single-shot script. Migration 0003 refuses nonempty legacy sessions, work and registrations. Migration 0004 preserves P0 sessions and resources and requires an explicit application mapping for populated P0 work or registrations.
 
 ```powershell
 psql "$env:AHP_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f database/migrations/0001_session_tool_baseline.sql
 psql "$env:AHP_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f database/migrations/0002_agent_work.sql
 psql "$env:AHP_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f database/migrations/0003_durable_session_resources.sql
+psql "$env:AHP_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f database/migrations/0004_work_policy_scheduling.sql
 ```
 
 In a POSIX shell, use `"$AHP_TEST_DATABASE_URL"` in those commands.
@@ -106,11 +107,12 @@ relationships, lease columns, and constraints.
 pnpm exec vite-node examples/postgresql-conformance.ts
 ```
 
-The runner checks PostgreSQL 17 and all three migration versions, then creates
+The runner checks PostgreSQL 17 and all four migration versions, then creates
 an isolated schema for fixture rows. It exercises registration quotas across
 two pools, host ownership and takeover, resource constraints, retirement,
-data revision conflicts and public-host rollback. A passing run prints
-`PostgreSQL registration, durable session/resource, migration and ownership conformance passed.`
+data revision conflicts and public-host rollback. Work checks include command replay,
+lost COMMIT acknowledgements, contended positive selectors and fenced settlement. A passing run prints
+`PostgreSQL registration, durable lifecycle, work, migration and ownership conformance passed.`
 The command requires a disposable database at an explicit loopback URL.
 
 `pnpm validate` runs the offline adapter tests and the in-memory conformance

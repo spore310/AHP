@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createAgentDirectory } from "@agents";
 import { createPersistence } from "@persistence";
 import type { DurableSessionInput } from "@persistence/types";
-import { createSessionOwnerRegistry, createWorkService } from "@work";
+import { workFixture } from "../work/commandsFixture";
 import { createExamplePersistence } from "../../../examples/advanced/persistence";
 
 import {
@@ -23,22 +23,6 @@ const session: DurableSessionInput = {
   modifiedAt: "2026-10-23T00:00:00.000Z",
   lastServerSeq: 1,
   durableState: { state: "ready" },
-};
-
-const composeServices = (fixture: ReturnType<typeof createMemoryPersistenceFixture>) => {
-  const persistence = createPersistence(fixture.provider);
-  const agents = createAgentDirectory({ registrations: persistence.registrations });
-  const owners = createSessionOwnerRegistry();
-  owners.bind(sessionUri, principal.subject);
-  const service = createWorkService({
-    repository: persistence.work,
-    sessions: owners,
-    presence: agents,
-    registrations: persistence.registrations,
-    describeSession: () => session,
-    allowedKinds: new Set(["code.review"]),
-  });
-  return { persistence, agents, service };
 };
 
 describe("provider conformance through neutral services", () => {
@@ -92,33 +76,18 @@ describe("provider conformance through neutral services", () => {
   });
 
   it("substitutes an independently built provider through AgentDirectory and WorkService", async () => {
-    const fixture = createMemoryPersistenceFixture();
-    const { persistence, agents, service } = composeServices(fixture);
-    const registration = await agents.register(principal, "agent-key");
-    const binding = agents.bindPresence(registration.id, principal, "connection-a");
-
-    const submission = {
-      sessionUri,
-      requestKey: "request-one",
-      kind: "code.review",
-      input: { path: "src/index.ts" },
-    };
-    const first = await service.submit(principal, submission);
-    const replay = await service.submit(principal, submission);
-    expect(replay.id).toBe(first.id);
-    expect(fixture.work.size).toBe(1);
-
-    await expect(service.submit(principal, { ...submission, input: { path: "different.ts" } }))
-      .rejects.toMatchObject({ code: "conflict" });
-
-    const lease = await service.claim({
-      principal,
-      agentId: registration.id,
-      connectionId: "connection-a",
-      generation: binding.generation,
-    }, sessionUri);
-    expect(lease).toMatchObject({ workId: first.id, attempt: 1, kind: "code.review" });
-    await persistence.dispose();
+    const persistence = createPersistence(createExamplePersistence().provider);
+    try {
+      if (!persistence.durability) throw new Error("Missing example storage");
+      const host = await persistence.durability.acquire("example", () => undefined);
+      const f = await workFixture({}, host);
+      const directory = createAgentDirectory({ registrations: persistence.registrations, domainId: f.ref.domainId });
+      const target = await directory.register({ subject: "different-owner" }, "worker");
+      const request = { ...f.request, targetAgentId: target.id };
+      const created = await f.service.submit(f.caller, request);
+      await expect(f.service.submit(f.caller, request)).resolves.toEqual(created);
+      await expect(host.work.get(f.ref.domainId, created.id)).resolves.toMatchObject({ targetAgentId: target.id });
+    } finally { await persistence.dispose(); }
   });
 
   it("isolates provider records and disposers across two instances", async () => {

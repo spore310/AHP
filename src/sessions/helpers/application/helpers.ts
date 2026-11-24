@@ -4,6 +4,7 @@ import { SESSION_TYPE_KEY_PATTERN } from "@sessions/constants";
 import { SessionsError } from "@sessions/helpers/errors";
 import { SessionTypeError, type ResolvedSessionType } from "@sessions/helpers/sessionTypes";
 import { captureCreationPolicy, freezeCreation } from "@sessions/helpers/creation";
+import { captureWorkKinds } from "@work/helpers/definitions";
 import { SESSION_TYPE_SELECTOR_KEY, type ToolContractRef } from "@tools";
 
 import { ClientAccessRole, ToolAccessLevel } from "./constants";
@@ -35,9 +36,11 @@ export function captureSessionApplication(
     const entries = new Map<string, ResolvedSessionType>();
     for (const definition of catalogue.list()) {
       const resolved = catalogue.resolveExisting(definition);
+      const work = captureWorkKinds(resolved.work, resolved.definition.work);
       entries.set(`${definition.key}@${String(definition.version)}`, freezeCreation({
         definition: structuredClone(resolved.definition), tools: structuredClone(resolved.tools), enabledForCreation: resolved.enabledForCreation,
         config: { schema: structuredClone(resolved.config.schema), parse: resolved.config.parse.bind(resolved.config) },
+        ...(resolved.work && { work: work.work }),
         ...(resolved.policy === undefined ? {} : { policy: captureCreationPolicy(resolved.policy) }),
       }));
     }

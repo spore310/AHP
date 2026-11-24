@@ -31,11 +31,11 @@ export function retirement(tx: DurableTransaction, authorize: (check: Admission)
       const workParams = [session.instanceId, whole, [...keys]];
       await client.query(`SELECT w.id FROM work_items w WHERE ${workPredicate} ORDER BY w.id FOR UPDATE`, workParams);
       authorize(check);
-      await client.query(`UPDATE canonical_resources SET lifecycle_status='retiring',
+      const changed = await client.query(`UPDATE canonical_resources SET lifecycle_status='retiring',
         updated_at=clock_timestamp(),resource_revision=resource_revision+1 WHERE resource_pk=ANY($1::uuid[]) AND lifecycle_status<>'retiring'`, [[...keys]]);
-      await client.query(`UPDATE sessions SET graph_revision=graph_revision+1,modified_at=clock_timestamp(),
+      if (changed.rowCount) await client.query(`UPDATE sessions SET graph_revision=graph_revision+1,modified_at=clock_timestamp(),
         lifecycle_status=CASE WHEN $2 THEN 'retiring' ELSE lifecycle_status END WHERE session_instance_id=$1`, [session.instanceId, whole]);
-      await client.query(`UPDATE work_items w SET status='cancelled',lease_agent_id=NULL,lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp()
+      await client.query(`UPDATE work_items w SET status='cancelled',lease_agent_id=NULL,lease_execution_epoch=NULL,lease_token=NULL,lease_expires_at=NULL,revision=revision+1,updated_at=clock_timestamp()
         WHERE ${workPredicate}`, workParams);
       const current = await resourceRows(client, session);
       return closure.reverse().map((row) => requireRow(current, row.ref).record);
@@ -52,8 +52,10 @@ export function retirement(tx: DurableTransaction, authorize: (check: Admission)
         && [record.parent, record.grantParent].some((p) => p && sameResource(p, ref)))) reject();
       await client.query(`UPDATE canonical_resources SET lifecycle_status='retired', retired_at=now(), updated_at=now(),
         resource_revision=resource_revision+1 WHERE resource_pk=$1`, [target.pk]);
-      if (sameResource(session, ref)) await client.query(`UPDATE sessions SET lifecycle_status='retired',retired_at=now(),
-        modified_at=now() WHERE session_instance_id=$1`, [session.instanceId]);
+      const whole = sameResource(session, ref);
+      await client.query(`UPDATE sessions SET graph_revision=graph_revision+1,modified_at=now(),
+        lifecycle_status=CASE WHEN $2 THEN 'retired' ELSE lifecycle_status END,
+        retired_at=CASE WHEN $2 THEN now() ELSE retired_at END WHERE session_instance_id=$1`, [session.instanceId, whole]);
     });
   }
   async function purge(sessionRef: ResourceRef<"session">, retainAfter: string): Promise<boolean> {

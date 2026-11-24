@@ -22,6 +22,13 @@ original identity and operation key. A failed or pending parent keeps its
 descendants unavailable. Once retirement is committed, recovery can finish
 destruction without requesting permission to restore the session.
 
+Typed application registrations may include `work`. Each kind has a stable
+name, an optional retry budget and optional input, result, and data schemas.
+The catalogue lists the serializable descriptors and retains bound parser
+methods for exact revision lookup. Durable creation records those descriptors
+with the session type. Recovery verifies them against the current registration
+before restoring an incarnation.
+
 ## Files
 
 | File | Responsibility |

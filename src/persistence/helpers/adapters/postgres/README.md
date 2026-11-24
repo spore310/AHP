@@ -19,6 +19,8 @@ contract and do not inspect this adapter.
 | `helpers/ownership/types.ts` | Acquired ownership, sequence checkpoint and transaction lock capability. |
 | `helpers/ownership/helpers.ts` | Dedicated advisory-lock connection, takeover epoch and loss notification. |
 | `helpers/resources/index.ts` | Durable storage factory. |
+| `helpers/durableWork/helpers.ts` | Exact-instance work submissions, quota serialization, epoch-fenced data writes and atomic settlement. |
+| `helpers/durableWork/rows.ts` | Internal work record and selectors, including microsecond timestamps. |
 | `helpers/resources/types.ts` | Transaction and resource-row types. |
 | `helpers/resources/helpers.ts` | Session/root reservation, fenced state writes, resource data CAS and recovery reads. |
 | `helpers/resources/rows/helpers.ts` | Exact reference lookup, row mapping, bounded value capture and resource insertion. |
@@ -58,9 +60,9 @@ under [`database/migrations/`](../../../../../database/migrations/).
 - `registrationLimits` sets `maxPerPrincipal` and `maxTotal` to positive safe
   integers. The defaults are 128 and 4,096. Registration checks both limits
   and writes on one transaction client under a table lock. The lock serializes
-  registration writes and allows ordinary reads. Lowering a limit preserves
+  registration writes and allows ordinary reads. Registration identity and per-principal quotas include the trusted domain. Lowering a limit preserves
   existing identities and their ability to re-register.
-- The P0 provider rejects URI-only projection methods, work submissions and
+- The legacy provider namespaces reject URI-only projection methods, work submissions and
   lease commands. A work read requires the owner and trusted domain of an
   active session, joins its exact incarnation, and omits lease credentials.
   Its dependent-work lookup
@@ -69,7 +71,8 @@ under [`database/migrations/`](../../../../../database/migrations/).
   work until explicit purge.
 - A pool-construction failure after allocation awaits one cleanup attempt and
   rethrows the original construction error.
-- Session rows join exact catalogue ID, key, version and provider.
+- The acquired host exposes exact-instance work graph lookup, submission, data replacement and settlement. Submission serializes quota reservations on the host state row and writes work and selections atomically. Settlement checks the registration epoch, attempt, token and database deadline.
+- Session rows join exact catalogue ID, key, version, provider and work manifest.
   State commits take the host checkpoint lock first. Ordinary resource data
   writers take shared session locks and compare the exact data revision.
   Lifecycle writers take an exclusive session lock before changing resources.

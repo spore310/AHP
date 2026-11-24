@@ -1,6 +1,10 @@
 import { assertDurableResourceConformance } from "../../conformance/helpers";
 import { createPostgresDurableStorage } from "@persistence/helpers/adapters/postgres";
 import { testPublicLifecycle } from "./publicLifecycle";
+import { testWorkSettlement } from "./p1Work";
+import { testP1Schema } from "./p1Schema";
+import { assertWorkDataConformance } from "../../conformance/work";
+import { assertTypeManifestPinning, assertWorkGraphRevisions } from "../../conformance/workGraph";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -15,7 +19,7 @@ import { assertRegistrationQuotaConformance } from "../../conformance/helpers";
 import { createPersistence } from "@persistence";
 import { createPostgresPersistenceProvider } from "@persistence/helpers/adapters/postgres";
 
-const migrations = ["0001_session_tool_baseline", "0002_agent_work", "0003_durable_session_resources"];
+const migrations = ["0001_session_tool_baseline", "0002_agent_work", "0003_durable_session_resources", "0004_work_policy_scheduling"];
 const migration = (name: string): Promise<string> => readFile(
   new URL(`../../../../../database/migrations/${name}.sql`, import.meta.url), "utf8",
 );
@@ -106,9 +110,9 @@ async function parkedRegistration(url: URL, sql: Pool): Promise<void> {
     await blocker.query("LOCK TABLE agent_registrations IN ACCESS EXCLUSIVE MODE");
     const { rows: [row] } = await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
     assert.ok(row);
-    const registration = Promise.allSettled([provider.registrations.register({ principalSubject: "parked", agentKey: "blocked" })]);
+    const registration = Promise.allSettled([provider.registrations.register({ domainId: "test", principalSubject: "parked", agentKey: "blocked" })]);
     await waitForBlocker(sql, row.pid);
-    const queued = assert.rejects(provider.registrations.getById(randomUUID()), { code: "database" });
+    const queued = assert.rejects(provider.registrations.getById(randomUUID(), "test"), { code: "database" });
     const draining = provider.dispose();
     await Promise.race([
       queued,
@@ -236,6 +240,27 @@ export const runP0PostgresConformance = async (input: string): Promise<void> => 
         client.release();
       }
       await rootAndDataLocks(first);
+      const upgrade = await migration("0004_work_policy_scheduling");
+      const before = await first.query("SELECT * FROM sessions ORDER BY session_instance_id");
+      const resourcesBefore = await first.query("SELECT * FROM canonical_resources ORDER BY resource_pk");
+      const client4 = await first.connect();
+      try {
+        await client4.query("INSERT INTO agent_registrations(principal_subject,agent_key) VALUES ('ambiguous','legacy')");
+        await assert.rejects(client4.query(upgrade), /explicit application mapping/);
+        await client4.query("ROLLBACK");
+        assert.equal((await client4.query("DELETE FROM agent_registrations WHERE principal_subject='ambiguous'")).rowCount, 1);
+        await client4.query(`INSERT INTO work_items(session_instance_id,domain_id,request_key,kind,input)
+          VALUES ($1,'example','ambiguous','legacy','{}')`, [sessionId]);
+        await assert.rejects(client4.query(upgrade), /explicit application mapping/);
+        await client4.query("ROLLBACK");
+        assert.equal((await client4.query("DELETE FROM work_items WHERE request_key='ambiguous'")).rowCount, 1);
+        await client4.query(upgrade);
+        assert.deepEqual((await client4.query("SELECT * FROM sessions ORDER BY session_instance_id")).rows, before.rows);
+        assert.deepEqual((await client4.query("SELECT * FROM canonical_resources ORDER BY resource_pk")).rows, resourcesBefore.rows);
+      } finally {
+        client4.release();
+      }
+      await testP1Schema(first);
       await ownership(url.href, first, second);
       const providerUrl = new URL(url);
       providerUrl.searchParams.set("options", `-c search_path=${schema}`);
@@ -243,17 +268,27 @@ export const runP0PostgresConformance = async (input: string): Promise<void> => 
       await testDurableAdapter(url.href, first);
       await testPublicLifecycle(url.href, first);
       await assertDurableResourceConformance(createPostgresDurableStorage({ connectionString: url.href }), "p0-conformance");
+      await assertTypeManifestPinning(createPostgresDurableStorage({ connectionString: url.href }), "p0-conformance");
       const provider = createPersistence(await createPostgresPersistenceProvider({ connectionString: url.href }));
       try {
         assert.ok(provider.durability);
         const host = await provider.durability.acquire("p0-conformance", () => {});
         try {
-          const registration = await provider.registrations.register({ principalSubject: "conformance", agentKey: "worker" });
-          assert.equal((await provider.registrations.getById(registration.id))?.id, registration.id);
+          await assertWorkDataConformance(host);
+          await assertWorkGraphRevisions(host);
+          await testWorkSettlement(host, first);
+          const registration = await provider.registrations.register({ domainId: "test", principalSubject: "conformance", agentKey: "worker" });
+          const other = await provider.registrations.register({ domainId: "other", principalSubject: "conformance", agentKey: "worker" });
+          assert.notEqual(other.id, registration.id);
+          assert.equal(other.executionEpoch, "0");
+          assert.equal(await provider.registrations.getById(registration.id, "other"), undefined);
+          assert.equal(await provider.registrations.getById(registration.id), undefined);
+          await assert.rejects(provider.registrations.register({ principalSubject: "conformance", agentKey: "worker" }), { code: "unauthorized" });
+          assert.equal((await provider.registrations.getById(registration.id, "test"))?.id, registration.id);
         } finally {
           await host.release();
         }
-        await assert.rejects(provider.registrations.register({ principalSubject: "conformance", agentKey: "late" }));
+        await assert.rejects(provider.registrations.register({ domainId: "test", principalSubject: "conformance", agentKey: "late" }));
       } finally {
         await provider.dispose();
       }
@@ -270,5 +305,5 @@ if (process.argv[1]?.endsWith("p0Conformance.ts")) {
   const url = process.env.AHP_TEST_DATABASE_URL;
   assert.ok(url, "Set AHP_TEST_DATABASE_URL to a migrated, disposable loopback PostgreSQL 17 database.");
   await runP0PostgresConformance(url);
-  process.stdout.write("PostgreSQL 17 migration 0003, ownership, takeover, root constraints and independent child writes passed.\n");
+  process.stdout.write("PostgreSQL 17 session, resource and work conformance passed with migrations 0001–0004.\n");
 }

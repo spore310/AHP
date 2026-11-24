@@ -32,9 +32,9 @@ registration and a live presence binding are separate concepts.
 - `createStaticTokenAuthenticator(tokens: ReadonlyMap<string, string>)` — maps an
   exact token to a principal subject. Missing, malformed, repeated, or unknown
   credentials resolve to `undefined`; tokens are never logged or echoed.
-- `createAgentDirectory({ registrations, now?, presenceTtlMs?, registrationLimits? })` —
+- `createAgentDirectory({ registrations, domainId?, now?, presenceTtlMs?, registrationLimits? })` —
   - `register(principal, agentKey, displayName?)` resolves the durable row for
-    that principal and key.
+    that principal and key in the host-configured domain. PostgreSQL requires this trusted domain for registration and lookup.
   - `bindPresence(agentId, principal, connectionId)` creates or returns the
     current binding, denying a different live connection.
   - `renewPresence(binding)` advances only the exact current connection and
@@ -76,7 +76,7 @@ for work authorization.
   through `registrationLimits`. Known identities remain usable at the
   retention limit as pending capacity allows. New identities need a slot
   before a repository call. Closing a binding preserves its generation history.
-- Registration rows grow only with unique `(principal, agent_key)` pairs: the
+- Registration rows grow only with unique `(domain_id, principal_subject, agent_key)` tuples. The
   register handler refuses a connection-level bind conflict before the durable
   write, and same-key registrations are upserts. The reachable "row landed but
   bind failed" shapes stay inside that bound: one connection racing two

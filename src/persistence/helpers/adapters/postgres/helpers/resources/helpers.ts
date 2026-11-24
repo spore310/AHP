@@ -1,4 +1,5 @@
 import { DatabaseError } from "pg";
+import { createPostgresDurableWork } from "../durableWork/helpers";
 import type { ResourceRef } from "@authorization";
 import { sameResource } from "@authorization/helpers/context";
 import { canRetrySessionStart, captureRef, captureData } from "@persistence/helpers/durability/helpers";
@@ -68,7 +69,7 @@ export function createOwnedPostgresStorage(
             const code = error instanceof DatabaseError && error.severity === "ERROR" ? error.code : undefined;
             if (!code || !/^[0-9A-Z]{5}$/u.test(code) || code === "40003" || code.startsWith("08") || code.startsWith("57")) {
               discard = true;
-              const unknown = new RepositoryError("database", "The durable commit outcome is uncertain.");
+              const unknown = new RepositoryError("outcome_unknown", "The durable commit outcome is uncertain.");
               unknown.name = "DurableCommitUncertain";
               throw unknown;
             }
@@ -127,11 +128,14 @@ export function createOwnedPostgresStorage(
             WHERE resource_pk=$3 AND lifecycle_status=$4 AND provision_key=$5`,
           [change.next, JSON.stringify(change.runtimeMetadata), resource.pk, change.expected, change.operationId]);
           if (result.rowCount !== 1) reject();
-          if (sameResource(change.ref, change.session)) await client.query(`UPDATE sessions SET lifecycle_status=$1, modified_at=clock_timestamp()
-            WHERE session_instance_id=$2`, [change.next, change.session.instanceId]);
+          const root = sameResource(change.ref, change.session);
+          if (root || change.expected !== change.next) await client.query(`UPDATE sessions SET
+            lifecycle_status=CASE WHEN $2 THEN $3 ELSE lifecycle_status END, modified_at=clock_timestamp(),
+            graph_revision=graph_revision+$4 WHERE session_instance_id=$1`, [change.session.instanceId, root, change.next, change.expected === change.next ? 0 : 1]);
         });
       }
       const host: DurableHost = {
+        work: createPostgresDurableWork(tx, authorize),
         epoch: owner.epoch, serverSeq: owner.serverSeq, isOpen,
         release() {
           closing = true;
@@ -152,21 +156,22 @@ export function createOwnedPostgresStorage(
               const occupied = await client.query("SELECT 1 FROM sessions WHERE session_instance_id=$1 OR (session_uri=$2 AND lifecycle_status<>'retired') LIMIT 1",
                 [session.ref.instanceId, session.ref.id]);
               if (occupied.rowCount) reject();
-              const catalogue = await client.query<{ exact: boolean }>(`SELECT (id=$1 AND type_key=$2 AND version=$3 AND provider_id=$4) AS exact
+              const manifest = JSON.stringify({ kinds: session.type.workManifest ?? [] });
+              const catalogue = await client.query<{ exact: boolean }>(`SELECT (id=$1 AND type_key=$2 AND version=$3 AND provider_id=$4 AND work_manifest=$5::jsonb) AS exact
                 FROM session_types WHERE id=$1 OR (type_key=$2 AND version=$3) FOR SHARE`,
-              [session.type.id, session.type.key, session.type.version, session.providerId]);
+              [session.type.id, session.type.key, session.type.version, session.providerId, manifest]);
               if (catalogue.rows.some((r) => !r.exact)) reject();
               authorize(check);
               if (!catalogue.rowCount) {
-                await client.query(`INSERT INTO session_types(id,type_key,version,provider_id) VALUES ($1,$2,$3,$4)
-                ON CONFLICT DO NOTHING`, [session.type.id, session.type.key, session.type.version, session.providerId]);
+                await client.query(`INSERT INTO session_types(id,type_key,version,provider_id,work_manifest) VALUES ($1,$2,$3,$4,$5::jsonb)
+                ON CONFLICT DO NOTHING`, [session.type.id, session.type.key, session.type.version, session.providerId, manifest]);
               }
               const added = await client.query(`INSERT INTO sessions (session_instance_id,session_uri,domain_id,provider_id,session_type_id,
                 owner_principal_subject,durable_state,created_at,modified_at,last_server_seq)
                 SELECT $1,$2,$3,$4,t.id,$6,$7::jsonb,$8,$9,$10 FROM session_types t
-                WHERE t.id=$5 AND t.type_key=$11 AND t.version=$12 AND t.provider_id=$4`,
+                WHERE t.id=$5 AND t.type_key=$11 AND t.version=$12 AND t.provider_id=$4 AND t.work_manifest=$13::jsonb`,
               [session.ref.instanceId, session.ref.id, session.ref.domainId, session.providerId, session.type.id, session.owner,
-                JSON.stringify(session.state), session.createdAt, session.modifiedAt, session.lastServerSeq, session.type.key, session.type.version]);
+                JSON.stringify(session.state), session.createdAt, session.modifiedAt, session.lastServerSeq, session.type.key, session.type.version, manifest]);
               if (added.rowCount !== 1) reject();
               await insertResource(client, row);
             });

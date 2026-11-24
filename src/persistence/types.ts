@@ -10,6 +10,8 @@ export type WorkStatus = "queued" | "leased" | "completed" | "failed" | "cancell
 
 /** Stable, durable agent registration identity. */
 export interface AgentRegistrationRecord {
+  readonly domainId?: string;
+  readonly executionEpoch?: string;
   readonly id: string;
   readonly principalSubject: string;
   readonly agentKey: string;
@@ -26,11 +28,12 @@ export interface AgentRegistrationLimits {
 export interface AgentRegistrationRepository {
   /** Idempotently resolves the row for one verified principal and agent key. */
   register(input: {
+    readonly domainId?: string;
     readonly principalSubject: string;
     readonly agentKey: string;
     readonly displayName?: string;
   }): Promise<AgentRegistrationRecord>;
-  getById(id: string): Promise<AgentRegistrationRecord | undefined>;
+  getById(id: string, domainId?: string): Promise<AgentRegistrationRecord | undefined>;
 }
 
 /** Minimal durable projection of a live session. */
@@ -166,7 +169,7 @@ export interface PersistenceProvider extends PersistenceRepositories {
 }
 
 /** Stable, sanitized persistence failures. */
-export type RepositoryErrorCode = "conflict" | "not_found" | "unauthorized" | "database";
+export type RepositoryErrorCode = "conflict" | "not_found" | "unauthorized" | "database" | "outcome_unknown";
 
 export class RepositoryError extends Error {
   constructor(

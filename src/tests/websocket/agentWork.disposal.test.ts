@@ -4,18 +4,13 @@ import { describe, expect, it } from "vitest";
 import type { JsonRpcParams } from "@jsonrpc";
 import { createSessionsFactory } from "@sessions";
 import type { SessionBackend, SessionProvider } from "@sessions/types";
-import { createSessionOwnerRegistry, createWorkService, type SessionOwnerRegistry } from "@work";
-import type { DurableSessionInput, WorkRepository } from "@persistence/types";
+import { createSessionOwnerRegistry, createWorkReadPort, type SessionOwnerRegistry } from "@work";
 // INTERNAL canonical owner/disposal compatibility; assertions are unchanged.
 import { createAHPKernel as createAHPBinding } from "@websocket/helpers/ahp/helpers/kernel/helpers";
 import { isSettlingSession } from "@websocket/helpers/settling";
 import type { JsonRpcInvocation, WebSocketConnectionContext } from "@websocket";
 
-import { createRegistrationFixture } from "../agents/fixtures";
-
 const SESSION_URI = "ahp-session:/disposal-race";
-const WORK_KIND = "code.review";
-const WORK_ID = "00000000-0000-4000-8000-000000090001";
 
 const invocation: JsonRpcInvocation = {
   kind: "request",
@@ -148,73 +143,23 @@ const createLateStartProvider = () => {
   };
 };
 
-const createRepository = () => {
-  const submitted: string[] = [];
-  const cancelled: string[] = [];
-  const dependentWork = new Set<string>();
-  const repository: WorkRepository = {
-    submit: (input) => {
-      submitted.push(`${input.session.sessionUri}\u0000${input.requestKey}`);
-      return Promise.resolve({ id: WORK_ID, created: true });
-    },
-    claim: () => Promise.resolve(null),
-    renew: () => Promise.resolve(null),
-    complete: () => Promise.resolve(false),
-    fail: () => Promise.resolve(null),
-    cancel: (input) => {
-      cancelled.push(input.workId);
-      return Promise.resolve("cancelled");
-    },
-    get: () => Promise.resolve(null),
-    reconcileExpired: () => Promise.resolve(0),
-    hasDependentWork: (sessionUri) => Promise.resolve(dependentWork.has(sessionUri)),
-  };
-  return { repository, submitted, cancelled, dependentWork };
-};
-
 const setupWithProvider = (
   provider: SessionProvider,
   sessionOwners: SessionOwnerRegistry = createSessionOwnerRegistry(),
 ) => {
   const factory = createSessionsFactory({ providers: [provider] });
-  const { repository, submitted, cancelled, dependentWork } = createRepository();
-  const registrations = createRegistrationFixture().repository;
-
-  const work = createWorkService({
-    repository,
-    sessions: sessionOwners,
-    presence: { getByConnection: () => undefined },
-    registrations,
-    describeSession: (uri): DurableSessionInput | undefined => {
-      const snapshot = factory.getSessionSnapshot(uri);
-      if (snapshot === undefined) {
-        return undefined;
-      }
-      const state = snapshot.state as { readonly provider?: unknown };
-      const owner = sessionOwners.owner(uri);
-      if (typeof state.provider !== "string" || owner === undefined) {
-        return undefined;
-      }
-      const now = new Date().toISOString();
-      return {
-        sessionUri: uri,
-        ownerPrincipalSubject: owner,
-        providerId: state.provider,
-        createdAt: now,
-        modifiedAt: now,
-        lastServerSeq: snapshot.fromSeq,
-        durableState: { fromSeq: snapshot.fromSeq, state: snapshot.state },
-      };
-    },
-    allowedKinds: new Set([WORK_KIND]),
-  });
+  const dependentWork = new Set<string>();
+  const work = createWorkReadPort({ sessions: sessionOwners, repository: {
+    get: () => Promise.resolve(null),
+    hasDependentWork: (uri) => Promise.resolve(dependentWork.has(uri)),
+  } });
 
   const binding = createAHPBinding(factory, () => undefined, {
     work,
     sessionOwners,
   });
 
-  return { factory, sessionOwners, work, submitted, cancelled, dependentWork, binding };
+  return { factory, sessionOwners, dependentWork, binding };
 };
 
 const setup = () => {
@@ -240,7 +185,7 @@ const connect = (
 
 describe("agent work disposal races", () => {
   it("releases the owner binding when backend disposal fails and keeps the recreated session owned", async () => {
-    const { gated, factory, sessionOwners, work, submitted, cancelled, binding } = setup();
+    const { gated, factory, sessionOwners, binding } = setup();
     const alice = connect(binding, "connection-1", "alice");
     await invoke(binding, "createSession", { channel: SESSION_URI }, alice);
     expect(sessionOwners.owner(SESSION_URI)).toBe("alice");
@@ -284,20 +229,7 @@ describe("agent work disposal races", () => {
     await invoke(binding, "createSession", { channel: SESSION_URI }, bob);
     expect(sessionOwners.owner(SESSION_URI)).toBe("bob");
 
-    // The stale principal can no longer make the recreated session accept work.
-    const submission = {
-      sessionUri: SESSION_URI,
-      requestKey: "after-race",
-      kind: WORK_KIND,
-      input: { path: "experiment.txt" },
-    };
-    await expect(work.submit({ subject: "alice" }, submission))
-      .rejects.toMatchObject({ code: "unauthorized" });
-
-    const lease = await work.submit({ subject: "bob" }, submission);
-    expect(lease.id).toBe(WORK_ID);
-    expect(submitted).toEqual([`${SESSION_URI}\u0000after-race`]);
-    expect(cancelled).toEqual([]);
+    expect(binding.handlers["x-ahp/work/submit"]).toBeUndefined();
   });
 
   it("keeps mid-window recreates fail-closed when the disposal succeeds", async () => {
@@ -393,7 +325,7 @@ describe("agent work disposal races", () => {
   });
 
   it("denies a stale detached create from binding a foreign successor's record", async () => {
-    const { late, factory, sessionOwners, work, binding } = setupLate();
+    const { late, factory, sessionOwners, binding } = setupLate();
     const alice = connect(binding, "connection-1", "alice");
     const creating = invoke(binding, "createSession", { channel: SESSION_URI }, alice);
     // The record attaches and the owner binding lands while the backend start
@@ -424,19 +356,7 @@ describe("agent work disposal races", () => {
     expect(sessionOwners.owner(SESSION_URI)).toBe("bob");
     expect(factory.getSessionSnapshot(SESSION_URI)).toBeDefined();
 
-    // The durable work channel stays with the true creator.
-    await expect(work.submit({ subject: "alice" }, {
-      sessionUri: SESSION_URI,
-      requestKey: "late-takeover",
-      kind: WORK_KIND,
-      input: { path: "experiment.txt" },
-    })).rejects.toMatchObject({ code: "unauthorized" });
-    await expect(work.submit({ subject: "bob" }, {
-      sessionUri: SESSION_URI,
-      requestKey: "true-creator",
-      kind: WORK_KIND,
-      input: { path: "experiment.txt" },
-    })).resolves.toMatchObject({ id: WORK_ID });
+    expect(binding.handlers["x-ahp/work/submit"]).toBeUndefined();
 
     late.release();
     await expect(bobCreating).resolves.toBeNull();

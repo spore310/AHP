@@ -32,7 +32,8 @@ const ref = (alias: string): string => `jsonb_build_object('domainId',${alias}.d
   'id',${alias}.resource_id, 'instanceId',${alias}.instance_id)`;
 const sessionRef = "jsonb_build_object('domainId',s.domain_id,'kind','session','id',s.session_uri,'instanceId',s.session_instance_id)";
 export const sessionColumns = `SELECT ${sessionRef} AS ref,
-  jsonb_build_object('id',t.id,'key',t.type_key,'version',t.version) AS type,
+  jsonb_build_object('id',t.id,'key',t.type_key,'version',t.version) || CASE WHEN t.work_manifest->'kinds'='[]'::jsonb THEN '{}'::jsonb
+    ELSE jsonb_build_object('workManifest',t.work_manifest->'kinds') END AS type,
   s.provider_id AS "providerId", s.owner_principal_subject AS owner, s.lifecycle_status AS lifecycle,
   s.durable_state AS state, s.state_revision::text AS "stateRevision", s.graph_revision::text AS "graphRevision",
   s.last_server_seq::float8 AS "lastServerSeq", ${date("s.created_at")} AS "createdAt", ${date("s.modified_at")} AS "modifiedAt"

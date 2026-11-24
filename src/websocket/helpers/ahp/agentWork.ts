@@ -1,10 +1,12 @@
 import { AhpErrorCodes, JsonRpcErrorCodes } from "@microsoft/agent-host-protocol";
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
+import { workRequestSchemas } from "@work/helpers/protocol/schemas";
 
 import { AgentDirectoryError, type AgentDirectory, type AuthenticatedPrincipal, type PresenceBinding } from "@agents";
 import { RpcError } from "@jsonrpc";
 import { isPortableText, RepositoryError } from "@persistence";
-import { WorkError, type WorkService } from "@work";
+import { WorkError, type WorkReadPort } from "@work";
 
 import type { JsonRpcHandler, JsonRpcHandlers, WebSocketConnectionContext } from "../../types";
 import {
@@ -16,7 +18,7 @@ import {
 
 export interface AgentWorkExtensionOptions {
   readonly agents?: AgentDirectory;
-  readonly work?: Pick<WorkService, "get">;
+  readonly work?: Pick<WorkReadPort, "get">;
 }
 
 export interface AgentWorkExtension {
@@ -49,10 +51,7 @@ const registerSchema = z.object({
 
 const renewSchema = z.object({ version }).strict();
 
-const getSchema = z.object({
-  version,
-  workId: z.uuid(),
-}).strict();
+const getSchema = workRequestSchemas.get;
 
 const invalid = (): never => {
   throw new RpcError(JsonRpcErrorCodes.InvalidParams, "Request rejected");
@@ -76,6 +75,8 @@ const notConfigured = (): never => {
 
 const mapRepositoryError = (error: RepositoryError): never => {
   switch (error.code) {
+    case "outcome_unknown":
+      throw new RpcError(JsonRpcErrorCodes.InternalError, "Internal error", { version: 1, kind: "outcome_unknown", correlationId: randomUUID() });
     case "conflict":
       return conflict();
     case "not_found":
@@ -147,7 +148,7 @@ export const createAgentWorkExtension = (
     return options.agents;
   };
 
-  const requireWork = (): Pick<WorkService, "get"> => {
+  const requireWork = (): Pick<WorkReadPort, "get"> => {
     if (options.work === undefined) {
       return notConfigured();
     }

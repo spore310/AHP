@@ -172,6 +172,7 @@ const sessionRow = (overrides: Partial<SessionRow> = {}): SessionRow => ({
 
 const registrationRow = (overrides: Partial<AgentRegistrationRow> = {}): AgentRegistrationRow => ({
   id: REGISTRATION_ID,
+  domain_id: "domain", execution_epoch: "0",
   principal_subject: "alice",
   agent_key: "agent-1",
   display_name: null,
@@ -186,7 +187,7 @@ describe("postgres agent registration repository", () => {
       { rows: [{ full: true }] },
     ]);
     const repository = createPostgresAgentRegistrationRepository(double.pool, { maxPerPrincipal: 1, maxTotal: 1 });
-    await expect(repository.register({ principalSubject: "alice", agentKey: "agent-2" })).rejects.toMatchObject({
+    await expect(repository.register({ domainId: "domain", principalSubject: "alice", agentKey: "agent-2" })).rejects.toMatchObject({
       code: "conflict", message: "Agent registration capacity unavailable.",
     });
     expect(double.connectCount()).toBe(1);
@@ -202,6 +203,7 @@ describe("postgres agent registration repository", () => {
     const repository = createPostgresAgentRegistrationRepository(double.pool);
 
     const record = await repository.register({
+      domainId: "domain",
       principalSubject: "alice",
       agentKey: "agent-1",
       displayName: "Willa",
@@ -213,18 +215,19 @@ describe("postgres agent registration repository", () => {
       "BEGIN", "SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
       "LOCK TABLE agent_registrations IN SHARE ROW EXCLUSIVE MODE",
     ]);
-    expect(callAt(double.calls, 3).values).toEqual(["alice", "agent-1", 4095, 127]);
+    expect(callAt(double.calls, 3).values).toEqual(["domain", "alice", "agent-1", 4095, 127]);
     expect(callAt(double.calls, 4).text.replace(/\s+/g, " ").trim()).toBe(
-      "INSERT INTO agent_registrations (principal_subject, agent_key, display_name)"
-      + " VALUES ($1, $2, $3)"
-      + " ON CONFLICT (principal_subject, agent_key)"
+      "INSERT INTO agent_registrations (domain_id, principal_subject, agent_key, display_name)"
+      + " VALUES ($1, $2, $3, $4)"
+      + " ON CONFLICT (domain_id, principal_subject, agent_key)"
       + " DO UPDATE SET display_name = COALESCE(EXCLUDED.display_name, agent_registrations.display_name)"
-      + " RETURNING id, principal_subject, agent_key, display_name, enabled, created_at",
+      + " RETURNING id, domain_id, principal_subject, agent_key, display_name, enabled, execution_epoch::text, created_at",
     );
-    expect(callAt(double.calls, 4).values).toEqual(["alice", "agent-1", "Willa"]);
+    expect(callAt(double.calls, 4).values).toEqual(["domain", "alice", "agent-1", "Willa"]);
     expect(callAt(double.calls, 5).text).toBe("COMMIT");
     expect(record).toEqual({
       id: REGISTRATION_ID,
+      domainId: "domain", executionEpoch: "0",
       principalSubject: "alice",
       agentKey: "agent-1",
       displayName: "Willa",
@@ -237,9 +240,9 @@ describe("postgres agent registration repository", () => {
     const double = createDatabaseDouble([{ rows: [{ full: false }] }, { rows: [registrationRow()] }]);
     const repository = createPostgresAgentRegistrationRepository(double.pool);
 
-    const record = await repository.register({ principalSubject: "alice", agentKey: "agent-1" });
+    const record = await repository.register({ domainId: "domain", principalSubject: "alice", agentKey: "agent-1" });
 
-    expect(callAt(double.calls, 4).values).toEqual(["alice", "agent-1", null]);
+    expect(callAt(double.calls, 4).values).toEqual(["domain", "alice", "agent-1", null]);
     expect(record.displayName).toBeUndefined();
     expect(record.createdAt).toBe("2026-01-02T03:04:05.678Z");
   });
@@ -248,7 +251,7 @@ describe("postgres agent registration repository", () => {
     const double = createDatabaseDouble([], { failAllWith: new SimulatedDriverError("23505") });
     const repository = createPostgresAgentRegistrationRepository(double.pool);
 
-    const attempt = repository.register({ principalSubject: "alice", agentKey: "agent-1" });
+    const attempt = repository.register({ domainId: "domain", principalSubject: "alice", agentKey: "agent-1" });
 
     await expect(attempt).rejects.toMatchObject({
       code: "conflict",
@@ -261,7 +264,7 @@ describe("postgres agent registration repository", () => {
     const repository = createPostgresAgentRegistrationRepository(double.pool);
 
     await expect(
-      repository.register({ principalSubject: "alice", agentKey: "agent-1" }),
+      repository.register({ domainId: "domain", principalSubject: "alice", agentKey: "agent-1" }),
     ).rejects.toHaveProperty("message", "The durable store operation failed.");
     expect(double.calls.at(-1)?.text).toBe("ROLLBACK");
   });
@@ -270,15 +273,16 @@ describe("postgres agent registration repository", () => {
     const double = createDatabaseDouble([{ rows: [registrationRow()] }]);
     const repository = createPostgresAgentRegistrationRepository(double.pool);
 
-    const record = await repository.getById(REGISTRATION_ID);
+    const record = await repository.getById(REGISTRATION_ID, "domain");
 
     expect(callAt(double.calls, 0).text.replace(/\s+/g, " ")).toBe(
-      "SELECT id, principal_subject, agent_key, display_name, enabled, created_at"
-      + " FROM agent_registrations WHERE id = $1::uuid",
+      "SELECT id, domain_id, principal_subject, agent_key, display_name, enabled, execution_epoch::text, created_at"
+      + " FROM agent_registrations WHERE id = $1::uuid AND domain_id = $2",
     );
-    expect([...callAt(double.calls, 0).values]).toEqual([REGISTRATION_ID]);
+    expect([...callAt(double.calls, 0).values]).toEqual([REGISTRATION_ID, "domain"]);
     expect(record).toEqual({
       id: REGISTRATION_ID,
+      domainId: "domain", executionEpoch: "0",
       principalSubject: "alice",
       agentKey: "agent-1",
       displayName: undefined,
@@ -291,14 +295,14 @@ describe("postgres agent registration repository", () => {
     const double = createDatabaseDouble([{ rows: [] }]);
     const repository = createPostgresAgentRegistrationRepository(double.pool);
 
-    await expect(repository.getById(REGISTRATION_ID)).resolves.toBeUndefined();
+    await expect(repository.getById(REGISTRATION_ID, "domain")).resolves.toBeUndefined();
   });
 
   it("getById sends constraint violations to the sanitized database class", async () => {
     const double = createDatabaseDouble([], { failAllWith: new SimulatedDriverError("42P01") });
     const repository = createPostgresAgentRegistrationRepository(double.pool);
 
-    await expect(repository.getById(REGISTRATION_ID)).rejects.toMatchObject({
+    await expect(repository.getById(REGISTRATION_ID, "domain")).rejects.toMatchObject({
       code: "database",
       message: "The durable store operation failed.",
     });

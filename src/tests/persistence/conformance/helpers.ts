@@ -18,14 +18,14 @@ export const assertRegistrationQuotaConformance = async (
   first: AgentRegistrationRepository,
   second: AgentRegistrationRepository,
 ): Promise<void> => {
-  const existing = { principalSubject: "quota-a", agentKey: "worker" };
+  const existing = { domainId: "quota", principalSubject: "quota-a", agentKey: "worker" };
   const [left, right] = await Promise.all([first.register(existing), second.register(existing)]);
   assert.equal(left.id, right.id);
   await assert.rejects(second.register({ ...existing, agentKey: "second-worker" }), registrationConflict);
 
   const outcomes = await Promise.allSettled([
-    first.register({ principalSubject: "quota-b", agentKey: "worker" }),
-    second.register({ principalSubject: "quota-c", agentKey: "worker" }),
+    first.register({ domainId: "quota", principalSubject: "quota-b", agentKey: "worker" }),
+    second.register({ domainId: "quota", principalSubject: "quota-c", agentKey: "worker" }),
   ]);
   const succeeded = outcomes.filter((outcome) => outcome.status === "fulfilled");
   const refused = outcomes.filter((outcome) => outcome.status === "rejected");
@@ -33,7 +33,7 @@ export const assertRegistrationQuotaConformance = async (
   assert.equal(refused.length, 1);
   assert.ok(registrationConflict(refused[0]?.reason));
   assert.equal((await first.register({ ...existing, displayName: "Renamed" })).id, left.id);
-  assert.equal((await second.getById(left.id))?.displayName, "Renamed");
+  assert.equal((await second.getById(left.id, "quota"))?.displayName, "Renamed");
 };
 
 /** Runs data-contract scenarios against any provider fixture, without SQL hooks. */

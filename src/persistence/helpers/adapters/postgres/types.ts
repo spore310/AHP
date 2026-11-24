@@ -32,6 +32,8 @@ export interface QueryableClient {
 
 /** Raw `agent_registrations` row shape (snake_case as returned by pg). */
 export interface AgentRegistrationRow extends QueryResultRow {
+  readonly domain_id: string;
+  readonly execution_epoch: string;
   readonly id: string;
   readonly principal_subject: string;
   readonly agent_key: string;

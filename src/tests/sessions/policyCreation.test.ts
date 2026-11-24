@@ -9,6 +9,7 @@ import { mockProvider } from "@sessions/mock";
 import type { SessionCreationApproval, SessionCreationContext, SessionCreationFacts, SessionTypePolicyRegistration } from "@sessions/helpers/creation/types";
 import { createToolPolicyFactory } from "@toolPolicy";
 import { SESSION_TYPE_SELECTOR_KEY, type ToolCatalogue } from "@tools";
+import { observableStorage } from "./durableFixture";
 
 const factories: SessionsFactory[] = [];
 afterEach(async () => {
@@ -111,6 +112,31 @@ const evaluate = (registry: ReferenceAuthorizer, scope: ResourceRef, bindingId: 
 });
 
 describe("P05 protected creation", () => {
+  it("reserves the exact work descriptor manifest and fences a changed manifest on recovery", async () => {
+    const { policies, registration, provider } = fixture({ template: false });
+    const db = observableStorage();
+    const createHost = (maxAttempts: number) => {
+      const catalogue = createSessionTypeCatalogue({ tools, types: [{ ...registration,
+        work: [{ kind: "review", maxAttempts, data: { parse: () => ({ accepted: true }) } }],
+        policy: { ...registration.policy, restoration: { prepare: () => Promise.resolve({ bindings: [], isCurrent: () => true }) } } }] });
+      const factory = createSessionsFactory({ providers: [{ ...mockProvider, ...provider }], application: { catalogue, defaultType: type },
+        durability: { storage: db.storage, hostId: "review" }, creationSecurity: { registry: createReferenceAuthorizer({ policies, now: Date.now }), policies } });
+      factories.push(factory);
+      return factory;
+    };
+    const first = createHost(5);
+    await first.durability?.start();
+    const channel = "ahp-session:/work-manifest";
+    await capability(first).createSession({ channel }, caller());
+    const ref = capability(first).getResource(channel);
+    if (!ref) throw new Error("Missing session");
+    expect((await db.current().sessions.get(ref))?.type.workManifest).toEqual([{ kind: "review", maxAttempts: 5 }]);
+    await first.dispose();
+    const changed = createHost(6);
+    await changed.durability?.start();
+    expect(capability(changed).isReady(ref)).toBe(false);
+    expect((await db.current().sessions.get(ref))?.lifecycle).toBe("suspended");
+  });
   it("S02 exact capability approval commits immutable actual owner/bootstrap without native cursor permission", async () => {
     const f = fixture();
     await f.auth.createSession({ channel: "ahp-session:/approved", owner: "mallory", role: "admin" }, caller());

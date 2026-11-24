@@ -1,15 +1,11 @@
 import { sameResource } from "@authorization/helpers/context";
+import { isDeepStrictEqual } from "node:util";
 import type { ResourceRef } from "@authorization";
-import { canRetrySessionStart, captureData, captureRef, resourceOrder } from "./helpers";
+import { atomic, canRetrySessionStart, captureData, captureRef, resourceOrder } from "./helpers";
+import { createMemoryWorkRepository } from "./memoryWork";
+import type { StoredWork } from "./workTypes";
+import type { AgentRegistrationRecord } from "../../types";
 import type { Admission, DurableHost, DurableStorage, ResourceRecord, StoredSession, Transition } from "./types";
-
-function atomic<T>(run: () => T): Promise<T> {
-  try {
-    return Promise.resolve(run());
-  } catch (error) {
-    return Promise.reject(error instanceof Error ? error : new Error("Durable operation failed."));
-  }
-}
 
 const key = (ref: ResourceRef): string => JSON.stringify([ref.domainId, ref.kind, ref.id, ref.instanceId]);
 const advance = (revision: string): string => (BigInt(revision) + 1n).toString();
@@ -17,19 +13,12 @@ function unavailable(): never {
   throw new Error("Durable operation unavailable.");
 }
 
-/** Minimal in-process work state used by storage conformance and retirement fixtures. */
-export interface MemoryWorkAnchor {
-  readonly session: ResourceRef<"session">;
-  readonly anchors: readonly { readonly resource: ResourceRef; readonly purpose: "scope" | "announce"; readonly include: boolean }[];
-  readonly status: "queued" | "leased" | "cancelled" | "completed" | "failed";
-  readonly lease?: { readonly token: string; readonly agent: string; readonly expiresAt: string };
-  readonly modifiedAt: string;
-}
-
 /** One storage instance may outlive multiple hosts. Every mutation below runs in one synchronous critical section. */
-export function createMemoryDurableStorage(work = new Map<string, MemoryWorkAnchor>()): DurableStorage {
+export function createMemoryDurableStorage(work = new Map<string, StoredWork>(), registrations: ReadonlyMap<string, AgentRegistrationRecord> = new Map()): DurableStorage {
   const sessions = new Map<string, StoredSession>();
   const resources = new Map<string, ResourceRecord>();
+  const typesById = new Map<string, { type: StoredSession["type"]; providerId: string }>();
+  const typeVersions = new Map<string, string>();
   let hostId: string | undefined;
   let epoch = 0n;
   let checkpoint = 0;
@@ -76,7 +65,8 @@ export function createMemoryDurableStorage(work = new Map<string, MemoryWorkAnch
           if (input.next === "creating" && (!canRetrySessionStart(r) || metadata !== undefined)) unavailable();
           if (input.next === "active" && r.ref.kind !== "session") requireOperationalParents(r, true);
           resources.set(key(r.ref), { ...r, lifecycle: input.next, resourceRevision: advance(r.resourceRevision), ...(metadata === undefined ? {} : { runtimeMetadata: metadata }) });
-          if (r.ref.kind === "session") sessions.set(key(s.ref), { ...s, lifecycle: input.next });
+          if (r.lifecycle !== input.next) sessions.set(key(s.ref), { ...s, graphRevision: advance(s.graphRevision),
+            ...(r.ref.kind === "session" ? { lifecycle: input.next } : {}) });
         });
       };
       const begin = (session: ResourceRef<"session">, ref: ResourceRef, admit: Admission): readonly ResourceRecord[] => {
@@ -92,27 +82,30 @@ export function createMemoryDurableStorage(work = new Map<string, MemoryWorkAnch
         }
         for (const [id, job] of work) {
           if (!sameResource(job.session, session) || !["queued", "leased"].includes(job.status)) continue;
-          if (sameResource(session, ref) || job.anchors.some((anchor) => anchor.include && anchor.purpose === "scope" && closure.has(key(anchor.resource)))) {
-            work.set(id, { session, anchors: job.anchors, status: "cancelled", modifiedAt: new Date().toISOString() });
+          if (sameResource(session, ref) || job.scope.some((anchor) => anchor.include && closure.has(key(anchor.resource)))) {
+            work.set(id, { ...job, lease: undefined, status: "cancelled", revision: advance(job.revision), updatedAt: new Date().toISOString() });
           }
         }
+        let changed = false;
         for (const k of closure) {
           const row = resources.get(k);
-          if (row && row.lifecycle !== "retiring") resources.set(k, { ...row, resourceRevision: advance(row.resourceRevision), lifecycle: "retiring" });
+          if (row && row.lifecycle !== "retiring") {
+            resources.set(k, { ...row, resourceRevision: advance(row.resourceRevision), lifecycle: "retiring" });
+            changed = true;
+          }
         }
-        sessions.set(key(session), { ...s, graphRevision: advance(s.graphRevision), ...(sameResource(ref, session) ? { lifecycle: "retiring" } : {}) });
+        if (changed) sessions.set(key(session), { ...s, graphRevision: advance(s.graphRevision), ...(sameResource(ref, session) ? { lifecycle: "retiring" } : {}) });
         return structuredClone(ordered.filter((r) => closure.has(key(r.ref))).reverse().map((r) => find(r.ref)));
       };
       const finish = (session: ResourceRef<"session">, ref: ResourceRef): void => {
         guard();
+        const s = sessions.get(key(session)) ?? unavailable();
         const row = find(ref);
         if (!sameResource(session, row.session) || row.lifecycle !== "retiring" || sessionRows(session).some((r) => r.lifecycle !== "retired"
           && [r.parent, r.grantParent].some((p) => p && sameResource(p, ref)))) unavailable();
         resources.set(key(ref), { ...row, modifiedAt: new Date().toISOString(), lifecycle: "retired", resourceRevision: advance(row.resourceRevision) });
-        if (ref.kind === "session") {
-          const s = sessions.get(key(session)) ?? unavailable();
-          sessions.set(key(ref), { ...s, modifiedAt: new Date().toISOString(), lifecycle: "retired" });
-        }
+        sessions.set(key(session), { ...s, graphRevision: advance(s.graphRevision),
+          ...(ref.kind === "session" ? { modifiedAt: new Date().toISOString(), lifecycle: "retired" as const } : {}) });
       };
       function unique(record: ResourceRecord): void {
         captureRef(record.ref);
@@ -124,18 +117,30 @@ export function createMemoryDurableStorage(work = new Map<string, MemoryWorkAnch
           if (isOpen()) occupied = false;
         });
       },
+      work: createMemoryWorkRepository(work, registrations, resources, (ref) => sessions.get(key(ref)), guard),
       sessions: {
         reserve(s, root, admit) {
           return atomic(() => {
             const state = captureData(s.state, 2 * 1024 * 1024);
-            guard(admit);
-            unique(root);
-            if (sessions.has(key(s.ref)) || !sameResource(root.ref, s.ref) || !sameResource(root.session, s.ref) || root.owner !== s.owner || root.providerId !== s.providerId
-              || root.parent || root.grantParent || s.lifecycle !== "creating" || root.lifecycle !== "creating") unavailable();
             const session = structuredClone({ ...s, state });
             const resource = structuredClone({ ...root, data: captureData(root.data), registration: captureData(root.registration), recoveryInput: captureData(root.recoveryInput), runtimeMetadata: captureData(root.runtimeMetadata) });
-            sessions.set(key(s.ref), session);
-            resources.set(key(root.ref), resource);
+            guard(admit);
+            unique(resource);
+            if (sessions.has(key(session.ref)) || !sameResource(resource.ref, session.ref) || !sameResource(resource.session, session.ref)
+              || resource.owner !== session.owner || resource.providerId !== session.providerId || resource.parent || resource.grantParent
+              || session.lifecycle !== "creating" || resource.lifecycle !== "creating") unavailable();
+            const typeId = session.type.id.toLowerCase();
+            const revision = JSON.stringify([session.type.key, session.type.version]);
+            const pinned = typesById.get(typeId);
+            const registeredId = typeVersions.get(revision);
+            const descriptor = { type: { ...session.type, id: typeId, workManifest: session.type.workManifest ?? [] }, providerId: session.providerId };
+            if ((registeredId !== undefined && registeredId !== typeId) || (pinned && !isDeepStrictEqual(pinned, descriptor))) unavailable();
+            if (!pinned) {
+              typesById.set(typeId, descriptor);
+              typeVersions.set(revision, typeId);
+            }
+            sessions.set(key(session.ref), session);
+            resources.set(key(resource.ref), resource);
           });
         },
         get(ref) {
@@ -180,7 +185,7 @@ export function createMemoryDurableStorage(work = new Map<string, MemoryWorkAnch
             const s = sessions.get(key(ref));
             if (!s || s.lifecycle !== "retired" || !(Date.parse(s.modifiedAt) < Date.parse(retainAfter)) || sessionRows(ref).some((r) => r.lifecycle !== "retired")) return false;
             const jobs = [...work.entries()].filter(([,job]) => sameResource(job.session, ref));
-            if (jobs.some(([,job]) => job.status === "queued" || job.status === "leased" || Date.parse(job.modifiedAt) >= Date.parse(retainAfter))) return false;
+            if (jobs.some(([,job]) => job.status === "queued" || job.status === "leased" || Date.parse(job.updatedAt) >= Date.parse(retainAfter))) return false;
             for (const [id] of jobs.slice(0, 256)) work.delete(id);
             if (jobs.length > 256) return false;
             for (const r of sessionRows(ref)) resources.delete(key(r.ref));

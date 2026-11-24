@@ -31,6 +31,7 @@ export interface AgentDirectoryRegistrationLimits {
 }
 
 export interface AgentDirectoryOptions {
+  readonly domainId?: string;
   readonly registrations: AgentRegistrationRepository;
   readonly registrationLimits?: Partial<AgentDirectoryRegistrationLimits>;
   /** Monotonic milliseconds used for presence deadlines. */

@@ -108,6 +108,7 @@ describe("neutral persistence facade", () => {
       get serverSeq() { return this.#host.serverSeq; }
       get resources() { return this.#host.resources; }
       get sessions() { return this.#host.sessions; }
+      get work() { return this.#host.work; }
       isOpen() { return this.#host.isOpen(); }
       release() { return this.#host.release(); }
     }
@@ -118,6 +119,7 @@ describe("neutral persistence facade", () => {
       expect(host.isOpen()).toBe(true);
       expect(host.sessions).toBe(memory.sessions);
       expect(host.resources).toBe(memory.resources);
+      expect(host.work).toBe(memory.work);
       expect(host.epoch).toBe(memory.epoch);
       expect(host.serverSeq).toBe(memory.serverSeq);
     } finally {

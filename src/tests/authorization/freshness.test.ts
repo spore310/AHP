@@ -8,7 +8,7 @@ import { createConnectionSetupAdapter } from "@websocket/helpers/security";
 import { FrameLog, responseWithId } from "../websocket/helpers";
 import { createSessionTypeCatalogue, createSessionsFactory, type SessionBackend, type SessionProvider, type SessionsFactory } from "@sessions";
 import * as publicSessions from "@sessions";
-import { createWorkService } from "@work";
+import { workFixture } from "../work/commandsFixture";
 import * as publicWork from "@work";
 import type { SessionOwnerLookup } from "@work";
 import { createMemoryPersistenceFixture } from "../persistence/conformance/helpers";
@@ -255,9 +255,9 @@ describe("P06 real public-host composition", () => {
   });
 
   it("reentrant canonical owner replacement cannot project successor ownership through the old hosted record", async () => {
-    const original = publicWork.createWorkService;
+    const original = publicWork.createWorkReadPort;
     let lookup: SessionOwnerLookup | undefined;
-    const spy = vi.spyOn(publicWork, "createWorkService").mockImplementationOnce((options) => {
+    const spy = vi.spyOn(publicWork, "createWorkReadPort").mockImplementationOnce((options) => {
       lookup = options.sessions;
       return original(options);
     });
@@ -924,24 +924,18 @@ describe("P06 explicit grant service", () => {
     const child = issuer.commit(await issuer.prepare(f.request));
     expect((await f.registry.evaluate({ actor: { ...context, actor: bob }, operation: "invoke", bindingId: child.id, policyRef: policy,
       scope: f.scope, route: { origin: f.scope, targets: [f.scope] } })).decision.effect).toBe("allow");
-    const memory = createMemoryPersistenceFixture();
-    const submit = vi.spyOn(memory.provider.work, "submit");
-    const timestamp = new Date().toISOString();
-    const work = createWorkService({ repository: memory.provider.work, registrations: memory.provider.registrations,
-      presence: { getByConnection: () => undefined }, allowedKinds: new Set(["fixture.task"]),
-      sessions: { owner: (uri) => uri === f.scope.id ? f.registry.owner(f.scope)?.subject : undefined },
-      describeSession: (uri) => uri === f.scope.id
-        ? { sessionUri: uri, ownerPrincipalSubject: principal.subject,
-            providerId: "test", createdAt: timestamp, modifiedAt: timestamp, lastServerSeq: 1, durableState: {} }
-        : undefined,
-    });
-    await expect(work.submit({ subject: bob.principal.subject }, { sessionUri: f.scope.id, requestKey: "junior", kind: "fixture.task", input: {} })).rejects.toThrow();
-    expect(submit).not.toHaveBeenCalled();
-    const submitted = await work.submit({ subject: principal.subject }, { sessionUri: f.scope.id, requestKey: "owner", kind: "fixture.task", input: {} });
-    expect(typeof submitted.id).toBe("string");
-    expect(submit).toHaveBeenCalledOnce();
-    expect(f.registry.owner(f.scope)).toEqual(principal);
-    await memory.provider.dispose();
+    const w = await workFixture({ prepare: (caller) => Promise.resolve({ release() {}, isCurrent: () =>
+      f.registry.owner(f.scope)?.subject === caller.context.actor.principal.subject }) });
+    try {
+      const submit = vi.spyOn(w.host.work, "submit");
+      const owner = { ...w.caller, context: { ...w.caller.context, actor: { kind: "user" as const, principal: { domainId: w.ref.domainId, subject: principal.subject } } } };
+      const junior = { ...owner, context: { ...owner.context, actor: { ...bob, principal: { domainId: w.ref.domainId, subject: bob.principal.subject } } } };
+      await expect(w.service.submit(junior, w.request)).rejects.toThrow();
+      expect(submit).not.toHaveBeenCalled();
+      await expect(w.service.submit(owner, w.request)).resolves.toHaveProperty("id");
+      expect(submit).toHaveBeenCalledOnce();
+      expect(f.registry.owner(f.scope)).toEqual(principal);
+    } finally { await w.host.release(); }
   });
 
   it("counts all bindings of the full actor across scopes before invoking grant adapters", async () => {

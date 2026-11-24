@@ -24,7 +24,7 @@ export function captureValue(value: unknown, limits: ValueLimits): CapturedValue
     }
     if (current === null || typeof current === "boolean" || (typeof current === "number" && Number.isFinite(current))) {
       add(JSON.stringify(current).length);
-      return current;
+      return current === 0 && limits.postgres ? 0 : current;
     }
     if (typeof current !== "object" || ancestors.has(current)) return invalid();
     const array = Array.isArray(current);

@@ -26,5 +26,5 @@ export const createAgentRegistrationFacade = (
   scope: PersistenceOperationScope,
 ): AgentRegistrationRepository => ({
   register: (input) => scope.run(() => repository.register(input)),
-  getById: (id) => scope.run(() => repository.getById(id)),
+  getById: (id, domainId) => scope.run(() => domainId === undefined ? repository.getById(id) : repository.getById(id, domainId)),
 });

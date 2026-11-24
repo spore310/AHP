@@ -1,8 +1,8 @@
 # Persistence
 
 Database-neutral repository contracts, facades, and provider selection for
-agent registrations, durable session incarnations, canonical resources and work
-reads. A host configured for durability publishes live state after a successful commit.
+agent registrations, durable session incarnations, canonical resources and work.
+A host configured for durability publishes live state after a successful commit.
 PostgreSQL implements the production storage adapter.
 
 ## Files
@@ -10,6 +10,9 @@ PostgreSQL implements the production storage adapter.
 | File | Responsibility |
 | ---- | -------------- |
 | `helpers/durability/types.ts` | Exact session/resource records, data CAS, lifecycle operations and host lease. |
+| `helpers/durability/workTypes.ts` | Work intent, internal records, lease fences and the owned repository. |
+| `helpers/durability/workIntent.ts` | Canonical work capture and structural replay equality. |
+| `helpers/durability/memoryWork.ts` | Work admission, quotas, data CAS and settlement over the same records used for retirement. |
 | `helpers/durability/helpers.ts` | Bounded data capture, resource identities and graph order. |
 | `helpers/durability/memory.ts` | Single-owner in-memory lifetime, revisions and retirement transactions. |
 | `types.ts` | Repository ports, plain DTOs, `PersistenceProvider`, and `RepositoryError`. |
@@ -37,13 +40,16 @@ Pass `provider.durability` and a stable logical `hostId` to the protected sessio
 
 The session/root reservation and retirement transitions are atomic. Resource data uses full-object CAS and independent decimal revisions. Terminal work remains scoped to its original incarnation through retirement. Explicit purge with a retention cutoff deletes eligible history in bounded batches. Applications monitor retained disk usage and choose a cutoff appropriate to their retention policy.
 
+Both adapters retain the exact type ID, key, version, provider and serializable work manifest after session purge and host reacquisition. A changed work manifest requires a new type version and ID. Reserving a resource or changing its lifecycle advances the owning session's graph revision, including when a grant parent's lifecycle changes. Repeating the same lifecycle preserves the graph revision.
+
 ## Provider contract
 
 `PersistenceProvider` exposes `registrations`, `sessions`, `work`, optional
 `durability`, and one `dispose()` method. Its repositories share a logical store
-and ownership scope. The P0 PostgreSQL and advanced example providers accept
-session and resource writes through an acquired `DurableHost`. Both reject
-URI-only session mutations, work submissions and lease commands.
+and ownership scope. An acquired `DurableHost` provides session, resource and
+work operations over one store. Its `work` port submits immutable intent,
+replaces data by revision and settles an exact lease. The provider-level legacy
+ports reject URI-only session and work mutations.
 
 `createPersistence(provider)` returns managed repository facades. Each call
 passes one repository operation through the shared lifecycle; it does not split
@@ -59,8 +65,8 @@ irrelevant, while array order remains significant.
 
 ## Registration quotas
 
-The registration repository resolves one durable identity for each principal
-and agent key. Providers used with registration quotas enforce them during
+The registration repository resolves one durable identity for each trusted domain,
+principal and agent key. Providers used with registration quotas enforce them during
 `register`. The PostgreSQL provider defaults to 128 per principal and 4,096
 total. Existing keys retain their IDs and allow display-name updates at
 capacity. A new key above quota returns a repository conflict. Use consistent
@@ -96,7 +102,7 @@ allowed-kind checks remain with their callers.
 
 The PostgreSQL provider owns a pool for registration operations and work reads. Each acquired
 host retains a dedicated advisory-lock connection and a separate pool for session
-and resource transactions. Both pools allow five seconds for checkout and
+and resource transactions, canonical work reads and work writes. Both pools allow five seconds for checkout and
 configure PostgreSQL to terminate a statement or an idle transaction after
 30 seconds. Registration writes check the current ownership epoch before their
 quota check and upsert. [PostgreSQL adapter](helpers/adapters/postgres/README.md)
@@ -112,9 +118,9 @@ and retains terminal rows until purge. [Session recovery](../sessions/README.md)
 
 Routine tests exercise the advanced example provider, the historical URI-only
 work fixture, and PostgreSQL query doubles. The opt-in PostgreSQL 17 runner
-exercises migration 0003, ownership takeover, blocked registration shutdown,
-concurrent resource writes, exact-instance retirement, purge, and public host
-recovery on a disposable database.
+exercises migrations 0003 and 0004, ownership takeover, blocked registration shutdown,
+concurrent resource writes, exact-instance retirement, purge, public host recovery,
+deferred positive-scope constraints, replay at full quota and atomic fenced settlement.
 
 | Test | Pins |
 | ---- | ---- |

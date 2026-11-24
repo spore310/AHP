@@ -3,6 +3,7 @@ import type { SessionConfigSchema } from "@microsoft/agent-host-protocol";
 import type { SessionConfigContract } from "@sessions/types";
 import type { SessionTypePolicyRegistration } from "@sessions/helpers/creation/types";
 import type { ToolContractDefinition, ToolContractRef } from "@tools";
+import type { WorkKindDescriptor, WorkKindRegistration } from "@work/helpers/definitions/types";
 
 /** Exact session-type revision. There is no latest resolver. */
 export interface SessionTypeRef {
@@ -18,10 +19,12 @@ export interface SessionTypeDefinition {
   readonly providerId: string;
   readonly configSchema: SessionConfigSchema;
   readonly tools: readonly ToolContractRef[];
+  readonly work?: readonly WorkKindDescriptor[];
 }
 
 /** Code registration that binds a definition to its parser. */
 export interface ApplicationSessionType {
+  readonly work?: readonly WorkKindRegistration[];
   readonly policy?: SessionTypePolicyRegistration;
   readonly definition: SessionTypeDefinition;
   readonly config: SessionConfigContract;
@@ -29,6 +32,7 @@ export interface ApplicationSessionType {
 }
 
 export interface ResolvedSessionType {
+  readonly work?: readonly WorkKindRegistration[];
   readonly policy?: SessionTypePolicyRegistration;
   readonly definition: SessionTypeDefinition;
   readonly tools: readonly ToolContractDefinition[];

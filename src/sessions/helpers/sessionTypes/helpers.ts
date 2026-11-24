@@ -1,4 +1,5 @@
 import { SESSION_TYPE_KEY_PATTERN } from "@sessions/constants";
+import { captureWorkKinds } from "@work/helpers/definitions";
 import { captureCreationPolicy, freezeCreation } from "@sessions/helpers/creation";
 import {
   MAX_CONTRACT_VERSION,
@@ -36,7 +37,9 @@ export function createSessionTypeCatalogue(
   const seenIds = new Set<string>();
 
   for (const registration of options.types) {
+    const { work, descriptors } = captureWorkKinds(registration.work, registration.definition.work);
     const definition = captureDefinition(registration.definition);
+    const withWork = work.length > 0 || registration.definition.work !== undefined;
     assertIdentity(definition);
     if (typeof registration.enabledForCreation !== "boolean") throw new SessionTypeError("invalid-definition", "Invalid creation enablement.");
     if (seenIds.has(definition.id)) {
@@ -49,7 +52,8 @@ export function createSessionTypeCatalogue(
     const tools = resolveTools(options.tools, definition.tools);
     seenIds.add(definition.id);
     byIdentity.set(identity, {
-      definition,
+      definition: withWork ? { ...definition, work: descriptors } : definition,
+      ...(withWork ? { work } : {}),
       tools,
       config: Object.freeze({ schema: freezeCreation(structuredClone(registration.config.schema)), parse: registration.config.parse.bind(registration.config) }),
       ...(registration.policy === undefined ? {} : { policy: captureCreationPolicy(registration.policy) }),
@@ -69,6 +73,7 @@ export function createSessionTypeCatalogue(
       definition: structuredClone(found.definition),
       tools: found.tools.map((tool) => structuredClone(tool)),
       config: found.config,
+      ...(found.work ? { work: found.work } : {}),
       ...(found.policy === undefined ? {} : { policy: found.policy }),
       enabledForCreation: found.enabledForCreation,
     };
@@ -146,6 +151,7 @@ function identityKey(definition: Pick<SessionTypeDefinition, "key" | "version">)
 }
 
 interface StoredSessionType {
+  readonly work?: ApplicationSessionType["work"];
   readonly policy?: ApplicationSessionType["policy"];
   readonly definition: SessionTypeDefinition;
   readonly tools: readonly ToolContractDefinition[];

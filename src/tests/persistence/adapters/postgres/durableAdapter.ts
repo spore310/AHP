@@ -25,7 +25,7 @@ export async function testDurableAdapter(url: string, sql: Pool): Promise<void> 
   try {
     const stamp = new Date().toISOString();
     const session: ResourceRef<"session"> = { domainId: "domain", kind: "session", id: "ahp-session:/p0", instanceId: randomUUID() };
-    const record: StoredSession = { ref: session, type: { id: randomUUID(), key: "p0", version: 1 }, providerId: "p0", owner: "owner",
+    const record: StoredSession = { ref: session, type: { id: randomUUID(), key: "p0", version: 1, workManifest: [{ kind: "review", maxAttempts: 3 }] }, providerId: "p0", owner: "owner",
       lifecycle: "creating", state: {}, stateRevision: "1", graphRevision: "1", lastServerSeq: 0, createdAt: stamp, modifiedAt: stamp };
     const root: ResourceRecord = { ref: session, session, driver: { key: "p0", version: 1 }, providerId: "p0", owner: "owner",
       lifecycle: "creating", operationId: randomUUID(), registration: {}, recoveryInput: {}, runtimeMetadata: {}, data: {},
@@ -75,6 +75,8 @@ export async function testDurableAdapter(url: string, sql: Pool): Promise<void> 
     const other = await child("other");
     const nested = await child("grant-child", parent);
     const elsewhere = { ...session, id: "ahp-session:/other", instanceId: randomUUID() };
+    await deniesBeforeWrite(() => host.sessions.reserve({ ...record, ref: elsewhere, type: { ...record.type, workManifest: [] } },
+      { ...root, ref: elsewhere, session: elsewhere, operationId: randomUUID() }, yes));
     await host.sessions.reserve({ ...record, ref: elsewhere }, { ...root, ref: elsewhere, session: elsewhere, operationId: randomUUID() }, yes);
     const fresh = { ...root, ref: { ...parent, id: "new", instanceId: "new-instance" }, operationId: randomUUID() };
     await assert.rejects(host.resources.reserve({ ...fresh, parent: fresh.ref }, yes));
@@ -145,17 +147,22 @@ export async function testDurableAdapter(url: string, sql: Pool): Promise<void> 
     assert.equal((await host.sessions.get(session))?.stateRevision, "2");
 
     const agent = randomUUID();
-    await sql.query("INSERT INTO agent_registrations (id,principal_subject,agent_key) VALUES ($1,'work-owner','fixture')", [agent]);
+    await sql.query("INSERT INTO agent_registrations (id,domain_id,principal_subject,agent_key,execution_epoch) VALUES ($1,$2,'work-owner','fixture',1)", [agent, session.domainId]);
     async function work(key: string, ref: ResourceRef, status: string, purpose = "scope", include = true): Promise<string> {
-      const result = await sql.query<{ id: string }>(`INSERT INTO work_items
-        (session_instance_id,domain_id,request_key,kind,input,status,lease_agent_id,lease_token,lease_expires_at,attempt_count)
-        VALUES ($1,$2,$3,'fixture','{}',$4,CASE WHEN $4 = 'leased' THEN $5::uuid END,
-          CASE WHEN $4 = 'leased' THEN gen_random_uuid() END,CASE WHEN $4 = 'leased' THEN now() END,
-          CASE WHEN $4 = 'leased' THEN 1 ELSE 0 END) RETURNING id`, [session.instanceId, session.domainId, key, status, agent]);
+      const result = await sql.query<{ id: string }>(`WITH added AS (
+        INSERT INTO work_items(session_instance_id,domain_id,request_key,kind,input,status,submitted_by_kind,submitted_by_subject,
+          result,lease_agent_id,lease_token,lease_execution_epoch,lease_expires_at,attempt_count)
+        VALUES ($1,$2,$3,'fixture','{}',$4,'user','owner',CASE WHEN $4='completed' THEN '{}'::jsonb END,
+          CASE WHEN $4='leased' THEN $5::uuid END, CASE WHEN $4='leased' THEN gen_random_uuid() END,
+          CASE WHEN $4='leased' THEN 1 END, CASE WHEN $4='leased' THEN now() END, CASE WHEN $4='leased' THEN 1 ELSE 0 END)
+        RETURNING id)
+        INSERT INTO work_resource_selections(work_id,session_instance_id,domain_id,purpose,resource_pk,include,include_descendants)
+        SELECT added.id,$1,$2,CASE WHEN resource.instance_id=$6 THEN $7 ELSE 'scope' END,resource.resource_pk,
+          CASE WHEN resource.instance_id=$6 THEN $8 ELSE true END,true
+        FROM added, canonical_resources resource WHERE resource.session_instance_id=$1 AND
+          (resource.instance_id=$6 OR (($7<>'scope' OR NOT $8) AND resource.kind='session')) RETURNING work_id AS id`,
+      [session.instanceId, session.domainId, key, status, agent, ref.instanceId, purpose, include]);
       assert.ok(result.rows[0]);
-      await sql.query(`INSERT INTO work_resource_selections (work_id,session_instance_id,domain_id,purpose,resource_pk,include,include_descendants)
-        SELECT $1,session_instance_id,domain_id,$2,resource_pk,$3,true FROM canonical_resources WHERE session_instance_id=$4 AND instance_id=$5`,
-      [result.rows[0].id, purpose, include, session.instanceId, ref.instanceId]);
       return result.rows[0].id;
     }
     await work("queued", nested, "queued");
