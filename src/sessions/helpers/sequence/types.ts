@@ -7,6 +7,11 @@
  */
 export interface ActionSequence {
   seed?(checkpoint: number): void;
+  /**
+   * Obtains up to `count` values for the next ordered write when allocation is
+   * owned by shared storage. Later `next()` calls return them synchronously.
+   */
+  reserve?(count: number): Promise<void>;
   next(): number;
   current(): number;
 }

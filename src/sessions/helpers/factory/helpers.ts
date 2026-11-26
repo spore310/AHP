@@ -217,16 +217,56 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
       }, 5000);
     });
     pendingWrites++;
-    const result = writeTail.then(() => {
+    const result = writeTail.then(async () => {
       clearTimeout(expire);
       if (!durable.isOpen() || !waiting) throw new Error("State write unavailable.");
       waiting = false;
+      // A shared store owns allocation. Values are obtained inside the ordered
+      // slot so a later slot on this host can never publish a lower value.
+      if (sequence.reserve) await sequence.reserve(2);
+      if (!durable.isOpen()) throw new Error("State write unavailable.");
       return run();
     });
     writeTail = result.then(() => undefined, () => undefined).finally(() => {
       pendingWrites--;
     });
     return Promise.race([result, expired]);
+  }
+
+  let recovering: Promise<readonly string[]> | undefined;
+  let recoverAgain = false;
+  const shouldRecoverAgain = (): boolean => recoverAgain && !disposing;
+  /** Single-flight for every caller: one session is never restored twice concurrently. */
+  function recoverOwned(): Promise<readonly string[]> {
+    if (disposing || !durable) return Promise.reject(new SessionsDisposingError());
+    if (recovering !== undefined) {
+      recoverAgain = true;
+      return recovering;
+    }
+    const run = (async (): Promise<readonly string[]> => {
+      const restored: string[] = [];
+      do {
+        recoverAgain = false;
+        let announced = 0;
+        try {
+          await durable.recoverOwned((record) => {
+            // Announced as each session is restored, so a pass that ends with a failure still publishes them.
+            dependencies.emitCatalogueNotification({ method: "root/sessionAdded", params: { channel: ROOT_CHANNEL_URI, summary: buildSessionSummary(record) } });
+            restored.push(record.sessionUri);
+            announced += 1;
+          });
+        } finally {
+          if (announced > 0) emitActiveSessionsChanged();
+        }
+      } while (shouldRecoverAgain());
+      return restored;
+    })();
+    recovering = run;
+    const clear = (): void => {
+      if (recovering === run) recovering = undefined;
+    };
+    run.then(clear, clear);
+    return run;
   }
 
   const dispose = (): Promise<void> => {
@@ -364,6 +404,30 @@ export function createSessionsFactory(options: SessionsFactoryOptions): Sessions
             publish(nextServerSeq());
             return Promise.resolve();
           }),
+          flush: () => writeTail,
+          recoverOwned,
+          async transfer(sessionUri: string, toHostId: string) {
+            if (disposing) throw new SessionsDisposingError();
+            const record = sessions.get(sessionUri);
+            const ref = record?.resource;
+            if (record === undefined || ref === undefined) throw new SessionsError(AhpErrorCodes.SessionNotFound, `Session not found: ${sessionUri}`);
+            // Local authority and handles are withdrawn first: after the durable
+            // change this host can no longer write, and before it nothing is lost.
+            const progress = { withdrawn: false };
+            try {
+              // Queued behind this session's admitted writes. Once it is withdrawn nothing else can write it.
+              const move = await ordered(() => durable.relocate(record, toHostId, () => {
+                progress.withdrawn = true;
+                dependencies.emitCatalogueNotification({ method: "root/sessionRemoved", params: { channel: ROOT_CHANNEL_URI, session: sessionUri } });
+                emitActiveSessionsChanged();
+              }));
+              await move();
+            } catch (error) {
+              // Whatever failed after the withdrawal, this host is still the owner: restore the session here.
+              if (progress.withdrawn) await recoverOwned().catch(() => undefined);
+              throw error;
+            }
+          },
         } }
       : {}),
     ...(managedTools === undefined ? {} : { managedTools }),

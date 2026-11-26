@@ -1,2 +1,2 @@
 export type { PoolClientLike, PoolLike, Queryable } from "./types";
-export { createPostgresPool, databaseFailure, toIso, uncertainCommit, withTransaction } from "./helpers";
+export { clientConfig, createPostgresPool, databaseFailure, toIso, uncertainCommit, withTransaction } from "./helpers";

@@ -7,7 +7,7 @@ import { withTransaction } from "@persistence/helpers/adapters/postgres/helpers/
 
 /** Run against the forward migrations, on an isolated schema with two P0 sessions and a child. */
 export async function testP1Schema(pool: Pool): Promise<void> {
-  const smoke = await readFile(new URL("../../../../../docs/plans/work/AHP_V1_Schema_Smoke.sql", import.meta.url), "utf8");
+  const smoke = await readFile(new URL("../../../../../docs/archive/plans/ahp-v1/AHP_V1_Schema_Smoke.sql", import.meta.url), "utf8");
   const fixture = await pool.connect();
   try {
     await fixture.query(smoke);

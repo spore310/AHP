@@ -9,9 +9,9 @@ PostgreSQL implements the production storage adapter.
 
 | File | Responsibility |
 | ---- | -------------- |
-| `helpers/durability/types.ts` | Exact session/resource records, data CAS, lifecycle operations and host lease. |
+| `helpers/durability/types.ts` | Exact session/resource records, data CAS, lifecycle operations, host lease, membership claim and the `HostCoordination` port. |
 | `helpers/durability/workTypes.ts` | Work intent, internal records, lease fences and the owned repository. |
-| `helpers/durability/workPages.ts` | Ordered per-session work keys and bounded finite pages in memory. |
+| `helpers/durability/workPages.ts` | Ordered per-session work keys and bounded finite pages in memory. One index per store, shared by every host that acquires it. |
 | `helpers/durability/workFences.ts` | Synchronous readers tied to the acquired host, exact session lifecycle and work revision. |
 | `helpers/durability/workEvents.ts` | Publishes confirmed work revisions after invalidation, including lease expiry and retirement cancellation. |
 | `helpers/durability/workIntent.ts` | Canonical work capture and structural replay equality. |
@@ -19,7 +19,7 @@ PostgreSQL implements the production storage adapter.
 | `helpers/durability/memoryScheduling.ts` | In-memory candidate ordering, identity-wide capacity, lease renewal and bounded exhaustion. |
 | `helpers/durability/scheduling.ts` | Shared preparation bounds and synchronous admission against exact, detached session and work records. |
 | `helpers/durability/helpers.ts` | Bounded data capture, resource identities and graph order. |
-| `helpers/durability/memory.ts` | Single-owner in-memory lifetime, revisions and retirement transactions. |
+| `helpers/durability/memory.ts` | In-memory lifetime, revisions and retirement transactions, with the same membership, per-session ownership, revocation and sequence transitions as the PostgreSQL adapter. |
 | `types.ts` | Repository ports, plain DTOs, `PersistenceProvider`, and `RepositoryError`. |
 | `index.ts` | Neutral public exports: ports, `createPersistence`, portable-text helpers, and `RepositoryError`. |
 | `helpers/provider/` | Composes repository facades under one lifecycle and disposer. |

@@ -82,9 +82,94 @@ export interface DurableHost {
   readonly serverSeq: number;
   readonly sessions: DurableSessionRepository;
   readonly resources: DurableResourceRepository;
+  /** Present when the storage adapter supports namespace membership and per-session ownership. */
+  readonly coordination?: HostCoordination;
   isOpen(): boolean;
   release(): Promise<void>;
 }
 export interface DurableStorage {
-  acquire(hostId: string, onLost: () => void): Promise<DurableHost>;
+  /** Without a claim the store must be exclusive and the host is its only logical owner. */
+  acquire(hostId: string, onLost: () => void, claim?: HostClaim): Promise<DurableHost>;
+}
+
+/** One runtime instance of a logical host, as recorded by the coordination store. */
+export interface HostMember {
+  readonly hostId: string;
+  readonly instanceId: string;
+  /** Unique per join. A restarted instance never reuses an earlier generation. */
+  readonly generation: Revision;
+  readonly role: "standby" | "active" | "draining";
+  readonly endpoint?: string;
+  readonly capabilities: JsonObject;
+  readonly policyRevision: number;
+}
+/** Identifier-only durable namespace event. Never carries inputs, results or credentials. */
+export interface HostEvent {
+  readonly eventId: string;
+  readonly topic: "work" | "ownership" | "authority" | "membership";
+  readonly kind: string;
+  readonly originHostId?: string;
+  readonly session?: ResourceRef<"session">;
+  readonly entityId?: string;
+  readonly revision?: Revision;
+  readonly occurredAt: string;
+}
+/** A reset tells a consumer that retained events were skipped and it must reconcile from state. */
+export type HostEventDelivery = { readonly type: "event"; readonly event: HostEvent } | { readonly type: "reset" };
+export interface SessionLocation {
+  readonly session: ResourceRef<"session">;
+  readonly hostId: string;
+  readonly ownershipEpoch: Revision;
+  readonly lifecycle: Lifecycle;
+}
+/**
+ * Trusted host membership claim presented when a logical host acquires a store.
+ * Every field comes from application configuration. A claim is not a credential.
+ */
+export interface HostClaim {
+  /** Canonical namespace the store must already be bound to, or is bound to on first use. */
+  readonly namespaceId: string;
+  readonly instanceId: string;
+  /** Shared stores let several logical hosts own disjoint sessions. */
+  readonly shared: boolean;
+  readonly policy: { readonly revision: number; readonly digest: string };
+  readonly credentialId?: string;
+  readonly endpoint?: string;
+  readonly capabilities?: JsonObject;
+  /** Upper bound on live instances of this logical host, including standbys. */
+  readonly maxInstances?: number;
+  /** Membership lease lifetime measured by the store's clock. */
+  readonly leaseMs?: number;
+  /** When present a replica waits for the lease as a standby instead of failing. */
+  readonly standby?: { readonly signal: AbortSignal; readonly retryMs?: number; onStandby?(): void };
+  /** An authoritative revocation was observed. The host must drop cached authority, then acknowledge. */
+  readonly onAuthorityRevoked?: (revision: number) => void;
+}
+/** Namespace coordination available to an acquired host. Portable across storage adapters. */
+export interface HostCoordination {
+  readonly namespaceId: string;
+  readonly hostId: string;
+  readonly instanceId: string;
+  readonly generation: Revision;
+  readonly shared: boolean;
+  members(): Promise<readonly HostMember[]>;
+  /** True only for the exact live generation. A restarted or expired instance is rejected. */
+  isCurrentMember(hostId: string, instanceId: string, generation: Revision): Promise<boolean>;
+  setRole(role: "active" | "draining"): Promise<void>;
+  locate(target: { readonly sessionUri: string } | { readonly workId: string }): Promise<SessionLocation | undefined>;
+  /** Sessions this logical host owns, in exact-instance order. */
+  listOwned(after?: string): Promise<readonly StoredSession[]>;
+  /** Moves one owned session to another live member. The old owner is fenced by the same commit. */
+  transfer(session: ResourceRef<"session">, toHostId: string): Promise<void>;
+  /** Logical hosts that still own sessions but have no live instance. */
+  orphanedOwners(): Promise<readonly string[]>;
+  /** Takes over the sessions of a logical host whose lease is provably free. */
+  adopt(fromHostId: string, limit?: number): Promise<readonly SessionLocation[]>;
+  authorityRevision(): number;
+  /** Durable namespace-wide revocation. Later fenced transactions fail until each host acknowledges. */
+  revokeAuthority(): Promise<number>;
+  acknowledgeAuthority(revision: number): void;
+  /** Globally increasing native sequence values for a shared store. */
+  allocateServerSeq(count: number): Promise<readonly number[]>;
+  subscribeEvents(listener: (delivery: HostEventDelivery) => void): () => void;
 }

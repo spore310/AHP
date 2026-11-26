@@ -35,9 +35,9 @@ export const createPostgresPersistenceProvider = async (
   });
   const pending = new Set<Promise<DurableHost>>();
   const durability: DurableStorage = {
-    async acquire(hostId, onLost) {
+    async acquire(hostId, onLost, claim) {
       if (disposal) throw new Error("The durable storage provider is closed.");
-      const acquisition = store.acquire(hostId, onLost);
+      const acquisition = store.acquire(hostId, onLost, claim);
       pending.add(acquisition);
       try {
         const host = await acquisition;

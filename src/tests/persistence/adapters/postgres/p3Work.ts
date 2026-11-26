@@ -239,7 +239,7 @@ async function checkOrdering(host: DurableHost, sql: Pool, register: Register) {
   assert.equal((await host.work.inspect(f.ref.domainId, urgent))?.row.attemptCount, 1);
   assert.equal((await host.work.claimPrepared({ ...one, candidates: one.candidates.filter((r) => r.id === urgent) }, yes)).status, "changed");
 }
-async function checkDeadline(host: DurableHost, peer: DurableWorkRepository, sql: Pool, register: Register, wait: Barrier) {
+export async function checkDeadline(host: DurableHost, peer: DurableWorkRepository, sql: Pool, register: Register, wait: Barrier) {
   const f = await schedulingFixture(host, register);
   const id = await f.submit(1000);
   await f.submit(1);

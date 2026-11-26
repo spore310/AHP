@@ -34,6 +34,38 @@ export function createActionSequence(start = 1): ActionSequence {
 }
 
 /**
+ * Creates a sequence whose values are allocated by shared storage.
+ *
+ * Several hosts publish into one namespace, so no process may invent a value.
+ * `reserve()` runs inside an ordered write and obtains fresh values that are
+ * greater than every value any host obtained earlier; `next()` hands them out
+ * synchronously. Unused values become gaps, which recipients already tolerate.
+ */
+export function createReservedActionSequence(allocate: (count: number) => Promise<readonly number[]>): ActionSequence {
+  let current = 0;
+  let reserved: number[] = [];
+  return {
+    seed(checkpoint) {
+      if (!Number.isSafeInteger(checkpoint) || checkpoint < 0) throw new Error("Invalid durable sequence checkpoint.");
+      if (checkpoint > current) current = checkpoint;
+    },
+    async reserve(count) {
+      reserved = [];
+      const values = [...await allocate(count)];
+      if (values.some((value, index) => !Number.isSafeInteger(value) || value <= (index === 0 ? current : values[index - 1] ?? 0))) throw new Error("Invalid server sequence.");
+      reserved = values;
+    },
+    next: (): number => {
+      const value = reserved.shift();
+      if (value === undefined || value <= current) throw new Error("Server sequence unavailable.");
+      current = value;
+      return value;
+    },
+    current: (): number => current,
+  };
+}
+
+/**
  * Creates a monotonic sequence allocator.
  *
  * Compatibility wrapper over {@link createActionSequence}: each call allocates

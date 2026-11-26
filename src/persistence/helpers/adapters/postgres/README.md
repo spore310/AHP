@@ -16,8 +16,10 @@ contract and do not inspect this adapter.
 | `helpers/connection/helpers.ts` | Pool creation, same-client transactions, timestamp conversion, and private SQLSTATE mapping. |
 | `helpers/connection/index.ts` | Connection helper boundary for sibling adapter modules. |
 | `helpers/ownership/index.ts` | Adapter-private ownership entry point. |
-| `helpers/ownership/types.ts` | Acquired ownership, sequence checkpoint and transaction lock capability. |
-| `helpers/ownership/helpers.ts` | Dedicated advisory-lock connection, takeover epoch and loss notification. |
+| `helpers/ownership/types.ts` | Acquired ownership, sequence checkpoint, transaction fence, authority revision and event subscription. |
+| `helpers/ownership/helpers.ts` | Namespace join, membership lease and heartbeat, per-host advisory lease, takeover epoch, standby wait, loss notification and the durable event reader. |
+| `helpers/coordination/index.ts` | Coordination entry point. |
+| `helpers/coordination/helpers.ts` | Member listing, session location, transfer, adoption, namespace revocation and shared sequence allocation. |
 | `helpers/resources/index.ts` | Durable storage factory. |
 | `helpers/durableWork/helpers.ts` | Exact-instance work submissions, quota serialization, epoch-fenced data writes and atomic settlement. |
 | `helpers/durableWork/rows.ts` | Internal work records, selector hydration, lease samples and exact-session work pages with microsecond timestamp/UUID keys. |
@@ -47,11 +49,72 @@ discards its client and preserves the original transaction error. Provider dispo
 drains and closes its resources.
 
 Applications using durable sessions independently can construct
-`createPostgresDurableStorage({ connectionString, maxConnections? })`.
+`createPostgresDurableStorage({ connectionString, maxConnections?, schema? })`.
 Acquire it once per host with a stable store ID. Startup refuses a concurrent
-owner or a different ID for an initialized namespace. A connection loss
-closes admission and invokes the host's loss callback. A replacement owner
-waits for transactions admitted under the prior epoch.
+owner of the same host ID, and a different ID in an exclusive store. A
+connection loss closes admission and invokes the host's loss callback. A
+replacement owner waits for transactions admitted under the prior epoch.
+
+## Host coordination
+
+Migration `0005_host_coordination` adds namespace binding, membership, a lease
+per logical host, per-session ownership and a durable event table.
+
+- `schema` selects the PostgreSQL schema that holds one namespace's store. It
+  is validated as a lowercase identifier and comes from trusted configuration.
+- `acquire(hostId, onLost, claim?)` joins the namespace as one instance, then
+  takes that host's lease. Without a claim the store must be exclusive.
+- A join checks the namespace binding, the store mode, the policy revision and
+  digest, duplicate instances and the instance limit in one transaction.
+- The lease is a session-level advisory lock keyed by the host's `lease_slot`.
+  Activation advances `ownership_epoch` after prior admitted transactions end.
+- Membership liveness uses the database clock. The owner renews at one third
+  of the lease. A row that expired, a superseded policy revision, or a local
+  renew deadline closes admission and reports loss.
+- Every fenced transaction locks its host row at the acquired epoch, takes a
+  share lock on the namespace row, and fails while an unacknowledged
+  revocation exists. A revocation updates that row, so it waits for
+  transactions that were already admitted.
+- A locked session read admits only the owning host. `sessions_owner_fence`
+  rejects any other write to a session row, including direct SQL.
+- `transfer` moves one session under its exclusive row lock. `adopt` requires
+  the previous owner's lease to be free and its membership expired, advances
+  that owner's epoch, then moves only sessions whose provider the adopter
+  declares.
+- Locks are taken in one order: the caller's host row, the namespace row,
+  the session row, the registration row, work rows. A revocation takes the
+  host row and then the namespace row exclusively. Competing transfer,
+  retirement and revocation therefore queue and do not deadlock.
+- Adoption never waits on another host's row. It tests the previous owner's
+  lease without waiting and locks that owner's row with `NOWAIT`. If anything
+  still holds the row the adoption is refused and tried again later, so a
+  transaction a dead owner left open cannot stall the adopter's own writes.
+- A bound namespace row cannot be renamed, truncated or inserted directly,
+  and cannot be deleted while the store has unretired sessions, queued or
+  leased work, or live members. `ahp_recreate_namespace` binds an emptied
+  store again and invalidates every earlier epoch and membership. These
+  guards act on their own schema whatever the caller's `search_path` is. A
+  deletion and a recreation take the join lock before the namespace row, in
+  the same order as a joining host, and are refused outside read committed.
+- Statements on the retained ownership connection (heartbeat, event reads,
+  pruning, role changes) are queued in the adapter, one at a time. Once
+  ownership has ended, only the statements that end it are still issued.
+- Shared stores allocate native sequence values from `host_server_seq`.
+- `host_events` rows are written in the transaction they describe. Work rows
+  record theirs through a trigger. Readers advance by transaction id below
+  the snapshot horizon, so a lower identifier that commits late is not
+  skipped. `LISTEN` is a wakeup; polling every `eventPollMs` is the fallback.
+  More than 512 pending rows, or retention past the reader's position,
+  delivers a reset. Each host removes events older than `eventRetentionMs`
+  (15 minutes by default) and records how far it pruned.
+
+A pre-0005 binary cannot acquire a migrated store: `host_state_guard` refuses
+its acquisition statement. Apply the migration only after stopping every
+existing host; it refuses to run while one holds the store.
+
+Each host uses one retained ownership connection plus its transaction pool.
+The registration and work-read pool is separate. Budget
+`hosts x (1 + maxConnections) + registration pool` connections.
 
 Pool and transaction types never cross the shared provider contract. SQLSTATE
 codes and PostgreSQL row types remain private here. Canonical schema DDL stays

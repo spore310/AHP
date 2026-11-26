@@ -14,6 +14,16 @@ import type { WorkStatus } from "@persistence/types";
 export interface PostgresOptions {
   readonly connectionString: string;
   readonly maxConnections?: number;
+  /**
+   * PostgreSQL schema holding this namespace's logical store. Trusted
+   * configuration only: it is validated as a plain lowercase identifier and
+   * never derived from request input. Defaults to the connection's search path.
+   */
+  readonly schema?: string;
+  /** Fallback interval for reading durable namespace events when a wakeup is missed. */
+  readonly eventPollMs?: number;
+  /** How long durable namespace events are kept. A reader further behind receives a reset. Defaults to 15 minutes. */
+  readonly eventRetentionMs?: number;
 }
 
 /**

@@ -259,6 +259,12 @@ export interface SessionsFactory {
     start(onLost?: () => void): Promise<void>;
     /** Schedule a trusted post-commit hint in the native host publication order. */
     publishWorkReady(publish: (serverSeq: number) => void): Promise<void>;
+    /** Resolves once every ordered write queued so far has committed and published. */
+    flush(): Promise<void>;
+    /** Restores sessions this host owns that are not live, and returns their URIs. */
+    recoverOwned(): Promise<readonly string[]>;
+    /** Withdraws a live session locally, then moves its durable ownership to another host. */
+    transfer(sessionUri: string, toHostId: string): Promise<void>;
     inspect(): readonly { readonly session: StoredSession["ref"]; readonly reason: string }[];
     purge(session: ResourceRef<"session">, retainAfter: string): Promise<boolean>;
   };

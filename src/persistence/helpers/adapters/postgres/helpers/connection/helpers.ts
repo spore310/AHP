@@ -5,10 +5,21 @@ import { RepositoryError } from "@persistence/types";
 import type { PoolClientLike, PoolLike } from "./types";
 import type { PostgresOptions } from "../../types";
 
+/** Connection settings shared by pooled clients and the retained ownership client. */
+export const clientConfig = (options: PostgresOptions): { connectionString: string; options?: string } => {
+  const { schema, eventPollMs, eventRetentionMs } = options;
+  if ((schema !== undefined && !/^[a-z_][a-z0-9_]{0,62}$/u.test(schema))
+    || (eventRetentionMs !== undefined && (!Number.isSafeInteger(eventRetentionMs) || eventRetentionMs < 1_000 || eventRetentionMs > 604_800_000))
+    || (eventPollMs !== undefined && (!Number.isSafeInteger(eventPollMs) || eventPollMs < 10 || eventPollMs > 600_000))) {
+    throw new Error("Invalid PostgreSQL persistence options.");
+  }
+  return { connectionString: options.connectionString, ...(schema === undefined ? {} : { options: `-c search_path=${schema}` }) };
+};
+
 /** A queued checkout or a blocked transaction must eventually release host shutdown and takeover. */
 export const createPostgresPool = (options: PostgresOptions): Pool => {
   const pool = new Pool({
-    connectionString: options.connectionString,
+    ...clientConfig(options),
     max: options.maxConnections ?? 10,
     connectionTimeoutMillis: 5_000,
     statement_timeout: 30_000,

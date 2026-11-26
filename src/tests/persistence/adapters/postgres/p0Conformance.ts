@@ -1,3 +1,4 @@
+import { testHostCoordination } from "./hostCoordination";
 import { assertDurableResourceConformance } from "../../conformance/helpers";
 import { createPostgresDurableStorage } from "@persistence/helpers/adapters/postgres";
 import { testPublicLifecycle } from "./publicLifecycle";
@@ -27,7 +28,7 @@ import { assertRegistrationQuotaConformance } from "../../conformance/helpers";
 import { createPersistence } from "@persistence";
 import { createPostgresPersistenceProvider } from "@persistence/helpers/adapters/postgres";
 
-const migrations = ["0001_session_tool_baseline", "0002_agent_work", "0003_durable_session_resources", "0004_work_policy_scheduling"];
+const migrations = ["0001_session_tool_baseline", "0002_agent_work", "0003_durable_session_resources", "0004_work_policy_scheduling", "0005_host_coordination"];
 const migration = (name: string): Promise<string> => readFile(
   new URL(`../../../../../database/migrations/${name}.sql`, import.meta.url), "utf8",
 );
@@ -180,10 +181,11 @@ const ownership = async (url: string, first: Pool, second: Pool): Promise<void> 
       await owner.lock(old);
       const { rows: [transaction] } = await old.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
       assert.ok(transaction);
-      // Scope termination to our isolated schema's exact relation advisory lock.
+      // Scope termination to our isolated schema's exact logical-host lease: (lease slot, relation).
       const killed = await second.query<{ killed: boolean }>(`SELECT pg_terminate_backend(pid) AS killed FROM pg_locks
         WHERE locktype = 'advisory' AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
-        AND classid = 0 AND objid = 'host_state'::regclass::oid AND objsubid = 1 AND granted`);
+        AND classid = (SELECT lease_slot FROM host_state WHERE host_id = 'p0-conformance')::oid
+        AND objid = 'host_state'::regclass::oid AND objsubid = 1 AND granted`);
       assert.deepEqual(killed.rows, [{ killed: true }]);
       await Promise.race([lost.promise, setTimeout(5000, null, { ref: false }).then(() => assert.fail("Ownership loss did not close admission."))]);
       assert.equal(owner.isOpen(), false);
@@ -218,6 +220,48 @@ const ownership = async (url: string, first: Pool, second: Pool): Promise<void> 
   }
 };
 
+/** H2-09: 0005 keeps a populated P0–P5 store intact, attributes it to its one host and excludes pre-0005 writers. */
+const hostCoordinationUpgrade = async (first: Pool, second: Pool, upgrade: string): Promise<void> => {
+  const strip = (rows: Record<string, unknown>[]) => rows.map((row) => Object.fromEntries(Object.entries(row).filter(([column]) => column !== "owner_host_id" && column !== "ownership_epoch")));
+  const sessionsBefore = await first.query("SELECT * FROM sessions ORDER BY session_instance_id");
+  const resourcesBefore = await first.query("SELECT * FROM canonical_resources ORDER BY resource_pk");
+  assert.ok(sessionsBefore.rowCount && resourcesBefore.rowCount);
+  const client = await first.connect();
+  const legacy = await second.connect();
+  try {
+    await assert.rejects(client.query(upgrade), /cannot attribute existing sessions/);
+    await client.query("ROLLBACK");
+    await client.query("INSERT INTO host_state (host_id, ownership_epoch, server_seq) VALUES ('p0-conformance', 3, 0)");
+    // A pre-0005 owner retains this session lock for as long as it runs.
+    await legacy.query("SELECT pg_advisory_lock('host_state'::regclass::oid::bigint)");
+    await assert.rejects(client.query(upgrade), /every existing host of this store to be stopped/);
+    await client.query("ROLLBACK");
+    await legacy.query("SELECT pg_advisory_unlock_all()");
+    await client.query(upgrade);
+    const sessionsAfter = await client.query("SELECT * FROM sessions ORDER BY session_instance_id");
+    assert.deepEqual(strip(sessionsAfter.rows as Record<string, unknown>[]), sessionsBefore.rows);
+    assert.ok(sessionsAfter.rows.every((row: { owner_host_id: string; ownership_epoch: string }) => row.owner_host_id === "p0-conformance" && row.ownership_epoch === "1"));
+    assert.deepEqual((await client.query("SELECT * FROM canonical_resources ORDER BY resource_pk")).rows, resourcesBefore.rows);
+    assert.deepEqual((await client.query("SELECT namespace_id, store_mode, policy_revision::int AS revision FROM host_namespaces")).rows,
+      [{ namespace_id: null, store_mode: "exclusive", revision: 0 }]);
+    assert.deepEqual((await client.query("SELECT is_called FROM host_server_seq")).rows, [{ is_called: false }]);
+    // The exact acquisition statement of a pre-0005 binary is refused and leaves the epoch alone.
+    await assert.rejects(client.query(`INSERT INTO host_state (host_id, ownership_epoch) VALUES ($1, 1)
+      ON CONFLICT (host_id) DO UPDATE SET ownership_epoch = host_state.ownership_epoch + 1, updated_at = clock_timestamp()
+      RETURNING ownership_epoch::text AS epoch, server_seq::text AS seq`, ["p0-conformance"]), /host coordination protocol 2/);
+    assert.deepEqual((await client.query("SELECT ownership_epoch::int AS epoch FROM host_state")).rows, [{ epoch: 3 }]);
+    // Without a fenced host identity nobody can move or rewrite a session, even with direct SQL.
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('ahp.host_id','intruder',true)");
+    await assert.rejects(client.query("UPDATE sessions SET owner_host_id='intruder'"), /Only the current owning host/);
+    await client.query("ROLLBACK");
+  } finally {
+    await client.query("ROLLBACK").catch(() => undefined);
+    client.release();
+    legacy.release();
+  }
+};
+
 /** Run only against an explicitly supplied, migrated disposable PostgreSQL 17 database. */
 export const runP0PostgresConformance = async (input: string): Promise<void> => {
   const url = new URL(input);
@@ -230,7 +274,8 @@ export const runP0PostgresConformance = async (input: string): Promise<void> => 
     assert.equal(server.rows[0]?.version, 17);
     const schema = `p0_test_${randomUUID().replaceAll("-", "")}`;
     await admin.query(`CREATE SCHEMA ${schema}`);
-    url.searchParams.set("options", `-c search_path=${schema} -c statement_timeout=10000`);
+    // Raw fixtures act as the conformance host: 0005 attributes every session write to a fenced host identity.
+    url.searchParams.set("options", `-c search_path=${schema} -c statement_timeout=10000 -c ahp.host_id=p0-conformance`);
     const first = new Pool({ connectionString: url.href });
     const second = new Pool({ connectionString: url.href });
     try {
@@ -268,6 +313,7 @@ export const runP0PostgresConformance = async (input: string): Promise<void> => 
       } finally {
         client4.release();
       }
+      await hostCoordinationUpgrade(first, second, await migration("0005_host_coordination"));
       await testP1Schema(first);
       await ownership(url.href, first, second);
       const providerUrl = new URL(url);
@@ -322,5 +368,6 @@ if (process.argv[1]?.endsWith("p0Conformance.ts")) {
   const url = process.env.AHP_TEST_DATABASE_URL;
   assert.ok(url, "Set AHP_TEST_DATABASE_URL to a migrated, disposable loopback PostgreSQL 17 database.");
   await runP0PostgresConformance(url);
-  process.stdout.write("PostgreSQL 17 session, resource and work conformance passed with migrations 0001–0004.\n");
+  await testHostCoordination(url);
+  process.stdout.write("PostgreSQL 17 session, resource, work and host coordination conformance passed with migrations 0001–0005.\n");
 }

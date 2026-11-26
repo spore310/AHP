@@ -61,6 +61,13 @@ export interface AgentDirectory {
   registerPresence(principal: AuthenticatedPrincipal, key: string, connectionId: string,
     options?: { readonly displayName?: string; readonly current?: () => boolean; readonly requireExecutionEpoch?: boolean }): Promise<PresenceBinding>;
   setEnabled(agentId: string, enabled: boolean): Promise<AgentRegistrationRecord>;
+  /**
+   * Binds presence for a connection that another host relays on behalf of the
+   * socket's owning host. It never allocates an execution epoch: the claimed
+   * epoch must equal the durable registration's current one, so a copied or
+   * superseded epoch confers nothing.
+   */
+  attachPresence?(principal: AuthenticatedPrincipal, key: string, connectionId: string, executionEpoch: string): Promise<PresenceBinding>;
   register(
     principal: AuthenticatedPrincipal,
     agentKey: string,

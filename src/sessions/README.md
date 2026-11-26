@@ -9,7 +9,7 @@ It is **AHP-aware but transport-agnostic**: it speaks protocol parameters,
 action envelopes, and snapshots, but imports no network transport. A
 *provider* here means an **agent backend** (`SessionProvider`), not a
 client-connection adapter; see
-[`docs/plans/ProvidersPlan.md`](../../docs/plans/work/ProvidersPlan.md).
+[`docs/plans/ProvidersPlan.md`](../../docs/plans/ProvidersPlan.md).
 
 On a protected typed host, `sessions.durability` binds the live registry to a `DurableStorage` and stable `hostId`. Host startup acquires ownership and recovers exact session incarnations before listening. The provider supplies a versioned recovery codec, idempotent provisioning, restoration and retirement. A session type supplies fresh restoration approval and bindings. Inspect `host.sessions.durability.inspect()` for unavailable sessions. Shutdown releases process handles. Explicit retirement destroys provider resources in reverse dependency order, and trusted purge applies a retention cutoff.
 
@@ -422,7 +422,7 @@ returned canonical envelopes and do not reduce state.
   where sessions sit in the capability map.
 - [`docs/technical/runtime-lifecycles.md`](../../docs/technical/runtime-lifecycles.md)
   — session lifecycle and disposal semantics.
-- [`docs/plans/ProvidersPlan.md`](../../docs/plans/work/ProvidersPlan.md) — the
+- [`docs/plans/ProvidersPlan.md`](../../docs/plans/ProvidersPlan.md) — the
   intended backend/AHP wiring (target state).
 
 ## Protected resource views

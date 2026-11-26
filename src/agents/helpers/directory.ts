@@ -285,6 +285,37 @@ export const createAgentDirectory = (options: AgentDirectoryOptions): AgentDirec
       }
     },
 
+    async attachPresence(principal, agentKey, connectionId, executionEpoch) {
+      requireDomain(principal);
+      if (!domainId || !registrations.bindExecution) throw new AgentDirectoryError("unauthorized", "Execution registration unavailable.");
+      const key = registrationKey(principal.subject, agentKey);
+      if (pendingKeys.has(key) || pendingConnections.has(connectionId) || pendingOperations >= maxPending) throw registrationCapacity();
+      const reservation = { cancelled: false };
+      pendingOperations += 1;
+      pendingKeys.set(key, reservation);
+      pendingConnections.set(connectionId, reservation);
+      try {
+        // A fresh durable read: the cache of another host's binding proves nothing here.
+        const record = await register(principal, agentKey, undefined, true);
+        if (reservation.cancelled || !record.enabled || changing.has(record.id) || record.executionEpoch === undefined
+          || record.executionEpoch === "0" || record.executionEpoch !== executionEpoch) {
+          throw new AgentDirectoryError("unauthorized", "Agent registration is not available");
+        }
+        const present = liveBinding(record.id, now());
+        if (present) {
+          if (present.connectionId === connectionId && present.executionEpoch === executionEpoch) return directory.renewPresence(present) ?? present;
+          // A binding from an older generation is stale. One from this generation on another socket conflicts.
+          if (present.executionEpoch === executionEpoch) throw registrationCapacity();
+          removeBinding(present);
+        }
+        return install(record.id, principal, connectionId, executionEpoch);
+      } finally {
+        pendingOperations -= 1;
+        pendingKeys.delete(key);
+        pendingConnections.delete(connectionId);
+      }
+    },
+
     async setEnabled(agentId, enabled) {
       if (!domainId || !registrations.setEnabled || typeof enabled !== "boolean") throw new AgentDirectoryError("invalid", "Registration changes unavailable.");
       if (changing.has(agentId) || changing.size >= maxPending) throw registrationCapacity();

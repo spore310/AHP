@@ -6,6 +6,7 @@ import { canRetrySessionStart, captureRef, captureData } from "@persistence/help
 import type { Admission, DurableHost, DurableStorage, StoredSession, Transition } from "@persistence/helpers/durability/types";
 import { RepositoryError } from "@persistence/types";
 import { acquirePostgresOwnership, type PostgresOwnership } from "../ownership";
+import { createPostgresCoordination } from "../coordination";
 import { createPostgresPool, databaseFailure, uncertainCommit } from "../connection";
 import type { PostgresOptions, QueryableClient } from "../../types";
 import { admit, assertSessionRef, captureRecord, insertResource, lockReservation, reject, requireRow, resourceRow, resourceRows, sessionColumns, sessionRow } from "./rows/helpers";
@@ -43,13 +44,13 @@ export function createOwnedPostgresStorage(
   const { connectionString, maxConnections = 10 } = options;
   if (!connectionString || !Number.isSafeInteger(maxConnections) || maxConnections < 1) throw new Error("Invalid durable storage configuration.");
   return {
-    async acquire(hostId, onLost) {
-      const owner = await acquirePostgresOwnership(connectionString, hostId, onLost);
-      const pool = createPostgresPool({ connectionString, maxConnections });
+    async acquire(hostId, onLost, claim) {
+      const owner = await acquirePostgresOwnership(options, hostId, onLost, claim);
+      const pool = createPostgresPool({ ...options, maxConnections });
       let closing = false;
       let disposed: Promise<void> | undefined;
       const isOpen = (): boolean => !closing && owner.isOpen();
-      const tx: DurableTransaction = async (write, checkpoint = false) => {
+      const tx: DurableTransaction = async (write, checkpoint = false, namespace = true) => {
         if (!isOpen()) reject();
         const client = await pool.connect().catch((error: unknown) => {
           throw databaseFailure(error);
@@ -58,7 +59,7 @@ export function createOwnedPostgresStorage(
         const disconnected = (): boolean => discard;
         try {
           await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
-          await owner.lock(client, checkpoint);
+          await owner.lock(client, checkpoint, namespace);
           if (!isOpen()) reject();
           const result = await write(client);
           if (!isOpen()) reject();
@@ -134,7 +135,7 @@ export function createOwnedPostgresStorage(
       }
       const host: DurableHost = {
         work: createPostgresDurableWork(tx, authorize, owner.epoch),
-        epoch: owner.epoch, serverSeq: owner.serverSeq, isOpen,
+        epoch: owner.epoch, serverSeq: owner.serverSeq, isOpen, coordination: createPostgresCoordination(owner, tx, read),
         release() {
           closing = true;
           disposed ??= pool.end().finally(() => owner.release());
@@ -165,11 +166,11 @@ export function createOwnedPostgresStorage(
                 ON CONFLICT DO NOTHING`, [session.type.id, session.type.key, session.type.version, session.providerId, manifest]);
               }
               const added = await client.query(`INSERT INTO sessions (session_instance_id,session_uri,domain_id,provider_id,session_type_id,
-                owner_principal_subject,durable_state,created_at,modified_at,last_server_seq)
-                SELECT $1,$2,$3,$4,t.id,$6,$7::jsonb,$8,$9,$10 FROM session_types t
+                owner_principal_subject,durable_state,created_at,modified_at,last_server_seq,owner_host_id)
+                SELECT $1,$2,$3,$4,t.id,$6,$7::jsonb,$8,$9,$10,$14 FROM session_types t
                 WHERE t.id=$5 AND t.type_key=$11 AND t.version=$12 AND t.provider_id=$4 AND t.work_manifest=$13::jsonb`,
               [session.ref.instanceId, session.ref.id, session.ref.domainId, session.providerId, session.type.id, session.owner,
-                JSON.stringify(session.state), session.createdAt, session.modifiedAt, session.lastServerSeq, session.type.key, session.type.version, manifest]);
+                JSON.stringify(session.state), session.createdAt, session.modifiedAt, session.lastServerSeq, session.type.key, session.type.version, manifest, hostId]);
               if (added.rowCount !== 1) reject();
               await insertResource(client, row);
             });
@@ -179,8 +180,9 @@ export function createOwnedPostgresStorage(
             return read((db) => sessionRow(db, session));
           },
           listRecoverable(after) {
-            return read(async (db) => (await db.query<StoredSession>(`${sessionColumns} WHERE s.lifecycle_status<>'retired'
-              AND ($1::uuid IS NULL OR s.session_instance_id>$1) ORDER BY s.session_instance_id LIMIT 64`, [after])).rows);
+            // A host restores only the sessions it currently owns.
+            return read(async (db) => (await db.query<StoredSession>(`${sessionColumns} WHERE s.lifecycle_status<>'retired' AND s.owner_host_id=$2
+              AND ($1::uuid IS NULL OR s.session_instance_id>$1) ORDER BY s.session_instance_id LIMIT 64`, [after, hostId])).rows);
           },
           async commitState(input, check) {
             const change = { ...input, ref: captureRef(input.ref), state: captureData(input.state, 2 * 1024 * 1024) };

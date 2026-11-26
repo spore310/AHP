@@ -421,6 +421,108 @@ export function createDurableLifecycle(options: NonNullable<SessionsFactoryOptio
       if (detached) await releaseBackend(record, detached);
     }
   }
+  const departing = new Set<string>();
+  /** Sessions whose retirement has started here. A retirement is final: such a session is never moved. */
+  const retiringSessions = new Set<string>();
+  const busy = (instanceId: string): boolean => departing.has(instanceId) || retiringSessions.has(instanceId)
+    || [...live.values()].some((entry) => entry.root.session.instanceId === instanceId);
+  type Install = (record: SessionRecord, owner: string, bindings: readonly ScopedPolicyBinding[], current: () => boolean) => void;
+  /** Restores one stored session this host owns. A failed restoration suspends it and returns nothing. */
+  async function recover(s: StoredSession, install: Install, teardown: (record: SessionRecord) => void): Promise<SessionRecord | undefined> {
+    const root = await store().resources.get(s.ref) ?? unavailable();
+    let record: SessionRecord | undefined;
+    try {
+      const type = deps.application?.catalogue.resolveExisting(s.type) ?? unavailable();
+      const provider = deps.providers.get(s.providerId) ?? unavailable();
+      if (type.definition.id !== s.type.id || !isDeepStrictEqual(type.definition.work ?? [], s.type.workManifest ?? [])
+        || type.definition.providerId !== s.providerId || root.driver.key !== provider.providerId
+        || root.driver.version !== provider.recovery?.version || root.owner !== s.owner || root.providerId !== s.providerId) unavailable();
+      const registration: ResourceRegistration = { resource: s.ref, owner: { domainId: s.ref.domainId, subject: s.owner }, route: { origin: s.ref, targets: [s.ref] }, externalAuthority: "none",
+        admission: { sessionType: { key: s.type.key, version: s.type.version }, providerId: s.providerId } };
+      if (!isDeepStrictEqual(root.registration, facts(registration))) unavailable();
+      const view = s.lifecycle === "retiring"
+        ? createInitialSessionState({ providerId: s.providerId, title: "", workingDirectories: [] })
+        : restoreState(s.providerId, s.state);
+      const tools = type.definition.tools;
+      record = { resource: captureRef(s.ref), sessionUri: s.ref.id, provider, createdAt: s.createdAt, modifiedAt: s.modifiedAt, serverSeq: s.lastServerSeq,
+        state: { ...view, _meta: { [APPLICATION_META_KEY]: projectSessionToolManifest(s.type, type.tools, tools) } },
+        application: { typeId: s.type.id, key: s.type.key, version: s.type.version, config: {}, tools } };
+      const entry = track(record, root, s.stateRevision);
+      const children = resourceOrder(await store().resources.listSession(s.ref));
+      for (const child of children) {
+        if (child.ref.kind !== "session" && child.lifecycle !== "retired") {
+          driverFor(record, child);
+          for (const parent of [child.parent, child.grantParent]) {
+            if (parent && !children.some((r) => sameResource(r.ref, parent) && r.lifecycle !== "retired")) unavailable();
+          }
+          if (!sameResource(child.session, s.ref) || child.ref.domainId !== s.ref.domainId || child.owner !== s.owner
+            || child.providerId !== s.providerId || !isDeepStrictEqual(child.registration, facts(childRegistration(record, child)))) unavailable();
+        }
+      }
+      if (s.lifecycle === "retiring") {
+        await destroy(record, await store().sessions.beginRetirement(s.ref, () => open(entry)));
+        await release(record);
+        return undefined;
+      }
+      const approval = type.policy?.restoration ?? unavailable();
+      const approved = await callback((signal) => approval.prepare({ session: structuredClone(s), signal }), entry.controller.signal);
+      if (!approved) unavailable();
+      const current = () => open(entry) && (approved.isCurrent() as unknown) === true;
+      if (!current()) unavailable();
+      install(record, s.owner, approved.bindings, current);
+      const restore = Object.hasOwn(root.runtimeMetadata, "receipt");
+      let expected = root.lifecycle;
+      if (!restore && (expected === "failed" || expected === "suspended")) {
+        await store().sessions.transition({ ref: s.ref, session: s.ref, operationId: root.operationId, expected, next: "creating" }, current);
+        expected = "creating";
+      }
+      entry.replay = { children: new Set(children.filter((row) => row.ref.kind !== "session" && row.lifecycle !== "retired")),
+        parents: new Set(restore ? [] : [resourceKey(root.ref)]) };
+      const restoredBackend = await backend(record, view.workingDirectories ?? [], {}, { restore, expected, current });
+      record.backend = restoredBackend;
+      const remaining = resourceOrder(await store().resources.listSession(s.ref));
+      const retiring = remaining.filter((child) => child.lifecycle === "retiring");
+      if (retiring.length) await destroy(record, retiring);
+      const unavailableParents: ResourceRef[] = [];
+      for (const child of remaining) {
+        if (child.ref.kind === "session" || child.lifecycle === "retired") continue;
+        if (child.lifecycle === "retiring" || entry.handles.has(child.operationId)) continue;
+        if ([child.parent, child.grantParent].some((parent) => parent && unavailableParents.some((ref) => sameResource(ref, parent)))) {
+          unavailableParents.push(child.ref);
+          continue;
+        }
+        try {
+          await attachChild(record, child);
+        } catch (error) {
+          if (!(error instanceof ProvisioningUnavailable)) throw error;
+          unavailableParents.push(child.ref);
+        }
+      }
+      delete entry.replay;
+      record.state = sessionReducer(record.state, { type: ACTION_TYPE_SESSION_READY });
+      if (!approved.isCurrent()) unavailable();
+      return record;
+    } catch (error) {
+      if (!host?.isOpen() || (error instanceof RepositoryError && error.code === "database")) throw new Error("Storage unavailable during recovery.", { cause: error });
+      let cleanupFailed = false;
+      if (record) {
+        try {
+          teardown(record);
+        } catch { cleanupFailed = true; }
+        if (deps.sessions.get(s.ref.id) === record) deps.sessions.delete(s.ref.id);
+        try {
+          await release(record);
+        } catch { cleanupFailed = true; }
+      }
+      if (s.lifecycle !== "retiring") {
+        const current = await store().resources.get(s.ref) ?? unavailable();
+        await store().sessions.transition({ ref: s.ref, session: s.ref, expected: current.lifecycle, next: "suspended", operationId: root.operationId }, () => !closed);
+      }
+      diagnose(s.ref, cleanupFailed ? "Recovery failed and process-local release was not confirmed." : "Check exact type, provider, drivers and restoration approval.");
+    }
+    return undefined;
+  }
+  let install: Install | undefined;
   return {
     closeAdmission() {
       closed = true;
@@ -472,16 +574,124 @@ export function createDurableLifecycle(options: NonNullable<SessionsFactoryOptio
     },
     async retire(record: SessionRecord, hide: () => void, admission: Admission) {
       const entry = state(record);
-      const rows = await guardedRetirement(record, () => store().sessions.beginRetirement(entry.root.session, () => !closed && live.get(record) === entry && admission() === true));
-      entry.controller.abort();
-      hide();
+      const instanceId = entry.root.session.instanceId;
+      // Marked before the first await: a transfer that arrives while the retirement commits is refused
+      // before it withdraws anything, instead of tearing down the handles this retirement still needs.
+      retiringSessions.add(instanceId);
       try {
-        await destroy(record, rows);
+        const rows = await guardedRetirement(record, () => store().sessions.beginRetirement(entry.root.session, () => !closed && live.get(record) === entry && admission() === true));
+        entry.controller.abort();
+        hide();
+        try {
+          await destroy(record, rows);
+        } finally {
+          await release(record);
+        }
       } finally {
-        await release(record);
+        retiringSessions.delete(instanceId);
       }
     },
-    async start(install: (record: SessionRecord, owner: string, bindings: readonly ScopedPolicyBinding[], current: () => boolean) => void, seed: (n: number) => void, lost: () => void, teardown: (record: SessionRecord) => void) {
+    /**
+     * Restores sessions this host owns that are not live yet, for example after
+     * another host transferred them here or this host adopted them.
+     */
+    async recoverOwned(onRestored?: (record: SessionRecord) => void): Promise<readonly SessionRecord[]> {
+      const restore = install ?? unavailable();
+      const teardown = withdraw ?? unavailable();
+      const recovered: SessionRecord[] = [];
+      let failure: unknown;
+      let after: string | undefined;
+      const absent = (ref: ResourceRef<"session">): boolean => {
+        const present = deps.sessions.get(ref.id);
+        // Owned in the store and absent from the registry also describes a session that is
+        // being retired, or that is between its local withdrawal and its durable move.
+        return !(present?.resource && sameResource(present.resource, ref)) && !busy(ref.instanceId);
+      };
+      for (;;) {
+        const page: readonly StoredSession[] = await store().sessions.listRecoverable(after);
+        if (!page.length) break;
+        for (const listed of page) {
+          const from = after;
+          after = listed.ref.instanceId;
+          if (!absent(listed.ref)) continue;
+          // An earlier restoration on this page can take as long as a provider callback. The page is
+          // stale by then, so each session is read again and restored only if this host still owns it,
+          // it is not retired, and nothing started serving or moving it in the meantime.
+          const owned = await store().sessions.listRecoverable(from);
+          const s = owned.find((row) => sameResource(row.ref, listed.ref));
+          if (s === undefined || !absent(s.ref)) continue;
+          try {
+            const record = await recover(s, restore, teardown);
+            if (record) {
+              recovered.push(record);
+              // Reported as each one is restored: a failure later in the same pass must not hide it.
+              try {
+                onRestored?.(record);
+              } catch { /* The session is restored and live whatever its observer does. */ }
+            }
+          } catch (error) {
+            // One session that cannot be settled does not hold back the others. The caller retries the pass.
+            if (!host?.isOpen() || closed) throw error;
+            // A storage failure can interrupt a restoration after its record was built. That record is
+            // withdrawn and released here, so the next pass finds the session absent and tries again
+            // instead of skipping it as busy.
+            for (const [partial, entry] of [...live]) {
+              if (entry.root.session.instanceId !== s.ref.instanceId) continue;
+              try {
+                teardown(partial);
+              } catch { /* Released below either way. */ }
+              if (deps.sessions.get(partial.sessionUri) === partial) deps.sessions.delete(partial.sessionUri);
+              await release(partial).catch(() => undefined);
+            }
+            diagnose(s.ref, "Restoration did not complete. It is retried on the next reconciliation.");
+            failure ??= error;
+          }
+        }
+      }
+      if (failure !== undefined) throw new Error("Durable session recovery is incomplete.", { cause: failure });
+      return recovered;
+    },
+    /**
+     * Moves one live session to another host in two steps. This call validates
+     * the target and withdraws the session locally without retiring anything
+     * durable; `withdrawn` is called once the session is no longer served here.
+     * The returned function releases the local handles and moves durable
+     * ownership. Only the first step needs the host's write slot: a slow
+     * provider release never delays other sessions' writes.
+     */
+    async relocate(record: SessionRecord, toHostId: string, withdrawn: () => void): Promise<() => Promise<void>> {
+      const entry = state(record);
+      const ref = captureRef(entry.root.session);
+      const coordination = store().coordination ?? unavailable();
+      // Nothing is torn down for a move the store would refuse. The store checks again in its own transaction.
+      const target = (await coordination.members()).find((member) => member.hostId === toHostId && member.role === "active");
+      const providers: unknown = target?.capabilities.providers;
+      if (toHostId === coordination.hostId || !Array.isArray(providers) || !providers.includes(record.provider.providerId) || !open(entry)
+        || retiringSessions.has(ref.instanceId) || live.get(record) !== entry) unavailable();
+      departing.add(ref.instanceId);
+      try {
+        entry.controller.abort();
+        if (deps.sessions.get(record.sessionUri) === record) deps.sessions.delete(record.sessionUri);
+        // From here the session is no longer served by this process, whatever follows.
+        withdrawn();
+        withdraw?.(record);
+      } catch (error) {
+        // Nothing stays half withdrawn: the handles are released and the caller restores the session.
+        await release(record).catch(() => undefined);
+        departing.delete(ref.instanceId);
+        throw error;
+      }
+      return async () => {
+        try {
+          await release(record);
+          await coordination.transfer(ref, toHostId);
+        } finally {
+          departing.delete(ref.instanceId);
+        }
+      };
+    },
+    async start(restore: Install, seed: (n: number) => void, lost: () => void, teardown: (record: SessionRecord) => void) {
+      install = restore;
       withdraw = teardown;
       host = await storage.acquire(hostId, () => {
         closed = true;
@@ -498,96 +708,7 @@ export function createDurableLifecycle(options: NonNullable<SessionsFactoryOptio
         if (!page.length) break;
         for (const s of page) {
           after = s.ref.instanceId;
-          const root = await store().resources.get(s.ref) ?? unavailable();
-          let record: SessionRecord | undefined;
-          try {
-            const type = deps.application?.catalogue.resolveExisting(s.type) ?? unavailable();
-            const provider = deps.providers.get(s.providerId) ?? unavailable();
-            if (type.definition.id !== s.type.id || !isDeepStrictEqual(type.definition.work ?? [], s.type.workManifest ?? [])
-              || type.definition.providerId !== s.providerId || root.driver.key !== provider.providerId
-              || root.driver.version !== provider.recovery?.version || root.owner !== s.owner || root.providerId !== s.providerId) unavailable();
-            const registration: ResourceRegistration = { resource: s.ref, owner: { domainId: s.ref.domainId, subject: s.owner }, route: { origin: s.ref, targets: [s.ref] }, externalAuthority: "none",
-              admission: { sessionType: { key: s.type.key, version: s.type.version }, providerId: s.providerId } };
-            if (!isDeepStrictEqual(root.registration, facts(registration))) unavailable();
-            const view = s.lifecycle === "retiring"
-              ? createInitialSessionState({ providerId: s.providerId, title: "", workingDirectories: [] })
-              : restoreState(s.providerId, s.state);
-            const tools = type.definition.tools;
-            record = { resource: captureRef(s.ref), sessionUri: s.ref.id, provider, createdAt: s.createdAt, modifiedAt: s.modifiedAt, serverSeq: s.lastServerSeq,
-              state: { ...view, _meta: { [APPLICATION_META_KEY]: projectSessionToolManifest(s.type, type.tools, tools) } },
-              application: { typeId: s.type.id, key: s.type.key, version: s.type.version, config: {}, tools } };
-            const entry = track(record, root, s.stateRevision);
-            const children = resourceOrder(await store().resources.listSession(s.ref));
-            for (const child of children) {
-              if (child.ref.kind !== "session" && child.lifecycle !== "retired") {
-                driverFor(record, child);
-                for (const parent of [child.parent, child.grantParent]) {
-                  if (parent && !children.some((r) => sameResource(r.ref, parent) && r.lifecycle !== "retired")) unavailable();
-                }
-                if (!sameResource(child.session, s.ref) || child.ref.domainId !== s.ref.domainId || child.owner !== s.owner
-                  || child.providerId !== s.providerId || !isDeepStrictEqual(child.registration, facts(childRegistration(record, child)))) unavailable();
-              }
-            }
-            if (s.lifecycle === "retiring") {
-              await destroy(record, await store().sessions.beginRetirement(s.ref, () => open(entry)));
-              await release(record);
-              continue;
-            }
-            const approval = type.policy?.restoration ?? unavailable();
-            const approved = await callback((signal) => approval.prepare({ session: structuredClone(s), signal }), entry.controller.signal);
-            if (!approved) unavailable();
-            const current = () => open(entry) && (approved.isCurrent() as unknown) === true;
-            if (!current()) unavailable();
-            install(record, s.owner, approved.bindings, current);
-            const restore = Object.hasOwn(root.runtimeMetadata, "receipt");
-            let expected = root.lifecycle;
-            if (!restore && (expected === "failed" || expected === "suspended")) {
-              await store().sessions.transition({ ref: s.ref, session: s.ref, operationId: root.operationId, expected, next: "creating" }, current);
-              expected = "creating";
-            }
-            entry.replay = { children: new Set(children.filter((row) => row.ref.kind !== "session" && row.lifecycle !== "retired")),
-              parents: new Set(restore ? [] : [resourceKey(root.ref)]) };
-            const restoredBackend = await backend(record, view.workingDirectories ?? [], {}, { restore, expected, current });
-            record.backend = restoredBackend;
-            const remaining = resourceOrder(await store().resources.listSession(s.ref));
-            const retiring = remaining.filter((child) => child.lifecycle === "retiring");
-            if (retiring.length) await destroy(record, retiring);
-            const unavailableParents: ResourceRef[] = [];
-            for (const child of remaining) {
-              if (child.ref.kind === "session" || child.lifecycle === "retired") continue;
-              if (child.lifecycle === "retiring" || entry.handles.has(child.operationId)) continue;
-              if ([child.parent, child.grantParent].some((parent) => parent && unavailableParents.some((ref) => sameResource(ref, parent)))) {
-                unavailableParents.push(child.ref);
-                continue;
-              }
-              try {
-                await attachChild(record, child);
-              } catch (error) {
-                if (!(error instanceof ProvisioningUnavailable)) throw error;
-                unavailableParents.push(child.ref);
-              }
-            }
-            delete entry.replay;
-            record.state = sessionReducer(record.state, { type: ACTION_TYPE_SESSION_READY });
-            if (!approved.isCurrent()) unavailable();
-          } catch (error) {
-            if (!host.isOpen() || (error instanceof RepositoryError && error.code === "database")) throw new Error("Storage unavailable during recovery.", { cause: error });
-            let cleanupFailed = false;
-            if (record) {
-              try {
-                teardown(record);
-              } catch { cleanupFailed = true; }
-              if (deps.sessions.get(s.ref.id) === record) deps.sessions.delete(s.ref.id);
-              try {
-                await release(record);
-              } catch { cleanupFailed = true; }
-            }
-            if (s.lifecycle !== "retiring") {
-              const current = await store().resources.get(s.ref) ?? unavailable();
-              await store().sessions.transition({ ref: s.ref, session: s.ref, expected: current.lifecycle, next: "suspended", operationId: root.operationId }, () => !closed);
-            }
-            diagnose(s.ref, cleanupFailed ? "Recovery failed and process-local release was not confirmed." : "Check exact type, provider, drivers and restoration approval.");
-          }
+          await recover(s, install, teardown);
         }
       }
     },

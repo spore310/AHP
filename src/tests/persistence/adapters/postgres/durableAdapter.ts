@@ -60,9 +60,9 @@ export async function testDurableAdapter(url: string, sql: Pool): Promise<void> 
     const activate = (r: ResourceRecord) => ({ ref: r.ref, session, expected: "creating" as const, next: "active" as const, operationId: r.operationId });
     await host.sessions.transition(activate(root), yes);
     await deniesBeforeWrite(() => host.sessions.transition({ ...activate(root), expected: "active" }, () => false));
-    const child = async (name: string, grantParent?: ResourceRef): Promise<ResourceRef> => {
+    const child = async (name: string, grantParent?: ResourceRef, under: ResourceRef = session): Promise<ResourceRef> => {
       const row = { ...root, ref: { ...session, kind: "chat", id: name, instanceId: name }, operationId: randomUUID(),
-        parent: session, ...(grantParent ? { grantParent } : {}) };
+        parent: under, ...(grantParent ? { grantParent } : {}) };
       await host.resources.reserve(row, yes);
       await host.resources.activate(activate(row), yes);
       return row.ref;
@@ -74,6 +74,8 @@ export async function testDurableAdapter(url: string, sql: Pool): Promise<void> 
     await deniesBeforeWrite(() => host.resources.beginRetirement(session, parent, () => false));
     const other = await child("other");
     const nested = await child("grant-child", parent);
+    // Reachable from `parent` through the containment edge only, as `nested` is through the grant edge only.
+    const contained = await child("contained-child", undefined, parent);
     const elsewhere = { ...session, id: "ahp-session:/other", instanceId: randomUUID() };
     await deniesBeforeWrite(() => host.sessions.reserve({ ...record, ref: elsewhere, type: { ...record.type, workManifest: [] } },
       { ...root, ref: elsewhere, session: elsewhere, operationId: randomUUID() }, yes));
@@ -179,13 +181,17 @@ export async function testDurableAdapter(url: string, sql: Pool): Promise<void> 
     await work("dynamic", session, "queued");
     await work("announced", parent, "queued", "announce");
     await work("excluded", nested, "queued", "scope", false);
+    await work("contained", contained, "queued");
     assert.equal(await host.sessions.purge(session, "2100-01-01"), false);
     const closing = await host.resources.beginRetirement(session, parent, yes);
-    assert.deepEqual(closing.map((r) => r.ref.id), [nested.id, parent.id]);
+    // Both parent edges are in the dependent closure, and the retired resource comes last.
+    assert.deepEqual(closing.map((r) => r.ref.id).sort(), [contained.id, nested.id, parent.id].sort());
+    assert.equal(closing.at(-1)?.ref.id, parent.id);
     const jobs = async () => (await sql.query<{ request_key: string; status: string }>(
       "SELECT request_key,status FROM work_items WHERE session_instance_id=$1 ORDER BY request_key", [session.instanceId])).rows;
     assert.deepEqual((await jobs()).map((r) => [r.request_key, r.status]), [
-      ["announced", "queued"], ["dynamic", "queued"], ["excluded", "queued"], ["leased", "cancelled"], ["queued", "cancelled"], ["terminal", "completed"],
+      ["announced", "queued"], ["contained", "cancelled"], ["dynamic", "queued"], ["excluded", "queued"], ["leased", "cancelled"], ["queued", "cancelled"],
+      ["terminal", "completed"],
     ]);
     assert.equal((await sql.query("SELECT 1 FROM work_items WHERE request_key='leased' AND (lease_token IS NOT NULL OR lease_agent_id IS NOT NULL OR lease_expires_at IS NOT NULL)")).rowCount, 0);
     await assert.rejects(host.resources.finishRetirement(session, parent));
@@ -195,7 +201,7 @@ export async function testDurableAdapter(url: string, sql: Pool): Promise<void> 
     const rest = await host.sessions.beginRetirement(session, yes);
     for (const r of rest.filter((r) => r.ref.kind !== "session")) await host.resources.finishRetirement(session, r.ref);
     await host.sessions.finishRetirement(session);
-    assert.equal((await jobs()).filter((r) => r.status === "cancelled").length, 5);
+    assert.equal((await jobs()).filter((r) => r.status === "cancelled").length, 6);
     assert.equal(await host.sessions.purge(session, "2000-01-01"), false);
     const next = { ...session, instanceId: randomUUID() };
     await host.sessions.reserve({ ...record, ref: next }, { ...root, ref: next, session: next, operationId: randomUUID() }, yes);

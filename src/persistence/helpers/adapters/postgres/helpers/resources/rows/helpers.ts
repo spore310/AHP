@@ -41,7 +41,9 @@ export const sessionColumns = `SELECT ${sessionRef} AS ref,
 
 export async function sessionRow(db: QueryableClient, session: ResourceRef<"session">, mode?: "share" | "exclusive"): Promise<StoredSession | undefined> {
   assertSessionRef(session);
-  const lock = mode === "share" ? "FOR SHARE OF s" : mode === "exclusive" ? "FOR UPDATE OF s" : "";
+  // A locked read is an admission: only the fenced owning host may take it, and the
+  // row lock orders it against an ownership transfer of the same session.
+  const lock = mode === undefined ? "" : `AND s.owner_host_id=current_setting('ahp.host_id', true) FOR ${mode === "share" ? "SHARE" : "UPDATE"} OF s`;
   const result = await db.query<StoredSession>(`${sessionColumns}
     WHERE s.session_instance_id=$1 AND s.domain_id=$2 AND s.session_uri=$3 ${lock}`, [session.instanceId, session.domainId, session.id]);
   return result.rows[0];
