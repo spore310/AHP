@@ -23,8 +23,13 @@ export type {
 export { createAHPBinding, createAHPBinding as createAHPConnectionModule } from "./helpers/ahp";
 export type { AHPBinding, AHPConnectionModuleOptions, AHPDiagnostic } from "./helpers/ahp";
 export type { NativeSessionWrites } from "./helpers/ahp/types";
-export { createAHPServer } from "./helpers/host";
-export type { AHPServerAgentWorkOptions, AHPServerHandle, AHPServerOptions } from "./helpers/host";
+/**
+ * @deprecated Import the composed host from `@host`. This compatibility
+ * re-export is one-directional: `@host` consumes `@websocket/helpers/*` entry
+ * points and never this barrel, so the resolved module graph stays acyclic.
+ */
+export { createAHPServer } from "@host";
+export type { AHPServerAgentWorkOptions, AHPServerHandle, AHPServerOptions } from "@host";
 export { createWebSocketServer } from "./helpers/server";
 export type {
   AHPServerSecurityOptions, ConnectionFence, ConnectionSecuritySnapshot, ConnectionSetupAdapter,

@@ -47,6 +47,8 @@
       "@authorization/policies": ["./src/authorization/helpers/policies/index.ts"],
       "@sessions/views": ["./src/sessions/helpers/views/index.ts"],
       "@jsonrpc/value": ["./src/jsonrpc/helpers/value/index.ts"],
+      "@host": ["./src/host/index.ts"],
+      "@host/*": ["./src/host/*"],
       "@websocket": ["./src/websocket/index.ts"],
       "@websocket/*": ["./src/websocket/*"]
     }

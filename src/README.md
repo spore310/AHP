@@ -14,7 +14,8 @@ Start here, then read the README of the capability you are changing.
 | ---------- | ------ | -------------- |
 | `jsonrpc/` | [`jsonrpc/README.md`](jsonrpc/README.md) | JSON-RPC 2.0 message schemas, the owned `RpcError`, and the allowlisted error codes. No transport, no I/O. |
 | `sessions/` | [`sessions/README.md`](sessions/README.md) | The session engine: provider registry, session store, state reducer, sequencing, and lifecycle. AHP-aware but transport-agnostic. |
-| `websocket/` | [`websocket/README.md`](websocket/README.md) | Raw transport, AHP subscriptions/publication, handshake authentication, and the composed host. |
+| `websocket/` | [`websocket/README.md`](websocket/README.md) | Raw transport, AHP subscriptions/publication and handshake authentication. |
+| `host/` | [`host/README.md`](host/README.md) | The composed host: `createAHPServer`, application namespaces, host admission, replicated and distributed topologies, routing and probes. |
 | `tool/` | [`tool/README.md`](tool/README.md) | Immutable exact-revision contracts, schema validation and descriptor projection. |
 | `application/` | [`application/README.md`](application/README.md) | Baseline session types, scoped namespaces and policy examples. |
 | `authorization/` | [`authorization/README.md`](authorization/README.md) | Trusted actors, connection grants, resource policy and authorization proofs. |

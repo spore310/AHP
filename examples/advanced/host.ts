@@ -12,7 +12,8 @@ import { createToolAdmission } from "@tool/policy";
 import { createPolicyFactory, type PolicyDefinitionBase, type PolicyOperation } from "@authorization/policies";
 import { type ToolExecutionBinding } from "@tool/policy/binding";
 import { createToolCatalogue, defineToolContract, type ToolContractDefinition } from "@tool";
-import { createAHPServer, type AHPServerHandle, type ConnectionFence } from "@websocket";
+import { createAHPServer, type AHPServerHandle, type HostTopologyOptions } from "@host";
+import type { ConnectionFence } from "@websocket";
 import { replacementSchema } from "@work/helpers/protocol/schemas";
 import type { WorkExecutionRef } from "@work";
 import { createExamplePersistence } from "./persistence";
@@ -95,6 +96,11 @@ export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
   readonly initialAuthority?: import("@websocket/helpers/security").InitialAuthoritySource;
   readonly chatProjection?: import("@work").WorkChatProjectionOptions;
   readonly capacityDemo?: { readonly leaseMs: number; readonly configuration: import("@agents").AgentWorkConfig };
+  /** Logical host identity, application namespace and multi-host mode. */
+  readonly topology?: HostTopologyOptions;
+  readonly listen?: { readonly host: string; readonly port: number };
+  /** Application policy for multi-host runs: every review session grants the demo roles wherever it is created or restored. */
+  readonly autoGrant?: boolean;
 }) {
   const { admitted, namespaces } = createExamplePolicyAdmission(mode, definitions);
   const rules = { admitted, mandatory: [providerPolicy] };
@@ -122,13 +128,38 @@ export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
         complete: { purpose: "execute", policies: [workPolicy] }, fail: { purpose: "execute", policies: [workPolicy] },
         announce: { purpose: "publish", policies: [workPolicy] },
       } },
-      ...(lifecycle?.restoration ? { restoration: lifecycle.restoration } : {}),
+      ...(lifecycle?.restoration
+        ? { restoration: lifecycle.restoration }
+        : lifecycle?.autoGrant
+          ? { restoration: { prepare: ({ session }) => {
+              // A restoring host derives fresh grants from current application policy. Nothing is copied from the previous owner.
+              granted.add(session.ref.instanceId);
+              return Promise.resolve({ bindings: grantsFor(session.ref), isCurrent: () => true });
+            } } }
+          : {}),
       creation: { capability: { key: "example.create-review", revision: 1 }, prepare: ({ request }) => Promise.resolve(
         request.caller.actor.principal.subject === "senior"
           ? { effect: "allow", request, bootstrap: { kind: "none" }, validUntil: Date.now() + 30_000, isCurrent: () => true, release: () => undefined }
           : { effect: "deny", release: () => undefined },
       ) } } });
 
+  const granted = new Set<string>();
+  const grantsFor = (resource: ResourceRef<"session">) => {
+    const grantId = (label: string) => resource.id === channel ? label : label + "-" + resource.instanceId;
+    return [
+      ...(Object.entries(roles) as [keyof typeof roles, string[]][]).map(([subject, scopedRoles]) => ({
+        id: grantId("demo-" + subject), actor: actorFor(subject), scope: resource, roles: scopedRoles,
+        policies: [policy, providerPolicy, challengePolicy, projectionPolicy, activationPolicy, workPolicy], revision: 1,
+        authority: subject === "junior"
+          ? { kind: "delegation" as const, issuer: actorFor("senior"), parentGrantId: grantId("demo-senior") }
+          : { kind: "host-policy" as const, policy },
+      })),
+      { id: grantId("demo-junior-work"), scope: resource, actor: actorFor("junior"), roles: ["work-execute"],
+        policies: [workPolicy], revision: 1, authority: { kind: "host-policy" as const, policy: workPolicy } },
+      { id: grantId("demo-pm-submit"), scope: resource, actor: actorFor("pm"), roles: ["submit-review"],
+        policies: [submitPolicy], revision: 1, authority: { kind: "host-policy" as const, policy: submitPolicy } },
+    ];
+  };
   const authenticator: ConnectionAuthenticator = { authenticate: ({ headers }) => {
     const token = headers["sec-websocket-protocol"];
     const subject = typeof token === "string" && token.startsWith("demo-") ? token.slice(5) : "";
@@ -198,7 +229,8 @@ export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
   const dispatcher = { challenge: { adapter: challenge }, projection };
 
   const catalogue = createSessionTypeCatalogue({ tools: createToolCatalogue({ definitions: allTools }), types: [type.registration] });
-  const host: AHPServerHandle = createAHPServer({ host: "127.0.0.1", port: 0,
+  const host: AHPServerHandle = createAHPServer({ host: lifecycle?.listen?.host ?? "127.0.0.1", port: lifecycle?.listen?.port ?? 0,
+    ...(lifecycle?.topology ? { topology: lifecycle.topology } : {}),
     ...(lifecycle?.nativeWrites ? { nativeWrites: lifecycle.nativeWrites } : {}),
     sessions: { ...(lifecycle ? { durability: lifecycle.durability } : {}), providers: [reviewProvider], creationSecurity: { registry, policies }, toolAdmission: admission,
       application: { catalogue, defaultType: sessionType } },
@@ -251,18 +283,10 @@ export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
     const resource = authorization.getResource(sessionId);
     assert.ok(resource);
     if (sessionId === channel) origin = resource;
-    const grantId = (label: string) => sessionId === channel ? label : label + "-" + resource.instanceId;
-    for (const [subject, scopedRoles] of Object.entries(roles) as [keyof typeof roles, string[]][]) registry.installBinding({
-      id: grantId("demo-" + subject), actor: actorFor(subject), scope: resource, roles: scopedRoles,
-      policies: [policy, providerPolicy, challengePolicy, projectionPolicy, activationPolicy, workPolicy], revision: 1,
-      authority: subject === "junior"
-        ? { kind: "delegation", issuer: actorFor("senior"), parentGrantId: grantId("demo-senior") }
-        : { kind: "host-policy", policy },
-    });
-    registry.installBinding({ id: grantId("demo-junior-work"), scope: resource, actor: actorFor("junior"), roles: ["work-execute"],
-      policies: [workPolicy], revision: 1, authority: { kind: "host-policy", policy: workPolicy } });
-    registry.installBinding({ id: grantId("demo-pm-submit"), scope: resource, actor: actorFor("pm"), roles: ["submit-review"],
-      policies: [submitPolicy], revision: 1, authority: { kind: "host-policy", policy: submitPolicy } });
+    if (!granted.has(resource.instanceId)) {
+      granted.add(resource.instanceId);
+      for (const grant of grantsFor(resource)) registry.installBinding(grant);
+    }
     if (sessionId !== channel) return;
     allowTool("senior", clientTool, ["discover", "invoke"], true);
     allowTool("junior", clientTool, ["discover", "invoke", "advertise"], true);
@@ -271,6 +295,14 @@ export function createReviewHost(mode: "direct" | "namespace", lifecycle?: {
     allowExecutor("host-action", serverTool.definition, { actor: executorContext.actor, connectionId: executorContext.connectionId, generation: 1,
       registrationRevision: serverTool.revision }, serverTool.implementation);
   };
+
+  if (lifecycle?.autoGrant) host.sessions.onCatalogueNotification((notification) => {
+    if (notification.method !== "root/sessionAdded") return;
+    const resource = host.sessions.authorization?.getResource(notification.params.summary.resource);
+    if (!resource || granted.has(resource.instanceId)) return;
+    granted.add(resource.instanceId);
+    for (const grant of grantsFor(resource)) registry.installBinding(grant);
+  });
 
   return { host, catalogue, artifacts, bytes, serverTool, connection, provision, registry, allowTool, allowClientExecutor,
     async createReviewChat(id: string, driver: { key: string; version: number }) {

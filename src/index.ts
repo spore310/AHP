@@ -9,11 +9,8 @@ import type { PersistenceProvider } from "@persistence/types";
 
 import { createBaselineSessionApplication } from "./application";
 import { mockProvider } from "@sessions/mock";
-import {
-  createAHPServer,
-  type AHPServerAgentWorkOptions,
-  type WebSocketServerHandle,
-} from "./websocket";
+import { createAHPServer, type AHPServerAgentWorkOptions } from "./host";
+import type { WebSocketServerHandle } from "./websocket";
 
 export const APP_NAME = "Agent Hosting Protocol";
 

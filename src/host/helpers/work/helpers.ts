@@ -14,11 +14,11 @@ import { lostWorkPolicy } from "@work/helpers/authorityLoss/helpers";
 import type { WorkAuthorityLossReason } from "@work/helpers/authorityLoss/types";
 import { createWorkSelectionGraph } from "@work/helpers/selections";
 import { isDeepStrictEqual } from "node:util";
-import { workConnection } from "../ahp/workContext";
-import { initialSchedulingFence } from "../security/helpers";
-import type { AHPBindingOptions } from "../ahp/types";
-import type { WebSocketConnectionContext } from "../../types";
-import type { AHPServerOptions } from "./types";
+import { workConnection } from "@websocket/helpers/ahp/workContext";
+import { initialSchedulingFence } from "@websocket/helpers/security/helpers";
+import type { AHPBindingOptions } from "@websocket/helpers/ahp/types";
+import type { WebSocketConnectionContext } from "@websocket/types";
+import type { AHPServerOptions } from "../../types";
 
 function unavailable(): never {
   throw new WorkError("unauthorized", "Work authority unavailable.");

@@ -81,16 +81,12 @@ host fences prevent reuse even though standalone factories may be reused.
 | `helpers/ahp/agentWork.ts` | Authenticated agent registration/presence and work request handlers, schemas, and error mapping. |
 | `helpers/ahp/workMutations.ts` | Strict V1 work commands with host-derived agent identity and response checks through final send. |
 | `helpers/ahp/workContext.ts` | Captures a protected caller with its connection lifetime and current setup. |
-| `helpers/host/work.ts` | Composes work authorization, exact agent mappings, lease loss handling and private tool guards. |
 | `helpers/ahp/toolInvocation.ts` | Namespaced client-executed tool calls, accepted executor ownership, contract validation, and settlement. |
 | `helpers/ahp/types.ts` | AHP peer, adapter, parameter schemas, and `AHPBindingOptions`. |
 | `helpers/ahp/constants.ts` | Method kinds, authenticated extension method inventory, baseline action inventory, and pending-delivery limit. |
-| `helpers/host/index.ts` | Public composed-host exports. |
-| `helpers/host/helpers.ts` | `createAHPServer`: owns sequence injection, sessions, binding, transport, and shutdown. |
-| `helpers/host/types.ts` | `AHPServerOptions` and `AHPServerHandle`. |
 | `helpers/settling.ts` | Legacy/internal settle-window probe: an owner binding without a live record means a disposal is still settling, so creates stay denied for every principal until the settlement releases the binding. |
 | `constants.ts` | Default path, heartbeat interval, payload limit, close codes, shutdown deadline, and the `426` status. |
-| `index.ts` | Public surface: `createAHPConnectionModule`, `createAHPServer`, `createWebSocketServer`, option/handle types, and constants. |
+| `index.ts` | Public surface: `createAHPConnectionModule`, `createWebSocketServer`, option/handle types, and constants. It re-exports `createAHPServer` and its types from [`@host`](../host/README.md) for existing imports; new code imports them from `@host`. |
 
 ## API
 
