@@ -142,6 +142,20 @@ export interface WebSocketServerOptions {
    * close. Defaults to `WEBSOCKET_SHUTDOWN_TIMEOUT_MS`.
    */
   readonly shutdownTimeoutMs?: number;
+  /** Serve the listener over TLS. Certificates and keys come from the application's secret provider. */
+  readonly tls?: import("node:https").ServerOptions;
+  /**
+   * Answers ordinary HTTP requests on the listener, such as health probes.
+   * Return `true` when the response was written. Unhandled requests keep the
+   * upgrade-required reply. Never receives WebSocket upgrades.
+   */
+  readonly httpHandler?: (request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse) => boolean;
+  /**
+   * Synchronous admission gate checked for every upgrade and again before a
+   * connection attaches. `false` answers 503 so a standby or draining process
+   * can stay observable without accepting protocol traffic.
+   */
+  readonly admission?: () => boolean;
 }
 
 /** Handle returned by {@link createWebSocketServer}. */

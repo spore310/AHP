@@ -91,6 +91,8 @@ export interface AHPBinding {
   dispose(): void;
   drainTools(): Promise<{ readonly draining: number }>;
   toolStats(): { readonly active: number; readonly draining: number; readonly retainedOutputBytes: number };
+  /** Resolves once every notification already queued for that connection has been sent or dropped. */
+  settle(connectionId: string): Promise<void>;
 }
 
 /** Internal canonical compatibility kernel; never exported by supported barrels. */
@@ -578,6 +580,10 @@ export const createAHPKernel = (
 
   return {
     handlers,
+    settle(connectionId) {
+      const peer = peers.get(connectionId);
+      return peer === undefined || protectedDelivery === undefined ? Promise.resolve() : protectedDelivery.settle(peer);
+    },
     initializedClientId(context) {
       const peer = peers.get(context.connectionId);
       return peer?.phase === "ready" && peer.context === context ? peer.clientId : undefined;

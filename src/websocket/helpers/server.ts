@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { createServer, type IncomingMessage } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer as createSecureServer } from "node:https";
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 import { WebSocketServer } from "ws";
@@ -68,7 +69,9 @@ export const createWebSocketServer = (
     beforeDispatch,
     deferredRequestCompletionMethods = new Map(),
     shutdownTimeoutMs = WEBSOCKET_SHUTDOWN_TIMEOUT_MS,
+    httpHandler,
   } = options;
+  const admitted = options.admission ?? ((): boolean => true);
 
   if (authenticator !== undefined && connectionSetup !== undefined) {
     throw new Error("Conflicting connection setup authenticators.");
@@ -88,12 +91,22 @@ export const createWebSocketServer = (
   const prepareConnection = connectionSetup?.prepare.bind(connectionSetup);
   const verifyHandshake = authenticator?.authenticate.bind(authenticator);
   let generation = 0;
-  const httpServer = createServer((_request, response) => {
+  const respond = (request: IncomingMessage, response: ServerResponse): void => {
+    try {
+      if (httpHandler?.(request, response) === true) return;
+    } catch {
+      // A failed probe handler falls through to the fixed reply below.
+    }
+    if (response.headersSent) {
+      response.end();
+      return;
+    }
     // This listener speaks WebSocket only. Answer ordinary HTTP requests
     // explicitly so an accepted request cannot complicate HTTP shutdown.
     response.writeHead(WEBSOCKET_HTTP_UPGRADE_REQUIRED, { Connection: "close" });
     response.end();
-  });
+  };
+  const httpServer = options.tls === undefined ? createServer(respond) : createSecureServer(options.tls, respond);
   // Hold a permanent error listener so a late server-level error (after the
   // one-shot listen handlers are removed) cannot crash the process. Socket
   // errors are handled per connection, and startup failures by the pending
@@ -129,7 +142,7 @@ export const createWebSocketServer = (
     };
     socket.once("error", onSocketError);
 
-    if (lifecycle !== "listening") {
+    if (lifecycle !== "listening" || !admitted()) {
       rejectUpgrade(socket, 503, "Service Unavailable");
       return;
     }
@@ -229,6 +242,10 @@ export const createWebSocketServer = (
     const establish = (principal: AuthenticatedPrincipal | undefined): void => {
       if (cancelled || attached || lifecycle !== "listening" || socket.readyState !== socket.OPEN) {
         cancel();
+        return;
+      }
+      if (!admitted()) {
+        reject(WEBSOCKET_CLOSE_GOING_AWAY);
         return;
       }
       if (authentication === "required" && principal === undefined) {

@@ -213,6 +213,23 @@ export function createProtectedViewDelivery(factory: SessionsFactory, options: R
       });
       return { isCurrent: () => views.current(state.recipient, [proof]), fence: proof.fence.bind(proof), release() {} };
     },
+    /** Resolves after every delivery queued for this peer so far has been sent or dropped. */
+    settle(peer: AHPPeer): Promise<void> {
+      const state = states.get(peer);
+      if (!state || state.controller.signal.aborted || (!state.running && state.queue.length === 0)) return Promise.resolve();
+      return new Promise((resolve) => {
+        const done = (): void => {
+          state.controller.signal.removeEventListener("abort", done);
+          resolve();
+        };
+        state.queue.push({ type: "work", channel: "", bytes: 0, deliver: () => {
+          done();
+          return Promise.resolve();
+        } });
+        state.controller.signal.addEventListener("abort", done, { once: true });
+        void pump(peer, state);
+      });
+    },
     workPending(peer: AHPPeer, id: string) {
       stateFor(peer, false).workPending.set(id, []);
     },
