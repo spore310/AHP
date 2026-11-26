@@ -1,0 +1,6 @@
+# The Kubernetes Namespace the example objects live in. It is unrelated to the
+# SDK namespace, which the application configures (AHP_NAMESPACE_ID).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ahp-example

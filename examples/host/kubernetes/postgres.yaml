@@ -1,0 +1,55 @@
+# A throwaway PostgreSQL for the example: no persistent volume, one synthetic
+# local credential. It stands in for the database a deployment already has.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ahp-example-database
+type: Opaque
+stringData:
+  password: ahp_example_local
+  url: postgresql://ahp_example:ahp_example_local@postgres:5432/ahp_example
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17.12-bookworm
+          imagePullPolicy: IfNotPresent
+          args: ["-c", "max_connections=200"]
+          env:
+            - { name: POSTGRES_USER, value: ahp_example }
+            - { name: POSTGRES_DB, value: ahp_example }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: ahp-example-database, key: password } }
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-q", "-U", "ahp_example", "-d", "ahp_example", "-h", "127.0.0.1"]
+            periodSeconds: 2
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector: { app: postgres }
+  ports:
+    - { name: postgres, port: 5432, targetPort: postgres }

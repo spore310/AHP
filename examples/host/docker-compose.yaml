@@ -1,0 +1,192 @@
+# Multi-host topologies for Agent Hosting Protocol, with independent processes,
+# real PostgreSQL and a load balancer. Run from the repository root:
+#
+#   docker compose -f examples/host/docker-compose.yaml up --build -d
+#   pnpm exec vite-node examples/host/acceptance.ts
+#   docker compose -f examples/host/docker-compose.yaml down -v
+#
+# Every credential here is a synthetic local value generated at startup. Ports
+# are published on loopback only. The control ports are example scaffolding.
+name: ahp-multi-host
+
+x-host: &host
+  image: ahp-multi-host-example:local
+  build:
+    context: ../..
+    dockerfile: examples/host/Dockerfile
+  # A refused start or a self-fenced owner exits non-zero and is started again, like a pod.
+  restart: on-failure
+  stop_grace_period: 20s
+  depends_on:
+    setup:
+      condition: service_completed_successfully
+
+x-host-env: &host-env
+  AHP_PUBLIC_HOST: 0.0.0.0
+  AHP_PUBLIC_PORT: "8080"
+  AHP_CONTROL_HOST: 0.0.0.0
+  AHP_CONTROL_PORT: "9090"
+  AHP_DATABASE_URL: postgresql://ahp_example:ahp_example_local@postgres:5432/ahp_example
+  AHP_DATABASE_POOL: "5"
+  AHP_LEASE_MS: "3000"
+  AHP_STANDBY_RETRY_MS: "250"
+  AHP_EVENT_POLL_MS: "250"
+
+x-tools-env: &tools-env
+  <<: *host-env
+  AHP_HOST_MODE: distributed
+  AHP_NAMESPACE_ID: ahp-namespace:support/shared
+  AHP_MEMBERSHIP_DIR: /membership/shared
+  AHP_ROUTING_HOST: 0.0.0.0
+  AHP_ROUTING_PORT: "7000"
+  AHP_ADOPTION: automatic
+
+services:
+  postgres:
+    image: postgres:17.12-bookworm
+    environment:
+      POSTGRES_USER: ahp_example
+      POSTGRES_PASSWORD: ahp_example_local
+      POSTGRES_DB: ahp_example
+    command: ["postgres", "-c", "max_connections=200"]
+    ports: ["127.0.0.1:15432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -U ahp_example -d ahp_example -h 127.0.0.1"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+    tmpfs: ["/var/lib/postgresql/data"]
+
+  # One schema per namespace, then one membership policy and one secret per host.
+  setup:
+    image: ahp-multi-host-example:local
+    build:
+      context: ../..
+      dockerfile: examples/host/Dockerfile
+    user: root
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AHP_DATABASE_URL: postgresql://ahp_example:ahp_example_local@postgres:5432/ahp_example
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        run() { node node_modules/vite-node/dist/cli.mjs "$$@"; }
+        run examples/host/migrate.ts ahp-namespace:support/shared ahp-namespace:support-app/default ahp-namespace:support/production ahp-namespace:support/staging
+        # Membership is generated once. Regenerating it would create a second, conflicting root of trust.
+        if [ ! -f /membership/ready ]; then
+          rm -rf /membership/*
+          run examples/host/membership.ts /membership/shared ahp-namespace:support/shared 1             support-tools-a=ws://tools-a:7000/ support-tools-b=ws://tools-b:7000/ support-tools-c=ws://tools-c:7000/
+          run examples/host/membership.ts /membership/app ahp-namespace:support-app/default 1 "support-app*2"
+          run examples/host/membership.ts /membership/production ahp-namespace:support/production 1 support-production
+          run examples/host/membership.ts /membership/staging ahp-namespace:support/staging 1 support-staging
+          touch /membership/ready
+        fi
+        chown -R node:node /membership
+    volumes: ["membership:/membership"]
+
+  # Scenario A: one host, one derived namespace, no database, no membership.
+  single:
+    image: ahp-multi-host-example:local
+    restart: "no"
+    stop_grace_period: 20s
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    environment:
+      AHP_HOST_ID: support-single
+      AHP_HOST_MODE: single
+      AHP_NAMESPACE_ID: ahp-namespace:support-single/default
+      AHP_PUBLIC_HOST: 0.0.0.0
+      AHP_PUBLIC_PORT: "8080"
+      AHP_CONTROL_HOST: 0.0.0.0
+      AHP_CONTROL_PORT: "9090"
+    ports: ["127.0.0.1:18111:8080", "127.0.0.1:19111:9090"]
+
+  # Scenario B: two replicas share the logical host name; one is active.
+  app-1: &app
+    <<: *host
+    environment: &app-env
+      <<: *host-env
+      AHP_HOST_ID: support-app
+      AHP_HOST_MODE: replicated
+      AHP_NAMESPACE_ID: ahp-namespace:support-app/default
+      AHP_MEMBERSHIP_DIR: /membership/app
+      AHP_INSTANCE_ID: app-1
+    volumes: ["membership:/membership:ro"]
+    ports: ["127.0.0.1:18091:8080", "127.0.0.1:19091:9090"]
+  app-2:
+    <<: *app
+    environment:
+      <<: *app-env
+      AHP_INSTANCE_ID: app-2
+    ports: ["127.0.0.1:18092:8080", "127.0.0.1:19092:9090"]
+
+  # Scenario C: two application namespaces, each with its own host and schema.
+  production:
+    <<: *host
+    environment:
+      <<: *host-env
+      AHP_HOST_ID: support-production
+      AHP_HOST_MODE: partitioned
+      AHP_NAMESPACE_ID: ahp-namespace:support/production
+      AHP_MEMBERSHIP_DIR: /membership/production
+    volumes: ["membership:/membership:ro"]
+    ports: ["127.0.0.1:18101:8080", "127.0.0.1:19101:9090"]
+  staging:
+    <<: *host
+    environment:
+      <<: *host-env
+      AHP_HOST_ID: support-staging
+      AHP_HOST_MODE: partitioned
+      AHP_NAMESPACE_ID: ahp-namespace:support/staging
+      AHP_MEMBERSHIP_DIR: /membership/staging
+    volumes: ["membership:/membership:ro"]
+    ports: ["127.0.0.1:18102:8080", "127.0.0.1:19102:9090"]
+  # A staging-configured host pointed at the production store. It must refuse to start.
+  intruder:
+    <<: *host
+    restart: "no"
+    profiles: ["negative"]
+    environment:
+      <<: *host-env
+      AHP_HOST_ID: support-staging
+      AHP_HOST_MODE: partitioned
+      AHP_NAMESPACE_ID: ahp-namespace:support/staging
+      AHP_MEMBERSHIP_DIR: /membership/staging
+      AHP_DATABASE_SCHEMA: ahp_support__production
+    volumes: ["membership:/membership:ro"]
+
+  # Scenario D: three logical hosts are active in one namespace.
+  tools-a: &tools
+    <<: *host
+    environment:
+      <<: *tools-env
+      AHP_HOST_ID: support-tools-a
+      AHP_ROUTING_ENDPOINT: ws://tools-a:7000/
+    volumes: ["membership:/membership:ro"]
+    ports: ["127.0.0.1:18081:8080", "127.0.0.1:19081:9090"]
+  tools-b:
+    <<: *tools
+    environment:
+      <<: *tools-env
+      AHP_HOST_ID: support-tools-b
+      AHP_ROUTING_ENDPOINT: ws://tools-b:7000/
+    ports: ["127.0.0.1:18082:8080", "127.0.0.1:19082:9090"]
+  tools-c:
+    <<: *tools
+    environment:
+      <<: *tools-env
+      AHP_HOST_ID: support-tools-c
+      AHP_ROUTING_ENDPOINT: ws://tools-c:7000/
+    ports: ["127.0.0.1:18083:8080", "127.0.0.1:19083:9090"]
+
+  lb:
+    image: haproxy:3.0-alpine
+    depends_on: [tools-a, tools-b, tools-c, app-1, app-2]
+    volumes: ["./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro"]
+    ports: ["127.0.0.1:18080:8080", "127.0.0.1:18090:8090"]
+
+volumes:
+  membership: {}

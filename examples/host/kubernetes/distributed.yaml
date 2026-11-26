@@ -1,0 +1,94 @@
+# Scenario D. Three logical hosts (support-tools-0..2) are active in one shared
+# namespace. Each pod name is a stable host name and each pod sees only its own
+# credential.
+apiVersion: v1
+kind: Service
+metadata:
+  name: support-tools-internal
+spec:
+  # Stable per-pod DNS names for the internal host endpoint. Never exposed outside the cluster.
+  clusterIP: None
+  # The coordination store, not Kubernetes readiness, decides which member may be dialled.
+  publishNotReadyAddresses: true
+  selector: { app: support-tools }
+  ports:
+    - { name: internal, port: 7000, targetPort: internal }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: support-tools
+spec:
+  # Public traffic. Only ready pods receive new connections.
+  selector: { app: support-tools }
+  ports:
+    - { name: ahp, port: 80, targetPort: ahp }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: support-tools
+spec:
+  serviceName: support-tools-internal
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: { app: support-tools }
+  template:
+    metadata:
+      labels: { app: support-tools }
+    spec:
+      # Covers drain() plus the transport shutdown timeout.
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: host
+          image: ahp-multi-host-example:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: ahp, containerPort: 8080 }
+            - { name: internal, containerPort: 7000 }
+          env:
+            # The pod name is the logical host name: stable when the pod is replaced.
+            - name: AHP_HOST_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            # The pod UID is the instance: new for every replacement, never a credential.
+            - name: AHP_INSTANCE_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.uid } }
+            - { name: AHP_HOST_MODE, value: distributed }
+            - { name: AHP_NAMESPACE_ID, value: "ahp-namespace:support/shared" }
+            - { name: AHP_ADOPTION, value: automatic }
+            - { name: AHP_PUBLIC_HOST, value: 0.0.0.0 }
+            - { name: AHP_PUBLIC_PORT, value: "8080" }
+            - { name: AHP_ROUTING_HOST, value: 0.0.0.0 }
+            - { name: AHP_ROUTING_PORT, value: "7000" }
+            # Must equal the endpoint listed for this host in policy.json.
+            - { name: AHP_ROUTING_ENDPOINT, value: "ws://$(AHP_HOST_ID).support-tools-internal:7000/" }
+            - { name: AHP_MEMBERSHIP_DIR, value: /var/run/ahp/membership }
+            - { name: AHP_CREDENTIAL_FILE, value: /var/run/ahp/credential.json }
+            - { name: AHP_LEASE_MS, value: "3000" }
+            - { name: AHP_EVENT_POLL_MS, value: "250" }
+            - name: AHP_DATABASE_URL
+              valueFrom: { secretKeyRef: { name: ahp-example-database, key: url } }
+            # Example scaffolding for the acceptance driver, on the pod's loopback only.
+            - { name: AHP_CONTROL_PORT, value: "9090" }
+          volumeMounts:
+            # policy.json is the same for every member.
+            - { name: policy, mountPath: /var/run/ahp/membership, readOnly: true }
+            # Only this pod's own credential file is mounted into its container.
+            - { name: credentials, mountPath: /var/run/ahp/credential.json, subPathExpr: $(AHP_HOST_ID).json, readOnly: true }
+          startupProbe:
+            httpGet: { path: /startupz, port: ahp }
+            periodSeconds: 2
+            failureThreshold: 60
+          livenessProbe:
+            httpGet: { path: /livez, port: ahp }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /readyz, port: ahp }
+            periodSeconds: 2
+            failureThreshold: 1
+      volumes:
+        - name: policy
+          secret: { secretName: support-tools-policy }
+        - name: credentials
+          secret: { secretName: support-tools-credentials }

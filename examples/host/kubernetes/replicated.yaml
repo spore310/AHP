@@ -1,0 +1,75 @@
+# Scenario B. Two replicas of one logical host (support-app). One is active.
+# The other is a healthy standby: alive, started and deliberately not ready,
+# so the Service sends it nothing until it takes over.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: support-app
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    # A standby is never ready, so an update can only finish if the old active pod may be removed
+    # while no new pod is ready yet. Kubernetes then replaces both pods without waiting for readiness:
+    # expect a few seconds with no ready pod while a new one starts and takes over. Old pods that are
+    # still terminating count as instances too, so the example policy admits five (maxInstances: 5).
+    rollingUpdate: { maxSurge: 1, maxUnavailable: "100%" }
+  selector:
+    matchLabels: { app: support-app }
+  template:
+    metadata:
+      labels: { app: support-app }
+    spec:
+      # Covers drain() plus the transport shutdown timeout.
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: host
+          image: ahp-multi-host-example:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: ahp, containerPort: 8080 }
+          env:
+            # Replicas share the logical host name. The pod UID tells the instances apart.
+            - { name: AHP_HOST_ID, value: support-app }
+            - name: AHP_INSTANCE_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.uid } }
+            - { name: AHP_HOST_MODE, value: replicated }
+            - { name: AHP_NAMESPACE_ID, value: "ahp-namespace:support-app/default" }
+            - { name: AHP_PUBLIC_HOST, value: 0.0.0.0 }
+            - { name: AHP_PUBLIC_PORT, value: "8080" }
+            - { name: AHP_MEMBERSHIP_DIR, value: /var/run/ahp/membership }
+            - { name: AHP_CREDENTIAL_FILE, value: /var/run/ahp/credential.json }
+            - { name: AHP_LEASE_MS, value: "3000" }
+            - { name: AHP_STANDBY_RETRY_MS, value: "250" }
+            - name: AHP_DATABASE_URL
+              valueFrom: { secretKeyRef: { name: ahp-example-database, key: url } }
+            # Example scaffolding for the acceptance driver, on the pod's loopback only.
+            - { name: AHP_CONTROL_PORT, value: "9090" }
+          volumeMounts:
+            - { name: policy, mountPath: /var/run/ahp/membership, readOnly: true }
+            - { name: credential, mountPath: /var/run/ahp/credential.json, subPath: support-app.json, readOnly: true }
+          startupProbe:
+            httpGet: { path: /startupz, port: ahp }
+            periodSeconds: 2
+            failureThreshold: 60
+          livenessProbe:
+            httpGet: { path: /livez, port: ahp }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /readyz, port: ahp }
+            periodSeconds: 2
+            failureThreshold: 1
+      volumes:
+        - name: policy
+          secret: { secretName: support-app-policy }
+        - name: credential
+          secret: { secretName: support-app-credentials }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: support-app
+spec:
+  selector: { app: support-app }
+  ports:
+    - { name: ahp, port: 80, targetPort: ahp }

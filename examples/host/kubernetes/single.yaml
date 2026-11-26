@@ -1,0 +1,54 @@
+# Scenario A. One logical host, one derived namespace: ahp-namespace:support-single/default.
+# It keeps its state in process memory, like the Compose example. With a
+# database, keep `replicas: 1` and `strategy: Recreate`: single mode has no standby.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: support-single
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: support-single }
+  template:
+    metadata:
+      labels: { app: support-single }
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: host
+          image: ahp-multi-host-example:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: ahp, containerPort: 8080 }
+          env:
+            - { name: AHP_HOST_ID, value: support-single }
+            - name: AHP_INSTANCE_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.uid } }
+            - { name: AHP_HOST_MODE, value: single }
+            - { name: AHP_NAMESPACE_ID, value: "ahp-namespace:support-single/default" }
+            - { name: AHP_PUBLIC_HOST, value: 0.0.0.0 }
+            - { name: AHP_PUBLIC_PORT, value: "8080" }
+            # Example scaffolding for the acceptance driver, on the pod's loopback only.
+            - { name: AHP_CONTROL_PORT, value: "9090" }
+          startupProbe:
+            httpGet: { path: /startupz, port: ahp }
+            periodSeconds: 2
+            failureThreshold: 60
+          livenessProbe:
+            httpGet: { path: /livez, port: ahp }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /readyz, port: ahp }
+            periodSeconds: 2
+            failureThreshold: 1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: support-single
+spec:
+  selector: { app: support-single }
+  ports:
+    - { name: ahp, port: 80, targetPort: ahp }

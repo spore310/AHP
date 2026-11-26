@@ -1,0 +1,20 @@
+# Applies every forward migration into one PostgreSQL schema per SDK namespace.
+# A namespace's schema is its logical store. Run it before any host starts and
+# again before each upgrade.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ahp-example-migrate
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: ahp-multi-host-example:local
+          imagePullPolicy: IfNotPresent
+          args: ["examples/host/migrate.ts", "ahp-namespace:support/shared", "ahp-namespace:support-app/default"]
+          env:
+            - name: AHP_DATABASE_URL
+              valueFrom: { secretKeyRef: { name: ahp-example-database, key: url } }
