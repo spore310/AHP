@@ -6,6 +6,7 @@
 | --- | --- |
 | Bring up a typed session from application code | [Five-minute quick start](guides/quickstart.md) |
 | Use authenticated clients, tools, and agent presence | [Advanced review application](guides/advanced.md) |
+| Name a host, choose namespaces, or run several hosts | [Multi-host deployment](guides/multi-host.md) |
 | Choose the public API for a capability | [Source modules](../src/README.md) |
 | Implement a protocol client or debug a frame | [Wire contract](technical/wire-contract.md) |
 | Configure the default process | [Environment settings](../env/README.md) |

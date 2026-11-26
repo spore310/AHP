@@ -9,6 +9,26 @@ records so you can find a packet or handoff by ID.
 
 - [`session-tables.md`](database/session-tables.md)
 
+## AHP V1 P0–P5 plan
+
+Moved from `docs/plans/` after the P0–P5 ledger was verified against commit
+`324fd60`. Link targets were repaired for the new depth; `manifest.json`
+records the original checksums and was not regenerated.
+
+- [`00_Shared_Contracts.md`](plans/ahp-v1/00_Shared_Contracts.md)
+- [`01_Wire_and_Service_Contracts.md`](plans/ahp-v1/01_Wire_and_Service_Contracts.md)
+- [`02_Source_Evidence_and_Review.md`](plans/ahp-v1/02_Source_Evidence_and_Review.md)
+- [`03_Acceptance_Matrix.md`](plans/ahp-v1/03_Acceptance_Matrix.md)
+- [`AHP_V1_P0_P4_Database_Schema_Plan.md`](plans/ahp-v1/AHP_V1_P0_P4_Database_Schema_Plan.md)
+- [`P0_Durable_Sessions_and_Resources.md`](plans/ahp-v1/P0_Durable_Sessions_and_Resources.md)
+- [`P1_Work_Contracts_and_Data.md`](plans/ahp-v1/P1_Work_Contracts_and_Data.md)
+- [`P2_Work_Authorization_and_Hooks.md`](plans/ahp-v1/P2_Work_Authorization_and_Hooks.md)
+- [`P3_Claims_Capacity_and_Diagnostics.md`](plans/ahp-v1/P3_Claims_Capacity_and_Diagnostics.md)
+- [`P4_Events_Snapshots_and_Chat_Projection.md`](plans/ahp-v1/P4_Events_Snapshots_and_Chat_Projection.md)
+- [`P5_Tool_and_Client_Boundaries.md`](plans/ahp-v1/P5_Tool_and_Client_Boundaries.md)
+- [`README_Codex_Handoff.md`](plans/ahp-v1/README_Codex_Handoff.md)
+- [`plan.md`](plans/ahp-v1/plan.md)
+
 ## Agent identity and work leasing
 
 - [`IMPLEMENTATION_LEDGER.md`](plans/agent%20tasks%20and%20identity/IMPLEMENTATION_LEDGER.md)

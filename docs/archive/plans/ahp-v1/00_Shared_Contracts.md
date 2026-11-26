@@ -321,7 +321,7 @@ The host captures these fences before entering storage and checks them after
 lock waits without invoking either application callback. The earlier receipt
 shape remains valid for native setup and for other work operations. A hosted
 caller with callback-only initial authority cannot acquire or renew a lease.
-[Advanced guide and migration example](../../guides/advanced.md)
+[Advanced guide and migration example](../../../guides/advanced.md)
 
 All async lookup/policy preparation and SQL lock waits happen before final synchronous admission. The server creates a private, single-use admission receipt tied to the exact command and trusted proofs. The repository calls the supplied host-private synchronous admission closure after locks/expected-revision checks and immediately before its first mutation.
 

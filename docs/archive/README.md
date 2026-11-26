@@ -11,6 +11,7 @@ Use the [documentation index](../README.md) for current instructions and the
 | Tool contracts and typed sessions | [Tool and session plans](plans/tools%20and%20session%20types/README.md) |
 | Agent identity and work leases | [M2 implementation ledger](plans/agent%20tasks%20and%20identity/IMPLEMENTATION_LEDGER.md) |
 | Provider baseline and stabilization | [Stabilization](plans/AHP_STABILIZATION_AND_PROVIDERS_PREP_TASKPLAN.md) · [Provider repair](plans/ProvidersPlan-Milestone1-FIX-TASKPLAN.md) |
+| AHP V1 durable sessions, work and client boundaries (P0–P5) | [Handoff](plans/ahp-v1/README_Codex_Handoff.md) · [Acceptance ledger](plans/ahp-v1/03_Acceptance_Matrix.md) |
 | Superseded session storage design | [Session tables proposal](database/session-tables.md) |
 | Historical reviews | [Stabilization panel](reviews/stabilization/00-final-report.md) · [Provider milestone review](reviews/providers/ProvidersPlan-Milestone1-review.md) |
 
